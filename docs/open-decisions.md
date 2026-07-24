@@ -11,8 +11,16 @@ a compliance claim — and none of those are an agent's to make.
 | 2 | **ISMS scope statement** (ISO/IEC 27001:2022) — which systems, sites, and data are in scope | Determines which controls apply at all. Guessing it produces a mapping that audits against the wrong boundary. | Michael |
 | 3 | **AIMS scope statement** (ISO/IEC 42001:2023) — which AI-assisted processes are in scope | Same, for the AI management system. Agent-assisted engineering is the obvious candidate but the boundary is a decision. | Michael |
 | 4 | **Evidence mapping format** — file layout, CI validation, freshness checking | `evidence-model.md` defines the fields but not the mechanism. | — |
-| 5 | **Repository visibility and access** — who can read, who can approve | Currently a private repo owned by one account. Approver separation needs at least a second party to be meaningful. | Michael |
+| 5 | **Access and approver separation** — who can approve, not who can read | The repository is public, but it is owned by one account. Public readability is not review; approver separation still needs a second party to mean anything. | Michael |
 | 6 | **Relationship to `dotmac_sub`'s SOT standard** — whether the source-of-truth standard becomes a policy here or stays in `dotmac_sub` | It is currently a Knowledge entry plus `dotmac_sub` docs. Under ADR 0001, a Knowledge entry is not normative. | Michael |
+| 7 | **Confirm CI can actually run here** | ADR 0001 makes CI the owner of evidence. While the repository was private, Actions did not start for account reasons. Public repositories get free standard runners, so this is expected to be resolved — but expected is not verified. | Michael |
+
+## Note on item 7
+
+This is not a CI outage to be waited out — it is the evidence pillar of ADR 0001
+being unavailable in the repository that declares it. Until a workflow run is
+observed to complete here, this repository can hold policy but cannot produce a
+single piece of evidence, and no control mapping should claim otherwise.
 
 ## Note on item 1
 

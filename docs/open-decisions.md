@@ -13,14 +13,18 @@ a compliance claim — and none of those are an agent's to make.
 | 4 | **Evidence mapping format** — file layout, CI validation, freshness checking | `evidence-model.md` defines the fields but not the mechanism. | — |
 | 5 | **Access and approver separation** — who can approve, not who can read | The repository is public, but it is owned by one account. Public readability is not review; approver separation still needs a second party to mean anything. | Michael |
 | 6 | **Relationship to `dotmac_sub`'s SOT standard** — whether the source-of-truth standard becomes a policy here or stays in `dotmac_sub` | It is currently a Knowledge entry plus `dotmac_sub` docs. Under ADR 0001, a Knowledge entry is not normative. | Michael |
-| 7 | **Confirm CI can actually run here** | ADR 0001 makes CI the owner of evidence, and no workflow run has yet completed in this repository — jobs are refused before they start, at the account level rather than because of repository visibility. Other public Dotmac repositories run Actions normally, so this is specific to how this repository is enrolled. | Michael |
+## Resolved
 
-## Note on item 7
+**7. Can CI actually run here? — yes, verified 2026-07-24.**
 
-This is not a CI outage to be waited out — it is the evidence pillar of ADR 0001
-being unavailable in the repository that declares it. Until a workflow run is
-observed to complete here, this repository can hold policy but cannot produce a
-single piece of evidence, and no control mapping should claim otherwise.
+While the repository was private, Actions refused to start jobs, which left
+ADR 0001's evidence pillar unavailable in the repository that declares it.
+Making the repository public resolved it. This is recorded as *verified* rather
+than *assumed* because the first run observed after the visibility change still
+failed — it had been queued mid-propagation — and taking that as the answer
+would have produced a confidently wrong conclusion in both directions. The
+first genuinely green run is
+[`30099449365`](https://github.com/michaelayoade/dotmac_governance/actions/runs/30099449365).
 
 ## Note on item 1
 

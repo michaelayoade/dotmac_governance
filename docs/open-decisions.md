@@ -13,7 +13,7 @@ a compliance claim — and none of those are an agent's to make.
 | 4 | **Evidence mapping format** — file layout, CI validation, freshness checking | `evidence-model.md` defines the fields but not the mechanism. | — |
 | 5 | **Access and approver separation** — who can approve, not who can read | The repository is public, but it is owned by one account. Public readability is not review; approver separation still needs a second party to mean anything. | Michael |
 | 6 | **Relationship to `dotmac_sub`'s SOT standard** — whether the source-of-truth standard becomes a policy here or stays in `dotmac_sub` | It is currently a Knowledge entry plus `dotmac_sub` docs. Under ADR 0001, a Knowledge entry is not normative. | Michael |
-| 7 | **Confirm CI can actually run here** | ADR 0001 makes CI the owner of evidence. While the repository was private, Actions did not start for account reasons. Public repositories get free standard runners, so this is expected to be resolved — but expected is not verified. | Michael |
+| 7 | **Confirm CI can actually run here** | ADR 0001 makes CI the owner of evidence, and no workflow run has yet completed in this repository — jobs are refused before they start, at the account level rather than because of repository visibility. Other public Dotmac repositories run Actions normally, so this is specific to how this repository is enrolled. | Michael |
 
 ## Note on item 7
 

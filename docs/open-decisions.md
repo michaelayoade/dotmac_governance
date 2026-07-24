@@ -28,10 +28,16 @@ Michael has already directed:
 - Interim accountable approval roles are recorded in ADR 0001. The surrounding
   ADR remains `Proposed` until Michael explicitly accepts it.
 
-## Visibility and CI correction
+## Resolved operational control: private CI
 
 The repository had been made public as a workaround for unavailable hosted
 Actions. That conflicted with the directed private boundary and was corrected on
 2026-07-24. The replacement control is a repository-scoped Seabone
-self-hosted runner. Private-repository CI must be observed green before this
-item is treated as closed.
+self-hosted runner.
+
+Private-repository CI was verified green in GitHub Actions run
+[`30128057161`](https://github.com/michaelayoade/dotmac_governance/actions/runs/30128057161).
+The run selected the Seabone runner, exercised the known-good and known-bad ADR
+controls, and validated the production record set. This closes CI availability;
+it does not close open decision 7 because the current plan still cannot require
+that check before merge.

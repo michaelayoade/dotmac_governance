@@ -12,11 +12,12 @@ A policy is normative and states what Dotmac requires. It is distinct from:
 ## Lifecycle
 
 1. Drafted as a pull request. An agent may write the draft.
-2. Reviewed by a named human who is not the author.
-3. Approved by a named human, recorded in a commit separate from the draft.
+2. Reviewed by the named human owner.
+3. Approved by the accountable named human in an attributable event distinct
+   from the agent's drafting act.
 4. Superseded explicitly, never edited into a different meaning. The history of
    what was required, and when, is part of the record.
 
-Nothing lands here until `docs/open-decisions.md` item 1 (named approvers) is
-resolved — an unapproved policy file would be a document that looks normative
-and is not, which is worse than an empty directory.
+Nothing lands here until ADR 0001 is accepted and the policy's scope and
+approver are resolved. An unapproved policy file that looks normative is worse
+than an honestly empty directory.

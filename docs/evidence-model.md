@@ -2,44 +2,67 @@
 
 Status: draft. Not approved.
 
-## What counts as evidence
+## Boundary
 
-Evidence is an artefact produced by a pipeline, addressable after the fact, and
-tied to a specific commit. In practice: a CI run ID, a build attestation, a
-signed image digest, a test report, a generated report committed by automation.
+Governance mappings live in Git. Evidence remains in the controlled system that
+produced it and is cited by immutable reference. Knowledge may index the
+reference for discovery; it is not the evidence store and cannot make an
+unevidenced claim true.
+
+Evidence can be produced by CI, a controlled monitoring/export pipeline, a
+signed approval system, or another named source system. It is not limited to
+tests, but it must be attributable, addressable after the fact, tied to a
+defined subject and period, and protected from silent mutation.
 
 ## What does not count
 
 - An agent stating that it ran a check.
-- A human stating that a control is in place.
+- A human stating that a control is in place without an attributable record.
 - A Knowledge entry describing a control.
-- A checked-in document asserting a state of the world (a document is *policy*;
-  it is not evidence that policy was followed).
+- A document asserting its own implementation.
+- A commit or image label that has not been bound to the artefact bytes it
+  claims to identify.
 
-This distinction is the whole point of splitting Git and CI in
-[ADR 0001](adr/0001-governance-authority-model.md). Prose is cheap to produce and
-impossible to audit; a pipeline artefact is neither.
+## Proposed typed reference
 
-## Mapping shape
-
-Each control interpretation carries a mapping with these fields. The mapping
-lives in Git; the evidence it points at does not.
+Each evidence reference should carry:
 
 | Field | Meaning |
 | --- | --- |
-| `control` | Clause identifier only (e.g. `ISO/IEC 27001:2022 A.8.28`). No standard text. |
-| `interpretation` | Dotmac's own statement of what this requires here. |
-| `implementation` | Where the control is implemented — repo, path, service. |
-| `evidence` | How CI produces the artefact, and where it lands. |
-| `owner` | Named human accountable. Not a team, not an agent. |
-| `status` | `unimplemented` \| `implemented-unevidenced` \| `evidenced`. |
+| `id` | Stable evidence-reference identifier. |
+| `kind` | CI run, test report, build attestation, approval, monitoring snapshot, audit export, or other controlled kind. |
+| `producer` | Named source system that created the evidence. |
+| `subject` | Control, service, repository, release, risk, or review being evidenced. |
+| `source_uri` | Immutable or retention-controlled reference. |
+| `commit_or_digest` | Commit, artefact digest, or signed record identity. |
+| `collected_at` | When the evidence was produced. |
+| `valid_from` / `valid_until` | Period the evidence supports, when applicable. |
+| `attested_by` | Named control owner attesting the evidence. |
+| `verified_by` | Different named human verifying effectiveness. |
+| `hash` | Content hash where the source system does not already provide immutable identity. |
 
-`implemented-unevidenced` is an expected, legitimate state. Recording it
-honestly is the mechanism by which the gap stays visible; collapsing it into
-`evidenced` because a document describes the control is the failure this model
-exists to prevent.
+No field may contain a secret value. References use an approved OpenBao path or
+controlled local pointer when a protected source must be named.
+
+## Control mapping
+
+Each control interpretation carries:
+
+| Field | Meaning |
+| --- | --- |
+| `control` | Standard/clause identifier only. No standard text. |
+| `interpretation` | Dotmac's own statement of the requirement. |
+| `implementation` | Owning repo, path, service, or process. |
+| `evidence_refs` | One or more typed references. |
+| `owner` | Named human accountable for the control. |
+| `status` | `unimplemented`, `implemented-unevidenced`, or `evidenced`. |
+
+`implemented-unevidenced` is an expected and legitimate state. It remains open
+until the evidence source, retention, attestation, and independent verification
+are established.
 
 ## Open
 
-The concrete mapping format (file layout, whether it is validated by CI, whether
-evidence freshness is checked) is undecided. See `open-decisions.md`.
+The serialization schema, retention requirements, freshness rules, tamper-
+evident export, and reconciler are intentionally deferred. See
+`open-decisions.md`.

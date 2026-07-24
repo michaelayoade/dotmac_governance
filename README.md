@@ -3,7 +3,8 @@
 Normative governance for Dotmac engineering: policies, architecture decisions,
 control interpretations, and evidence mappings for the Dotmac management system.
 
-**Status: bootstrapping. Nothing in this repository is approved yet.**
+**Status: private bootstrap repository. ADR 0001 is `Proposed`; no policy is
+effective yet.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
@@ -24,6 +25,16 @@ Four systems, four distinct jobs. None of them substitutes for another.
 Governance is normative only where it is checked in here. Knowledge entries aid
 discovery; they never make something true, and they are never cited as evidence.
 
+## Initial standards baseline
+
+The directed baseline uses ISO/IEC 27001:2022 and ISO/IEC 42001:2023.
+ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 are engineering
+references. ISO 9001 certification is deferred pending an actual customer,
+procurement, or company-wide QMS requirement.
+
+Only identifiers and Dotmac's interpretations belong here. This repository does
+not reproduce standard text and does not itself establish conformity.
+
 ## Hard rules
 
 1. **No ISO text.** ISO standards are copyrighted. This repository stores clause
@@ -37,6 +48,9 @@ discovery; they never make something true, and they are never cited as evidence.
    own output, or declare compliance.
 4. **`main` changes by review.** Every substantive change arrives as a pull
    request with a named human approver.
+5. **Private means private.** Hosted-CI availability is never a reason to make
+   the governance source of truth public. Validation runs on the
+   repository-scoped Seabone self-hosted runner.
 
 ## Layout
 
@@ -44,3 +58,15 @@ discovery; they never make something true, and they are never cited as evidence.
   [`docs/adr/README.md`](docs/adr/README.md) for the numbering rule.
 - `policies/` — normative policies.
 - `docs/` — scope, evidence model, and open decisions.
+- `AGENTS.md` — vendor-neutral agent constraints.
+- `CLAUDE.md` — Claude's import boundary for `AGENTS.md`.
+
+## Validation
+
+```bash
+python -m unittest discover --start-directory tests --verbose
+python tools/check_adrs.py
+```
+
+CI records the authoritative result. A local or agent-reported pass is useful
+diagnostic context, not governance evidence.

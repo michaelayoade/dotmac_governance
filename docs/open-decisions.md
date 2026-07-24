@@ -1,33 +1,37 @@
 # Open decisions
 
-Decisions this repository needs from a human, listed rather than assumed. An
-agent drafted the surrounding scaffold and deliberately did not resolve any of
-these, because each one either names a person, fixes a scope boundary, or makes
-a compliance claim — and none of those are an agent's to make.
+These items require a named human decision. An agent drafted the surrounding
+scaffold and deliberately did not infer scope, identity, or evidence claims.
 
 | # | Decision | Why it is blocking | Owner |
 | --- | --- | --- | --- |
-| 1 | **Named approvers**, including the interim arrangement | Nothing can move from `Proposed` to `Accepted` without one. Every document here is currently non-normative. | Michael |
-| 2 | **ISMS scope statement** (ISO/IEC 27001:2022) — which systems, sites, and data are in scope | Determines which controls apply at all. Guessing it produces a mapping that audits against the wrong boundary. | Michael |
-| 3 | **AIMS scope statement** (ISO/IEC 42001:2023) — which AI-assisted processes are in scope | Same, for the AI management system. Agent-assisted engineering is the obvious candidate but the boundary is a decision. | Michael |
-| 4 | **Evidence mapping format** — file layout, CI validation, freshness checking | `evidence-model.md` defines the fields but not the mechanism. | — |
-| 5 | **Access and approver separation** — who can approve, not who can read | The repository is public, but it is owned by one account. Public readability is not review; approver separation still needs a second party to mean anything. | Michael |
-| 6 | **Relationship to `dotmac_sub`'s SOT standard** — whether the source-of-truth standard becomes a policy here or stays in `dotmac_sub` | It is currently a Knowledge entry plus `dotmac_sub` docs. Under ADR 0001, a Knowledge entry is not normative. | Michael |
-## Resolved
+| 1 | ISMS scope statement for ISO/IEC 27001:2022 | Determines which systems, sites, people, and data are governed. | Michael |
+| 2 | AIMS scope statement for ISO/IEC 42001:2023 | Determines which AI systems and assisted processes are governed. | Michael |
+| 3 | Named independent evidence verifier(s) | Michael is the interim accountable approver, but evidence effectiveness requires a different named human. | Michael |
+| 4 | Evidence schema, retention, freshness, and tamper-evident export | `evidence-model.md` defines the proposed meaning, not the final implementation contract. | Control owners |
+| 5 | Human/agent identity separation in GitHub and Knowledge | An agent operating through Michael's account is not distinguishable from Michael's own action; approval provenance is therefore incomplete. | Michael |
+| 6 | Relationship to `dotmac_sub`'s source-of-truth standard | Decide whether it is promoted to an organization policy here or remains a repository-local standard. | Michael |
+| 7 | Enforced branch protection for private repositories | The current GitHub plan returned HTTP 403 for branch protection; CI-before-merge is not technically enforced. | Michael |
+| 8 | Managed Codex/Claude policy rollout and cutover | The vendor-neutral bundle, managed permissions/hooks, repository adoption checks, fallback retirement, and drift reconciler need a separate approved design after identity/RBAC. | Michael |
 
-**7. Can CI actually run here? — yes, verified 2026-07-24.**
+## Directed bootstrap decisions
 
-While the repository was private, Actions refused to start jobs, which left
-ADR 0001's evidence pillar unavailable in the repository that declares it.
-Making the repository public resolved it. This is recorded as *verified* rather
-than *assumed* because the first run observed after the visibility change still
-failed — it had been queued mid-propagation — and taking that as the answer
-would have produced a confidently wrong conclusion in both directions. The
-first genuinely green run is
-[`30099449365`](https://github.com/michaelayoade/dotmac_governance/actions/runs/30099449365).
+Michael has already directed:
 
-## Note on item 1
+- `dotmac_governance` is private and owns organization-wide policies, control
+  definitions, global ADRs, templates, and generated indexes.
+- Initial standards scope is ISO/IEC 27001 and ISO/IEC 42001, with
+  ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 as engineering
+  references.
+- ISO 9001 certification is deferred until a customer, procurement, or
+  company-wide QMS requirement exists.
+- Interim accountable approval roles are recorded in ADR 0001. The surrounding
+  ADR remains `Proposed` until Michael explicitly accepts it.
 
-Until approvers are named, this repository is a scaffold with no authority. That
-is a truthful state and it is fine to sit in briefly — but it means nothing here
-should be cited as policy yet, including by agents reading it as context.
+## Visibility and CI correction
+
+The repository had been made public as a workaround for unavailable hosted
+Actions. That conflicted with the directed private boundary and was corrected on
+2026-07-24. The replacement control is a repository-scoped Seabone
+self-hosted runner. Private-repository CI must be observed green before this
+item is treated as closed.

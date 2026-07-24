@@ -14,14 +14,20 @@
       wording only
 - [ ] No secret values; only paths or OpenBao references
 - [ ] Any new ADR has a unique number and a valid `Status`
-- [ ] Any control mapping cites CI-produced evidence, or is honestly marked
-      `implemented-unevidenced`
+- [ ] Any control mapping cites evidence from a named controlled source, or is
+      honestly marked `implemented-unevidenced`
+- [ ] Evidence references name the producer, subject, immutable identity, and
+      validity period where applicable
 - [ ] Anything left undecided is recorded in `docs/open-decisions.md` rather
       than assumed
 
 ## Approval
 
-Approver (named human): <!-- required before merge if this change is normative -->
+Owner (named human):
+
+Approver (named human): <!-- Michael for organization-wide governance during bootstrap -->
+
+Independent evidence verifier: <!-- required when the PR claims control effectiveness -->
 
 If any part of this pull request was drafted by an AI agent, the approver is
 attesting to the content on their own reading. An agent's review does not

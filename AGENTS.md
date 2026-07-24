@@ -3,6 +3,17 @@
 These constraints bind any AI agent (Claude Code, Codex, or otherwise) operating
 on this repository or producing governance material for Dotmac.
 
+## Authority and status
+
+- Checked-in policies and `Accepted` ADRs are authoritative for their declared
+  scope. A `Proposed` ADR is a draft and must never be cited as policy.
+- Knowledge MCP aids discovery and continuity. It does not approve, activate,
+  or override governance records.
+- Issues own actions and deadlines. Do not hide a corrective action inside a
+  document paragraph.
+- GitHub and controlled source systems produce approval/execution evidence.
+  An agent's statement that a check ran is not evidence.
+
 ## An agent may
 
 - Draft policies, ADRs, control interpretations, and evidence mappings.
@@ -26,6 +37,34 @@ on this repository or producing governance material for Dotmac.
 - **Write secret values** anywhere, including drafts and scratch files.
 - **Promote an inference into a standard.** A cross-cutting finding is surfaced
   as a candidate for a human decision; it is not silently adopted.
+
+## Required workflow
+
+1. Search Knowledge for relevant decisions, then verify them against the
+   checked-in source of truth.
+2. Work on a non-default branch. Do not commit directly to `main`.
+3. Keep new governance records `Proposed` unless a named human explicitly
+   approves them through the recorded process.
+4. Run:
+
+   ```bash
+   python -m unittest discover --start-directory tests --verbose
+   python tools/check_adrs.py
+   ```
+
+5. Open a pull request that states the governance effect, the authority status,
+   the named approver, evidence references, and every unresolved decision.
+6. Never merge unless the configured checks are green and the required human
+   approval is present. If GitHub cannot technically enforce the rule, report
+   that enforcement gap rather than pretending the control exists.
+
+## Collaboration records
+
+- Stand-up summaries are source-linked observations. They create no policy.
+- Decisions become ADRs; actions become owned Issues; evidence stays in its
+  producing system and is cited by immutable reference.
+- Codex and Claude may challenge each other's drafts. Two agents are not two
+  independent approvers.
 
 ## Reporting
 

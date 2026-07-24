@@ -34,7 +34,22 @@ Every ADR carries exactly one:
 | `Rejected` | Considered and declined. Kept for the reasoning. |
 
 An ADR authored by an agent is `Proposed` until a named human approver moves it
-to `Accepted` in a separate commit. See [AGENTS.md](../../AGENTS.md).
+to `Accepted` through an attributable approval event. See
+[AGENTS.md](../../AGENTS.md).
+
+## Controlled metadata
+
+Every ADR has exactly one value for:
+
+- `Status`
+- `Date`
+- `Owner`
+- `Approver`
+- `Scope`
+- `Classification`
+
+`Proposed` records may name the intended approver, but that name is not an
+approval. Approval is a separate human act recorded by the review process.
 
 ## Template
 
@@ -43,7 +58,10 @@ to `Accepted` in a separate commit. See [AGENTS.md](../../AGENTS.md).
 
 - Status: Proposed
 - Date: YYYY-MM-DD
-- Approver: (unassigned)
+- Owner: Named human
+- Approver: Named human (intended while Proposed)
+- Scope: Affected organization, repositories, or services
+- Classification: Public | Internal | Confidential | Restricted
 
 ## Context
 ## Decision

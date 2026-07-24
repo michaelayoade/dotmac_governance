@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""Enforce the ADR rules from docs/adr/README.md.
+"""Enforce the controlled ADR contract from docs/adr/README.md.
 
-Checks:
-  1. Every ADR filename is NNNN-kebab-case-title.md.
-  2. No two ADRs share a number (the dotmac_sub double-0004 collision).
-  3. Every ADR declares exactly one valid Status.
-
-This script fails loudly when it finds no ADRs at all. A check that passes over
-an empty set is indistinguishable from a check that passes, and that has already
-cost us one false "clean" result.
+The validator is intentionally callable against a temporary directory so its
+known-bad controls can prove that they fail, rather than merely asserting that
+the production directory passes.
 """
 
 from __future__ import annotations
@@ -20,19 +15,36 @@ from pathlib import Path
 
 ADR_DIR = Path(__file__).resolve().parent.parent / "docs" / "adr"
 FILENAME = re.compile(r"^(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
-STATUS = re.compile(r"^- Status:\s*(.+?)\s*$", re.MULTILINE)
 VALID_STATUS = re.compile(r"^(Proposed|Accepted|Rejected|Superseded by \d{4})$")
+FIELDS = (
+    "Status",
+    "Date",
+    "Owner",
+    "Approver",
+    "Scope",
+    "Classification",
+)
+SECTIONS = (
+    "Context",
+    "Decision",
+    "Consequences",
+    "Drift prevention",
+)
 
 
-def main() -> int:
-    if not ADR_DIR.is_dir():
-        print(f"error: {ADR_DIR} does not exist", file=sys.stderr)
-        return 1
+def _field_values(body: str, field: str) -> list[str]:
+    pattern = re.compile(rf"^- {re.escape(field)}:\s*(.+?)\s*$", re.MULTILINE)
+    return pattern.findall(body)
 
-    adrs = sorted(p for p in ADR_DIR.glob("*.md") if p.name != "README.md")
+
+def validate_adrs(adr_dir: Path) -> list[str]:
+    """Return every validation error for the ADR directory."""
+    if not adr_dir.is_dir():
+        return [f"{adr_dir} does not exist"]
+
+    adrs = sorted(p for p in adr_dir.glob("*.md") if p.name != "README.md")
     if not adrs:
-        print("error: no ADRs found; refusing to report success", file=sys.stderr)
-        return 1
+        return ["no ADRs found; refusing to report success"]
 
     errors: list[str] = []
     by_number: dict[str, list[str]] = defaultdict(list)
@@ -44,22 +56,49 @@ def main() -> int:
             continue
         by_number[match.group(1)].append(path.name)
 
-        statuses = STATUS.findall(path.read_text(encoding="utf-8"))
-        if len(statuses) != 1:
-            errors.append(f"{path.name}: expected exactly one '- Status:' line, found {len(statuses)}")
-        elif not VALID_STATUS.match(statuses[0]):
+        body = path.read_text(encoding="utf-8")
+        field_values = {
+            field: _field_values(body, field)
+            for field in FIELDS
+        }
+        for field, values in field_values.items():
+            if len(values) != 1:
+                errors.append(
+                    f"{path.name}: expected exactly one '- {field}:' line, "
+                    f"found {len(values)}"
+                )
+
+        statuses = field_values["Status"]
+        if len(statuses) == 1 and not VALID_STATUS.fullmatch(statuses[0]):
             errors.append(f"{path.name}: invalid status {statuses[0]!r}")
+
+        for section in SECTIONS:
+            if not re.search(
+                rf"^## {re.escape(section)}\s*$",
+                body,
+                flags=re.MULTILINE,
+            ):
+                errors.append(f"{path.name}: missing required section {section!r}")
 
     for number, names in sorted(by_number.items()):
         if len(names) > 1:
             errors.append(f"ADR number {number} used by: {', '.join(sorted(names))}")
 
+    return errors
+
+
+def main() -> int:
+    errors = validate_adrs(ADR_DIR)
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print(f"ok: {len(adrs)} ADR(s), numbers unique, statuses valid")
+    adrs = sorted(p for p in ADR_DIR.glob("*.md") if p.name != "README.md")
+    print(
+        f"ok: {len(adrs)} ADR(s), numbers unique, controlled metadata and "
+        "required sections valid"
+    )
     return 0
 
 

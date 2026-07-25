@@ -26,7 +26,8 @@ Michael has already directed:
 - ISO 9001 certification is deferred until a customer, procurement, or
   company-wide QMS requirement exists.
 - Interim accountable approval roles are recorded in ADR 0001. The surrounding
-  ADR remains `Proposed` until Michael explicitly accepts it.
+  ADR was explicitly accepted by Michael on 2026-07-25 and becomes effective
+  when its accepted revision merges to `main`.
 
 ## Resolved operational control: private CI
 

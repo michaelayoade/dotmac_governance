@@ -18,6 +18,7 @@ A policy is normative and states what Dotmac requires. It is distinct from:
 4. Superseded explicitly, never edited into a different meaning. The history of
    what was required, and when, is part of the record.
 
-Nothing lands here until ADR 0001 is accepted and the policy's scope and
-approver are resolved. An unapproved policy file that looks normative is worse
-than an honestly empty directory.
+ADR 0001 now permits policies to be proposed through this lifecycle. This
+directory remains empty until each policy's scope, owner, approver, and approval
+are independently resolved. An unapproved policy file that looks normative is
+worse than an honestly empty directory.

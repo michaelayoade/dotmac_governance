@@ -1,9 +1,10 @@
 # 0001. Governance authority model
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-24
+- Effective: 2026-07-25
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (interim)
+- Approver: Michael Ayoade
 - Scope: Dotmac organization-wide engineering governance
 - Classification: Internal
 
@@ -33,8 +34,8 @@ contract question it was intended to control.
 Michael has already directed that this repository is private and owns
 organization-wide policies, control definitions, global ADRs, templates, and
 generated indexes. Repository-local technical ADRs remain beside the affected
-code. This ADR records the proposed operating model; it does not become
-normative until a human explicitly accepts it.
+code. Michael explicitly accepted this ADR on 2026-07-25. This accepted
+revision becomes authoritative when merged to `main`.
 
 ## Decision
 

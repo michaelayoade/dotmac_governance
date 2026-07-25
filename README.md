@@ -3,8 +3,8 @@
 Normative governance for Dotmac engineering: policies, architecture decisions,
 control interpretations, and evidence mappings for the Dotmac management system.
 
-**Status: private bootstrap repository. ADR 0001 is `Proposed`; no policy is
-effective yet.**
+**Status: private governance source of truth. ADR 0001 was accepted by Michael
+Ayoade effective 2026-07-25; no policy has been approved yet.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting

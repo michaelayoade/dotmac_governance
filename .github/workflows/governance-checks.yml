@@ -1,0 +1,33 @@
+name: Governance checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotmac-governance-seabone-ci
+  cancel-in-progress: true
+
+jobs:
+  records:
+    name: Governance record validation
+    runs-on: [self-hosted, linux, x64, seabone, dotmac-governance]
+    timeout-minutes: 10
+    steps:
+      - name: Check out the proposed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select the validation runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Exercise known-good and known-bad controls
+        run: python -m unittest discover --start-directory tests --verbose
+
+      - name: Validate governance records
+        run: python tools/check_adrs.py

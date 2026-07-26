@@ -78,10 +78,27 @@ pull request, and workflow approval defaults are weaker than this warrants.
 Untrusted code executing on a self-hosted runner reaches the host, not a
 disposable container.
 
-This is a condition of the change, not a follow-up. Before or at the moment of
-publication, Actions must require approval for **all** outside contributors,
-not first-time contributors only. If that control cannot be set, the repository
-does not become public.
+This is a condition of the change, not a follow-up. Two controls, because the
+first cannot be configured before publication — the fork-approval API rejects
+the call on a private repository, which leaves a window between the visibility
+change and the setting taking effect:
+
+1. **Actions requires approval for all outside contributors**, not
+   first-time contributors only. Set immediately after publication and
+   verified by API.
+2. **`governance-checks.yml` refuses to run for a pull request whose head
+   repository is not this repository.** A job-level condition, so it is in
+   force during the configuration window and survives the Actions setting
+   being changed later. Changing it requires a reviewed change to the workflow
+   file.
+
+A fork pull request therefore runs no validation and cannot satisfy the
+required check. That is intended for a repository where every merge is a
+governance act.
+
+Publication is sequenced so the runner is never exposed: Actions disabled,
+visibility changed, approval policy set, Actions re-enabled, both controls
+verified.
 
 ## Consequences
 
@@ -104,9 +121,11 @@ does not become public.
 - Branch protection on `main` is verified by API after the change and its
   configuration recorded in the pull request. A 403 or a missing required check
   is a failed change, not a partial success.
-- The Actions fork-approval policy is verified as requiring approval for all
-  outside contributors. This is checked at publication and re-checked whenever
-  workflow configuration changes.
+- The Actions fork-approval policy is verified by API as requiring approval for
+  all outside contributors, and the workflow's fork guard is verified present.
+  Both are re-checked whenever workflow configuration changes. Neither is
+  assumed from the other: the setting can be changed without review, and the
+  guard is what makes that survivable.
 - `README.md` hard rule 5 is rewritten in the same change as this ADR, so the
   front page cannot state a visibility rule the repository contradicts.
 - A record carrying `Confidential` or `Restricted` in a public repository is a

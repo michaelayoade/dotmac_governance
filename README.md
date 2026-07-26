@@ -3,8 +3,9 @@
 Normative governance for Dotmac engineering: policies, architecture decisions,
 control interpretations, and evidence mappings for the Dotmac management system.
 
-**Status: private governance source of truth. ADR 0001 was accepted by Michael
-Ayoade effective 2026-07-25; no policy has been approved yet.**
+**Status: governance source of truth. ADR 0001 was accepted by Michael Ayoade
+effective 2026-07-25; no policy has been approved yet. ADR 0002 (development
+model) and ADR 0003 (repository visibility) are `Proposed` and non-normative.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
@@ -60,9 +61,13 @@ not reproduce standard text and does not itself establish conformity.
    own output, or declare compliance.
 4. **`main` changes by review.** Every substantive change arrives as a pull
    request with a named human approver.
-5. **Private means private.** Hosted-CI availability is never a reason to make
-   the governance source of truth public. Validation runs on the
-   repository-scoped Seabone self-hosted runner.
+5. **Classification, not visibility.** Hosted-CI availability is never a reason
+   to change this repository's visibility. Validation runs on the
+   repository-scoped Seabone self-hosted runner. Material classified
+   `Confidential` or `Restricted` does not belong here and is referenced from
+   the system that holds it. ADR 0003 (`Proposed`) narrows this rule from the
+   private-by-default form stated in ADR 0001; until it is approved, that form
+   stands.
 
 ## Layout
 

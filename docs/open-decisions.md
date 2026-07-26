@@ -11,11 +11,12 @@ scaffold and deliberately did not infer scope, identity, or evidence claims.
 | 4 | Evidence schema, retention, freshness, and tamper-evident export | Deliberately deferred. Under ADR 0002 this is derived from adopted processes and their information items, so it cannot be designed until the six processes exist. | Control owners |
 | 5 | Human/agent identity separation in GitHub and Knowledge | An agent operating through Michael's account is not distinguishable from Michael's own action. Under ADR 0002 this blocks the agent-participation process being verifiable, so it moves ahead of the process definitions. | Michael |
 | 6 | Relationship to `dotmac_sub`'s source-of-truth standard | Under ADR 0002 this becomes the architecture-and-design process definition rather than a standalone policy. Confirm that framing. | Michael |
-| 7 | Enforced branch protection | The current GitHub plan returned HTTP 403 for branch protection; CI-before-merge is not technically enforced. Under ADR 0002 every process gate depends on this, which raises its priority. | Michael |
+| 7 | Enforced branch protection | Directed 2026-07-26: closed by publishing the repository. ADR 0003 records the decision and its conditions; the item stays open until protected `main` is verified by API. | Michael |
 | 8 | Managed Codex/Claude policy rollout and cutover | Still gated on decision 5, but under ADR 0002 it is the distribution mechanism for the agent-participation process rather than a separate programme. | Michael |
 | 9 | Governed scope beyond the initial six repositories | `dotmac_academy_app`, `dotmac_voice`, `dotmac_mobile`, `dotmac_vtu`, `dotmac_starter_mt`, `dotmac_data`, and `flutter-xcode-cloud-starter` are active but out of initial scope. In or out, deliberately. | Michael |
 | 10 | Canonical location of `dotmac_field` | Referenced in operational practice, but not found under this account or any organization it belongs to. Scope cannot include a repository whose canonical URL is unknown. | Michael |
-| 11 | Public default branches for governed repositories | `dotmac_sub`, `dotmac_crm`, `dotmac_erp`, and `dotmac-integration-client` are public while `dotmac_governance` is private. Whether that is compatible with the configuration-and-secrets process needs a decision, not an assumption. | Michael |
+| 11 | Public default branches for governed repositories | `dotmac_sub`, `dotmac_crm`, `dotmac_erp`, and `dotmac-integration-client` are public. ADR 0003 resolves this for `dotmac_governance` only; whether public default branches are compatible with the configuration-and-secrets process across the governed set is still undecided. | Michael |
+| 12 | Self-hosted runner exposure on a public repository | `governance-checks.yml` runs on `pull_request` against the Seabone self-hosted runner. Public forks can execute code on it unless Actions requires approval for all outside contributors. ADR 0003 makes this a condition of publication; it must be verified, not assumed. | Michael |
 
 Decisions 1, 2, and 3 are struck through pending ADR 0002 approval. While that
 record is `Proposed` they remain open, because a proposed record closes nothing.
@@ -24,8 +25,12 @@ record is `Proposed` they remain open, because a proposed record closes nothing.
 
 Michael has already directed:
 
-- `dotmac_governance` is private and owns organization-wide policies, control
-  definitions, global ADRs, templates, and generated indexes.
+- `dotmac_governance` owns organization-wide policies, control definitions,
+  global ADRs, templates, and generated indexes. It was private at bootstrap;
+  Michael directed on 2026-07-26 that it become public so branch protection is
+  technically enforceable. ADR 0003 records that decision, narrows hard rule 5
+  from visibility to classification, and makes an Actions fork-approval policy
+  a condition of publication.
 - Initial standards scope is ISO/IEC 27001 and ISO/IEC 42001, with
   ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 as engineering
   references. ADR 0002 proposes inverting this — 12207 and 15289 as the spine,

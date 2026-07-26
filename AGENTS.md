@@ -50,6 +50,7 @@ on this repository or producing governance material for Dotmac.
    ```bash
    python -m unittest discover --start-directory tests --verbose
    python tools/check_adrs.py
+   python tools/check_processes.py
    ```
 
 5. Open a pull request that states the governance effect, the authority status,

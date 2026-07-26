@@ -15,13 +15,14 @@ concurrency:
 jobs:
   records:
     name: Governance record validation
-    # The Seabone runner is a host, not a disposable container. On a public
-    # repository a fork pull request must never reach it. GitHub's Actions
-    # approval setting is the primary control; this guard is the one that
-    # survives that setting being changed, and it cannot be toggled without a
-    # reviewed change to this file. A fork pull request therefore runs no
-    # validation and cannot satisfy the required check — deliberate, for a
-    # repository where every merge is a governance act.
+    # The Seabone runner is a host, not a disposable container, and a fork pull
+    # request must never reach it. Keeping this repository private is the
+    # control that achieves that (ADR 0003); this guard is a backstop, not a
+    # barrier. It cannot be relied on against a hostile fork: a pull_request
+    # workflow runs the definition produced by merging the head into the base,
+    # and a fork controls its head, so it can delete this condition. It defends
+    # against an accidental fork pull request and against a run approved
+    # without close reading.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository

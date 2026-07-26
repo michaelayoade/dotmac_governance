@@ -25,12 +25,24 @@ Four systems, four distinct jobs. None of them substitutes for another.
 Governance is normative only where it is checked in here. Knowledge entries aid
 discovery; they never make something true, and they are never cited as evidence.
 
-## Initial standards baseline
+## Standards baseline
 
-The directed baseline uses ISO/IEC 27001:2022 and ISO/IEC 42001:2023.
-ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 are engineering
-references. ISO 9001 certification is deferred pending an actual customer,
-procurement, or company-wide QMS requirement.
+The product is a **standards-based development model**, not a certification
+programme. ADR 0002 (`Proposed`) amends the ADR 0001 baseline to:
+
+| Standard | Role |
+| --- | --- |
+| ISO/IEC/IEEE 12207:2026 | Process spine — which life-cycle processes exist |
+| ISO/IEC/IEEE 15289:2019 | Information-item discipline — what record each produces |
+| ISO/IEC 27001:2022 | Security overlay on those processes |
+| ISO/IEC 42001:2023 | AI overlay, including agent participation |
+
+Certification against any of these is out of current scope, reconsidered only on
+an external requirement. ISO 9001 remains deferred on the same terms. Dropping
+certification machinery does not drop risk management: lifecycle, security, and
+AI risk activity stays inside the processes that require it.
+
+Until ADR 0002 is approved and merged, the ADR 0001 baseline stands as written.
 
 Only identifiers and Dotmac's interpretations belong here. This repository does
 not reproduce standard text and does not itself establish conformity.
@@ -55,8 +67,11 @@ not reproduce standard text and does not itself establish conformity.
 ## Layout
 
 - `docs/adr/` — architecture and governance decisions. See
-  [`docs/adr/README.md`](docs/adr/README.md) for the numbering rule.
+  [`docs/adr/README.md`](docs/adr/README.md) for the numbering and relationship
+  rules.
 - `policies/` — normative policies.
+- `processes/` — adopted life-cycle process definitions. Empty until ADR 0002
+  is approved.
 - `docs/` — scope, evidence model, and open decisions.
 - `AGENTS.md` — vendor-neutral agent constraints.
 - `CLAUDE.md` — Claude's import boundary for `AGENTS.md`.

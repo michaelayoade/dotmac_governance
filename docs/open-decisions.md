@@ -5,14 +5,20 @@ scaffold and deliberately did not infer scope, identity, or evidence claims.
 
 | # | Decision | Why it is blocking | Owner |
 | --- | --- | --- | --- |
-| 1 | ISMS scope statement for ISO/IEC 27001:2022 | Determines which systems, sites, people, and data are governed. | Michael |
-| 2 | AIMS scope statement for ISO/IEC 42001:2023 | Determines which AI systems and assisted processes are governed. | Michael |
-| 3 | Named independent evidence verifier(s) | Michael is the interim accountable approver, but evidence effectiveness requires a different named human. | Michael |
-| 4 | Evidence schema, retention, freshness, and tamper-evident export | `evidence-model.md` defines the proposed meaning, not the final implementation contract. | Control owners |
-| 5 | Human/agent identity separation in GitHub and Knowledge | An agent operating through Michael's account is not distinguishable from Michael's own action; approval provenance is therefore incomplete. | Michael |
-| 6 | Relationship to `dotmac_sub`'s source-of-truth standard | Decide whether it is promoted to an organization policy here or remains a repository-local standard. | Michael |
-| 7 | Enforced branch protection for private repositories | The current GitHub plan returned HTTP 403 for branch protection; CI-before-merge is not technically enforced. | Michael |
-| 8 | Managed Codex/Claude policy rollout and cutover | The vendor-neutral bundle, managed permissions/hooks, repository adoption checks, fallback retirement, and drift reconciler need a separate approved design after identity/RBAC. | Michael |
+| 1 | ~~ISMS scope statement for ISO/IEC 27001:2022~~ | Closes if ADR 0002 is approved: replaced by the governed-scope repository list. See decision 9. | Michael |
+| 2 | ~~AIMS scope statement for ISO/IEC 42001:2023~~ | Closes if ADR 0002 is approved: replaced by the agent-participation process. | Michael |
+| 3 | ~~Named independent evidence verifier(s)~~ | Closes if ADR 0002 is approved: independent verification is certification machinery. Human approval of changes still applies. | Michael |
+| 4 | Evidence schema, retention, freshness, and tamper-evident export | Deliberately deferred. Under ADR 0002 this is derived from adopted processes and their information items, so it cannot be designed until the six processes exist. | Control owners |
+| 5 | Human/agent identity separation in GitHub and Knowledge | An agent operating through Michael's account is not distinguishable from Michael's own action. Under ADR 0002 this blocks the agent-participation process being verifiable, so it moves ahead of the process definitions. | Michael |
+| 6 | Relationship to `dotmac_sub`'s source-of-truth standard | Under ADR 0002 this becomes the architecture-and-design process definition rather than a standalone policy. Confirm that framing. | Michael |
+| 7 | Enforced branch protection | The current GitHub plan returned HTTP 403 for branch protection; CI-before-merge is not technically enforced. Under ADR 0002 every process gate depends on this, which raises its priority. | Michael |
+| 8 | Managed Codex/Claude policy rollout and cutover | Still gated on decision 5, but under ADR 0002 it is the distribution mechanism for the agent-participation process rather than a separate programme. | Michael |
+| 9 | Governed scope beyond the initial six repositories | `dotmac_academy_app`, `dotmac_voice`, `dotmac_mobile`, `dotmac_vtu`, `dotmac_starter_mt`, `dotmac_data`, and `flutter-xcode-cloud-starter` are active but out of initial scope. In or out, deliberately. | Michael |
+| 10 | Canonical location of `dotmac_field` | Referenced in operational practice, but not found under this account or any organization it belongs to. Scope cannot include a repository whose canonical URL is unknown. | Michael |
+| 11 | Public default branches for governed repositories | `dotmac_sub`, `dotmac_crm`, `dotmac_erp`, and `dotmac-integration-client` are public while `dotmac_governance` is private. Whether that is compatible with the configuration-and-secrets process needs a decision, not an assumption. | Michael |
+
+Decisions 1, 2, and 3 are struck through pending ADR 0002 approval. While that
+record is `Proposed` they remain open, because a proposed record closes nothing.
 
 ## Directed bootstrap decisions
 
@@ -22,7 +28,11 @@ Michael has already directed:
   definitions, global ADRs, templates, and generated indexes.
 - Initial standards scope is ISO/IEC 27001 and ISO/IEC 42001, with
   ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 as engineering
-  references.
+  references. ADR 0002 proposes inverting this — 12207 and 15289 as the spine,
+  27001 and 42001 as overlays — and is not yet approved.
+- The product is a standards-based development model, not a certification
+  programme. ADR 0002 records this; until it is approved the destination stated
+  in ADR 0001 stands.
 - ISO 9001 certification is deferred until a customer, procurement, or
   company-wide QMS requirement exists.
 - Interim accountable approval roles are recorded in ADR 0001. The surrounding

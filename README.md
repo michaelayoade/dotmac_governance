@@ -30,7 +30,7 @@ discovery; they never make something true, and they are never cited as evidence.
 ## Standards baseline
 
 The product is a **standards-based development model**, not a certification
-programme. ADR 0002 (`Proposed`) amends the ADR 0001 baseline to:
+programme. Accepted ADR 0002 amends the ADR 0001 baseline to:
 
 | Standard | Role |
 | --- | --- |
@@ -43,8 +43,6 @@ Certification against any of these is out of current scope, reconsidered only on
 an external requirement. ISO 9001 remains deferred on the same terms. Dropping
 certification machinery does not drop risk management: lifecycle, security, and
 AI risk activity stays inside the processes that require it.
-
-Until ADR 0002 is approved and merged, the ADR 0001 baseline stands as written.
 
 Only identifiers and Dotmac's interpretations belong here. This repository does
 not reproduce standard text and does not itself establish conformity.
@@ -75,8 +73,9 @@ not reproduce standard text and does not itself establish conformity.
   [`docs/adr/README.md`](docs/adr/README.md) for the numbering and relationship
   rules.
 - `policies/` — normative policies.
-- `processes/` — adopted life-cycle process definitions. Empty until ADR 0002
-  is approved.
+- `processes/` — adopted life-cycle process definitions. See
+  [`processes/README.md`](processes/README.md) for the definition contract and
+  the enforce-or-delete rule.
 - `docs/` — scope, evidence model, and open decisions.
 - `AGENTS.md` — vendor-neutral agent constraints.
 - `CLAUDE.md` — Claude's import boundary for `AGENTS.md`.
@@ -86,6 +85,7 @@ not reproduce standard text and does not itself establish conformity.
 ```bash
 python -m unittest discover --start-directory tests --verbose
 python tools/check_adrs.py
+python tools/check_processes.py
 ```
 
 CI records the authoritative result. A local or agent-reported pass is useful

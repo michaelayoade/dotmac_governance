@@ -42,3 +42,6 @@ jobs:
 
       - name: Validate governance records
         run: python tools/check_adrs.py
+
+      - name: Validate process definitions
+        run: python tools/check_processes.py

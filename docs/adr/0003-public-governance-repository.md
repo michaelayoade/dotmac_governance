@@ -83,22 +83,52 @@ first cannot be configured before publication — the fork-approval API rejects
 the call on a private repository, which leaves a window between the visibility
 change and the setting taking effect:
 
-1. **Actions requires approval for all outside contributors**, not
-   first-time contributors only. Set immediately after publication and
-   verified by API.
+1. **Actions requires approval for all outside contributors**
+   (`all_external_contributors`), not the `first_time_contributors` default.
+   Set immediately after publication and verified by API. **This is the only
+   control that holds against a hostile fork.**
 2. **`governance-checks.yml` refuses to run for a pull request whose head
-   repository is not this repository.** A job-level condition, so it is in
-   force during the configuration window and survives the Actions setting
-   being changed later. Changing it requires a reviewed change to the workflow
-   file.
+   repository is not this repository.** A job-level condition.
 
-A fork pull request therefore runs no validation and cannot satisfy the
-required check. That is intended for a repository where every merge is a
-governance act.
+The second control is weaker than it looks, and the difference matters enough
+to state precisely. A `pull_request` workflow executes the definition produced
+by merging the head into the base, and a fork controls its own head — so a
+malicious fork can delete the guard along with everything else it edits. The
+guard defends against an accidental fork pull request and against a maintainer
+approving a run without reading the diff closely. It does **not** defend against
+an attacker who edits the workflow. Calling it a barrier that survives the
+Actions setting being changed would be exactly the false assurance this
+repository exists to prevent.
 
-Publication is sequenced so the runner is never exposed: Actions disabled,
-visibility changed, approval policy set, Actions re-enabled, both controls
-verified.
+The approval policy is therefore not defence in depth behind the guard. It is
+the barrier, and it must be re-verified after any change to Actions settings
+rather than inferred from the workflow file.
+
+A fork pull request runs no validation and cannot satisfy the required check.
+That is intended for a repository where every merge is a governance act.
+
+### What was actually done
+
+Recorded because the intended sequence was not the executed one.
+
+The plan was to disable Actions, change visibility, set the approval policy,
+then re-enable. The disable call failed with HTTP 422 — a string where the API
+required a boolean — and the failure was not caught before the visibility
+change proceeded. The repository was therefore public with Actions enabled and
+the approval policy still at the `first_time_contributors` default for the
+interval between those two calls.
+
+The exposure was bounded by that default, which requires approval for a
+contributor who has not previously contributed, and by the absence of any
+attacker with prior contribution history. Verified after the fact: zero forks,
+and every workflow run in the repository's history originates from a branch in
+this repository. No fork run occurred.
+
+The window was real regardless of the outcome, and the durable correction is
+sequencing that does not depend on a call succeeding silently: **verify the
+disable took effect before changing visibility.** Recorded here rather than
+tidied away, because a governance record that only documents the intended path
+is not a record of what happened.
 
 ## Consequences
 
@@ -108,7 +138,18 @@ verified.
 - Dotmac's governance gaps become public. Accepted.
 - The Seabone runner moves from a private trust boundary to a public one, and
   depends on an Actions approval policy that must be verified rather than
-  assumed.
+  assumed. The workflow guard does not reduce that dependency.
+- Protected `main` requires a pull request and a green check, but
+  `required_approving_review_count` is **0**. GitHub does not let an author
+  approve their own pull request, and every change — human-written or
+  agent-drafted — currently arrives under Michael's account. Requiring one
+  approval would make merging impossible rather than safer. The approval count
+  rises to 1 when open decision 5 lands and agents hold a distinct identity;
+  until then, `README.md` rule 4's named-approver requirement is enforced as a
+  pull-request-and-green-CI gate, not as an independent review.
+- `enforce_admins` is enabled, so the gate binds Michael too. An emergency
+  bypass means deliberately disabling protection, which is itself an auditable
+  act rather than a silent direct push.
 - Any future record needing `Confidential` or `Restricted` classification
   forces a location decision instead of defaulting here.
 - The 2026-07-24 reversal is not undone. Its reasoning — that CI availability
@@ -120,7 +161,13 @@ verified.
 
 - Branch protection on `main` is verified by API after the change and its
   configuration recorded in the pull request. A 403 or a missing required check
-  is a failed change, not a partial success.
+  is a failed change, not a partial success. Verified 2026-07-26: required
+  check `Governance record validation`, strict, `enforce_admins` enabled,
+  linear history, no force pushes, no deletions.
+- Any settings change made through the API is verified by reading the setting
+  back. The publication sequence failed silently once because a 422 was not
+  checked before the next step ran; a call that is not read back is not a
+  control.
 - The Actions fork-approval policy is verified by API as requiring approval for
   all outside contributors, and the workflow's fork guard is verified present.
   Both are re-checked whenever workflow configuration changes. Neither is

@@ -1,0 +1,3 @@
+# Byte-code from the validation commands AGENTS.md requires agents to run.
+__pycache__/
+*.py[cod]

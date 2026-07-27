@@ -1,182 +1,157 @@
-# 0003. Public governance repository and enforced branch protection
+# 0003. Public governance repository with enforced branch protection
 
 - Status: Proposed
-- Date: 2026-07-26
+- Date: 2026-07-27
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: `https://github.com/michaelayoade/dotmac_governance`
-- Classification: Internal
-- Amends: 0001 — the private-visibility rule and the branch-protection enforcement gap
+- Classification: Public
+- Amends: 0001 — the private-visibility rule, the record classification it implied, and the branch-protection enforcement gap
 
 ## Context
 
-ADR 0001 records that the current GitHub plan cannot enforce branch protection
-on a private repository. The attempt returned HTTP 403. Green CI and human
-approval therefore operate as a rule with a documented enforcement gap: nothing
-technically prevents a direct push to `main`, and `README.md` rule 4 — every
-substantive change arrives as a pull request with a named human approver — is
-honour-system.
+ADR 0001 records that the GitHub plan in use could not enforce branch
+protection on a private repository; the attempt returned HTTP 403. Rule 4 —
+every substantive change arrives as a pull request with a named human approver
+— was therefore honour-system, and under ADR 0002 every adopted process gate
+rests on it.
 
-This repository was previously made public as a workaround for unavailable
-hosted Actions, and that was reversed on 2026-07-24 because CI availability is
-not a reason to publish the governance source of truth. ADR 0001 hard rule 5
-states that directly. The replacement control was a repository-scoped Seabone
-self-hosted runner, which closed CI availability but not enforcement.
+This decision has been revisited twice, and the reasoning of both earlier
+positions is retained rather than discarded.
 
-The reason now is different, and the distinction is the whole basis for
-revisiting a decision made two days earlier. CI availability is a convenience;
-it had an alternative, and the alternative worked. An unenforceable approval
-gate is a control failure with no alternative on the current plan. Under
-ADR 0002 every adopted process depends on gates at the default branch, so an
-unenforced `main` degrades not one rule but the entire development model.
+The repository was published on 2026-07-26 to obtain branch protection, and
+that action was taken while the authorizing record was still `Proposed`. That
+sequencing was wrong independently of the destination, and is recorded in
+[issue #3](https://github.com/michaelayoade/dotmac_governance/issues/3). A
+subsequent draft proposed restoring private and paying for the capability. This
+ADR supersedes that draft's conclusion but not its analysis: the three
+objections it raised were correct, and two of them are resolved here by
+changing the configuration rather than by argument.
 
-Four of the six repositories in ADR 0002's governed scope — `dotmac_sub`,
-`dotmac_crm`, `dotmac_erp`, and `dotmac-integration-client` — are already
-public. Governance being private is not a consistent boundary; it is one repo
-treated differently from the systems it governs.
+**Objection 1 — a self-hosted runner on a public repository.** Correct, and
+GitHub's own guidance says so: once a fork's workflow run is approved,
+user-controlled code executes on the runner host. It is resolved by removing
+the self-hosted runner. Seabone existed only because hosted Actions were
+unavailable on the *private* repository. A public repository gets hosted
+runners at no cost, so the condition that created the exposure disappears
+rather than being mitigated. There is no runner host to reach, no approval
+policy to maintain, and no workflow guard whose assurance has to be qualified.
 
-Michael directed this change on 2026-07-26.
+**Objection 2 — publishing `Classification: Internal` records makes the label
+meaningless.** Correct, and it is resolved by classification, not by
+redefinition. Records in this repository are classified `Public`. Anything that
+must carry `Internal`, `Confidential`, or `Restricted` does not belong here and
+is referenced from the system that holds it. This is a real admission control
+with a real consequence, and it is the opposite of widening `Internal` to cover
+what was already done.
+
+**Objection 3 — an accepted rule was departed from on the authority of a
+proposed one.** Correct, and not resolved by this ADR's conclusion. It is a
+process failure, it is recorded as an incident, and its corrective actions
+stand regardless of which visibility is chosen.
+
+What remains is a genuine trade. Publishing makes Dotmac's governance gaps
+readable by anyone. That is accepted deliberately: a governance repository that
+could not survive being read is not recording its gaps truthfully, and every
+open gap here is already written down as an open decision or an incident.
 
 ## Decision
 
-`dotmac_governance` becomes a public repository, and protected `main` is
-configured and verified.
+`dotmac_governance` is a **public** repository with **enforced** branch
+protection on `main`.
 
-### Hard rule 5 is narrowed, not deleted
+### Visibility
 
-The rule was written as a statement about repository visibility. It is replaced
-by a statement about content, which is what it was actually protecting:
+ADR 0001 hard rule 5 is amended. Its protected interest was never visibility
+itself; it was that governance material not leak secrets, ISO text, or
+confidential operational detail. Those are preserved as content rules:
 
-- Secret values never appear here, in any form. Only an approved OpenBao path
+- Secret values never appear here, in any form — only an approved OpenBao path
   or a controlled local pointer. Unchanged and absolute.
 - ISO standard text is never reproduced. Unchanged and absolute.
-- Material classified `Confidential` or `Restricted` does not belong in this
-  repository. It is referenced from the controlled system that holds it.
+- Records here are classified `Public`. Material requiring `Internal` or above
+  is referenced, not stored.
 - Hosted-CI availability remains an invalid reason to change visibility. That
-  part of rule 5 stands as written; this ADR is not an appeal to it.
+  clause of rule 5 stands; this ADR does not appeal to it, and the reason here
+  is enforceability plus the removal of the self-hosted runner.
 
-`Classification` therefore stops being descriptive metadata and becomes an
-admission control. A record that must carry `Confidential` or `Restricted`
-belongs somewhere else.
+Existing records carry `Classification: Internal`, which was never accurate for
+a public repository. This ADR authorizes correcting that field on ADR 0001 and
+ADR 0002 to `Public`. The correction changes a label to match reality and
+changes no decision; it is recorded here rather than made silently.
 
-### What becomes publicly readable
+### Validation runtime
 
-This is accepted deliberately, not overlooked. Publishing makes readable: that
-Dotmac's approval gates were unenforced until this change; that agents act
-through a personal GitHub account and cannot be distinguished from the human;
-the `claude_knowledge` deployment defects cited in ADR 0001; the Seabone runner
-labels; and every unresolved item in `docs/open-decisions.md`.
+Validation runs on GitHub-hosted runners. The Seabone self-hosted runner is
+retired for this repository and must not be reintroduced while it is public.
 
-Honest records of open gaps are the point of this repository. A governance repo
-that could not survive being read is not recording gaps truthfully.
+This is a downgrade in one respect worth stating: the private runner was a
+controlled host, and hosted runners are shared infrastructure. For a repository
+whose entire content is public and which holds no secrets, that trade is
+acceptable. It would not be for a repository that holds either.
 
-### Self-hosted runner exposure
+### Branch protection
 
-`governance-checks.yml` triggers on `pull_request` and targets the Seabone
-self-hosted runner. On a public repository any GitHub user may fork and open a
-pull request, and workflow approval defaults are weaker than this warrants.
-Untrusted code executing on a self-hosted runner reaches the host, not a
-disposable container.
+Protected `main` requires a pull request and the `Governance record validation`
+check, applies to administrators, and forbids force pushes, deletions, and
+non-linear history.
 
-This is a condition of the change, not a follow-up. Two controls, because the
-first cannot be configured before publication — the fork-approval API rejects
-the call on a private repository, which leaves a window between the visibility
-change and the setting taking effect:
+### Approval strength is bounded by identity, not by protection
 
-1. **Actions requires approval for all outside contributors**
-   (`all_external_contributors`), not the `first_time_contributors` default.
-   Set immediately after publication and verified by API. **This is the only
-   control that holds against a hostile fork.**
-2. **`governance-checks.yml` refuses to run for a pull request whose head
-   repository is not this repository.** A job-level condition.
+Protected `main` enforces *pull request and green check*. It does not enforce
+*independent human approval*, because `required_approving_review_count` is `0`.
 
-The second control is weaker than it looks, and the difference matters enough
-to state precisely. A `pull_request` workflow executes the definition produced
-by merging the head into the base, and a fork controls its own head — so a
-malicious fork can delete the guard along with everything else it edits. The
-guard defends against an accidental fork pull request and against a maintainer
-approving a run without reading the diff closely. It does **not** defend against
-an attacker who edits the workflow. Calling it a barrier that survives the
-Actions setting being changed would be exactly the false assurance this
-repository exists to prevent.
+GitHub does not permit an author to approve their own pull request, and every
+change — human-written or agent-drafted — currently arrives under Michael's
+account. Requiring one approval would make merging impossible rather than
+safer. Raising the count is gated on open decision 5 giving agents a distinct
+identity.
 
-The approval policy is therefore not defence in depth behind the guard. It is
-the barrier, and it must be re-verified after any change to Actions settings
-rather than inferred from the workflow file.
+Until then, rule 4's named-approver requirement is honestly stated as a
+pull-request-and-green-CI gate. Recording it as an approval gate would overstate
+the control.
 
-A fork pull request runs no validation and cannot satisfy the required check.
-That is intended for a repository where every merge is a governance act.
-
-### What was actually done
-
-Recorded because the intended sequence was not the executed one.
-
-The plan was to disable Actions, change visibility, set the approval policy,
-then re-enable. The disable call failed with HTTP 422 — a string where the API
-required a boolean — and the failure was not caught before the visibility
-change proceeded. The repository was therefore public with Actions enabled and
-the approval policy still at the `first_time_contributors` default for the
-interval between those two calls.
-
-The exposure was bounded by that default, which requires approval for a
-contributor who has not previously contributed, and by the absence of any
-attacker with prior contribution history. Verified after the fact: zero forks,
-and every workflow run in the repository's history originates from a branch in
-this repository. No fork run occurred.
-
-The window was real regardless of the outcome, and the durable correction is
-sequencing that does not depend on a call succeeding silently: **verify the
-disable took effect before changing visibility.** Recorded here rather than
-tidied away, because a governance record that only documents the intended path
-is not a record of what happened.
+Public visibility introduces a second consideration for that decision: outside
+contributors can now open pull requests. They cannot merge, because protection
+requires the check and the repository has one maintainer, but the review burden
+is real and is accepted.
 
 ## Consequences
 
-- Branch protection becomes technically enforceable, closing the enforcement
-  gap recorded in ADR 0001 and open decision 7, and giving ADR 0002's process
-  gates something real to rest on.
-- Dotmac's governance gaps become public. Accepted.
-- The Seabone runner moves from a private trust boundary to a public one, and
-  depends on an Actions approval policy that must be verified rather than
-  assumed. The workflow guard does not reduce that dependency.
-- Protected `main` requires a pull request and a green check, but
-  `required_approving_review_count` is **0**. GitHub does not let an author
-  approve their own pull request, and every change — human-written or
-  agent-drafted — currently arrives under Michael's account. Requiring one
-  approval would make merging impossible rather than safer. The approval count
-  rises to 1 when open decision 5 lands and agents hold a distinct identity;
-  until then, `README.md` rule 4's named-approver requirement is enforced as a
-  pull-request-and-green-CI gate, not as an independent review.
-- `enforce_admins` is enabled, so the gate binds Michael too. An emergency
-  bypass means deliberately disabling protection, which is itself an auditable
-  act rather than a silent direct push.
-- Any future record needing `Confidential` or `Restricted` classification
-  forces a location decision instead of defaulting here.
-- The 2026-07-24 reversal is not undone. Its reasoning — that CI availability
-  does not justify publication — remains correct and is preserved above.
-- Visibility becomes a governed property. Changing it back requires an ADR, not
-  a settings click.
+- Branch protection is enforceable at no subscription cost, closing the gap
+  recorded in ADR 0001 and open decision 7.
+- The self-hosted runner exposure is removed rather than mitigated. Open
+  decision 12 closes, and the fork-approval policy and workflow guard both
+  become unnecessary.
+- Dotmac's governance gaps, incidents, and unresolved decisions are publicly
+  readable. Accepted.
+- `Classification` becomes admission control for this repository: a record that
+  needs `Internal` or above forces a location decision instead of defaulting
+  here.
+- Seabone's runner registration for this repository should be removed rather
+  than left idle, so that a future workflow cannot select it by accident.
+- Anyone may open a pull request or an issue. Triage is unowned and will need
+  an owner if volume appears.
+- Visibility is a governed property. Changing it again requires an approved
+  ADR, not a settings change.
 
 ## Drift prevention
 
-- Branch protection on `main` is verified by API after the change and its
-  configuration recorded in the pull request. A 403 or a missing required check
-  is a failed change, not a partial success. Verified 2026-07-26: required
-  check `Governance record validation`, strict, `enforce_admins` enabled,
-  linear history, no force pushes, no deletions.
-- Any settings change made through the API is verified by reading the setting
-  back. The publication sequence failed silently once because a 422 was not
-  checked before the next step ran; a call that is not read back is not a
-  control.
-- The Actions fork-approval policy is verified by API as requiring approval for
-  all outside contributors, and the workflow's fork guard is verified present.
-  Both are re-checked whenever workflow configuration changes. Neither is
-  assumed from the other: the setting can be changed without review, and the
-  guard is what makes that survivable.
-- `README.md` hard rule 5 is rewritten in the same change as this ADR, so the
-  front page cannot state a visibility rule the repository contradicts.
-- A record carrying `Confidential` or `Restricted` in a public repository is a
-  classification error. This is a candidate control for the ADR validator once
-  the classification vocabulary is fixed.
+- Protected `main` is verified by API and the verified configuration recorded
+  in the pull request. Verified 2026-07-26: required check `Governance record
+  validation`, strict, `enforce_admins` enabled, linear history, no force
+  pushes, no deletions.
+- The workflow declares `runs-on: ubuntu-latest` with a comment stating why.
+  Reintroducing a self-hosted runner requires a reviewed change to that file
+  and contradicts this ADR on its face.
 - Secret scanning and push protection are enabled, so the secrets rule has a
   mechanism behind it rather than only a prohibition.
+- A record carrying `Internal` or above in this repository is a classification
+  error. This is a candidate control for the record validators once the
+  classification vocabulary is fixed.
+- Every settings change is verified by reading the setting back. The failed
+  publication sequence proceeded because an HTTP 422 was not checked before the
+  next step ran; a call that is not read back is not a control.
+- An accepted ADR is not departed from on the authority of a `Proposed` one.
+  Where a proposal conflicts with an accepted rule, the conflict is resolved by
+  approval or withdrawal before any action is taken.

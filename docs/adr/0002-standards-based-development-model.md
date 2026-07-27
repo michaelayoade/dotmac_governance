@@ -1,12 +1,13 @@
 # 0002. Standards-based development model
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-26
+- Effective: 2026-07-26
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Canonical Dotmac engineering repositories listed under "Governed scope"
-- Classification: Internal
-- Amends: 0001 — the standards baseline and the conformity posture it implied
+- Classification: Public
+- Amends: 0001 — the standards baseline, the conformity posture it implied, and the independent evidence-verification role
 
 ## Context
 
@@ -146,8 +147,9 @@ demonstrated cost:
 
 Each is defined in `processes/`, declaring: purpose; 12207 process identifier;
 owner; inputs, activities, and outcomes; `required_information_items` and where
-each lives; `work_products`; the approval gate and who holds it; agent
-participation limits; 27001 and 42001 clause identifiers with Dotmac's
+each lives; `work_products`; the approval gate and who holds it; whether
+separate effectiveness verification is required and, if so, the named verifier;
+agent participation limits; 27001 and 42001 clause identifiers with Dotmac's
 interpretation; and its enforcement mechanism.
 
 Once these six exist, the remaining 12207 processes are reviewed for gaps rather
@@ -165,18 +167,54 @@ document that nobody enforces and nobody owns describes a practice that is not
 happening, and it is more damaging than its absence because it reads as
 coverage.
 
+### Verification of evidence
+
+ADR 0001 assigns evidence verification to a role: the control owner attests,
+and **a different named human verifies effectiveness**. Dropping certification
+machinery does not silently dissolve that role, and an earlier draft of this
+ADR did exactly that — it closed the independent-verifier requirement while
+also claiming ADR 0001's accountability model stood untouched. Those two
+statements cannot both be true. This section amends the role explicitly
+instead.
+
+- **Human approval remains mandatory** for every governance change and every
+  code change in the governed scope. This is not weakened, reduced, or made
+  conditional by anything in this ADR.
+- **Separate effectiveness verification is required only where an adopted
+  process explicitly declares it.** A process that governs a control whose
+  failure is silent or costly — production deployment, secret handling,
+  billing correctness, network control — declares a verifier and names them.
+  A process whose gate is self-evidencing does not.
+- **Certification-style independent auditing is out of scope**, consistent
+  with the conformity posture above. What is dropped is the standing
+  requirement that every piece of evidence carry a second human's
+  attestation, which for a team of this size produced a nominal verifier
+  rather than an actual one.
+- **Periodic review of the development model remains.** The processes are
+  reviewed on a declared cadence for whether they still describe what happens.
+  What does not carry over is certification management-review machinery —
+  the standing agenda, the retained minutes, the input/output checklist.
+
+The distinction is between verification that catches defects and verification
+that exists to be shown to an auditor. The first is retained and targeted; the
+second is out of scope.
+
 ### Relationship to ADR 0001
 
-This ADR amends ADR 0001's standards baseline and conformity posture. It does
-**not** supersede it. The authority model remains in force in full: the
-four-system split across Git, CI, Knowledge, and Issues; human accountability
-roles; agents draft and humans approve; the evidence boundary; controlled record
-metadata; private-by-default; and the deployment provenance invariants. Those
-controls are load-bearing for a development model and would have been discarded
-by a supersession.
+This ADR amends three things in ADR 0001: the standards baseline, the
+conformity posture it implied, and the independent evidence-verification role
+described above. It does **not** supersede it.
 
-While this record is `Proposed` the amendment is not in force and ADR 0001's
-baseline stands as written.
+Everything else remains in force: the four-system split across Git, CI,
+Knowledge, and Issues; the accountability roles other than evidence
+verification; agents draft and humans approve; the evidence boundary;
+controlled record metadata; private-by-default; and the deployment provenance
+invariants. Those controls are load-bearing for a development model and would
+have been discarded by a supersession.
+
+Nothing in this ADR authorizes a change to repository visibility. ADR 0001's
+private-by-default rule is untouched here and is addressed separately in
+ADR 0003.
 
 ## Consequences
 
@@ -184,9 +222,15 @@ baseline stands as written.
   greenfield governance build. Most of what the six processes describe already
   happens.
 - ISMS and AIMS organizational scope statements, the risk register, the
-  Statement of Applicability, independent evidence verifiers, tamper-evident
-  export, and audit cycles are no longer required work. Open decisions 1, 2,
-  3, and 4 change shape or close.
+  Statement of Applicability, tamper-evident export, and certification audit
+  cycles are no longer required work. Open decisions 1 and 2 close; 3 narrows
+  from a standing role to a per-process declaration; 4 is deferred until the
+  processes exist.
+- Independent verification becomes a property of individual processes rather
+  than a standing organizational role. A process that needs a verifier and
+  does not name one is an incomplete process definition, and the conformance
+  validator can say so — which the previous standing requirement never could,
+  because it applied everywhere and was satisfied nowhere.
 - Dotmac gains no ability to answer a certification request. That is the
   accepted trade, and it reverses on an external requirement.
 - The evidence model must be derived from adopted processes and their

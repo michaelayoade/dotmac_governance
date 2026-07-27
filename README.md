@@ -3,9 +3,10 @@
 Normative governance for Dotmac engineering: policies, architecture decisions,
 control interpretations, and evidence mappings for the Dotmac management system.
 
-**Status: governance source of truth. ADR 0001 was accepted by Michael Ayoade
-effective 2026-07-25; no policy has been approved yet. ADR 0002 (development
-model) and ADR 0003 (repository visibility) are `Proposed` and non-normative.**
+**Status: public governance source of truth. ADR 0001 (authority model,
+effective 2026-07-25) and ADR 0002 (development model, effective 2026-07-26)
+are accepted. ADR 0003 (public repository and enforced branch protection) is
+`Proposed` and non-normative. No policy has been approved yet.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
@@ -37,6 +38,11 @@ programme. ADR 0002 (`Proposed`) amends the ADR 0001 baseline to:
 | ISO/IEC/IEEE 15289:2019 | Information-item discipline — what record each produces |
 | ISO/IEC 27001:2022 | Security overlay on those processes |
 | ISO/IEC 42001:2023 | AI overlay, including agent participation |
+| ISO/IEC 25010 | Product quality vocabulary — what a quality claim names |
+| ISO/IEC 5055 | Automated source code measures — what a tool can assert |
+
+ADR 0004 (`Proposed`) adds the quality references and states Dotmac's six
+quality principles; they become binding only in the verification process.
 
 Certification against any of these is out of current scope, reconsidered only on
 an external requirement. ISO 9001 remains deferred on the same terms. Dropping
@@ -61,13 +67,12 @@ not reproduce standard text and does not itself establish conformity.
    own output, or declare compliance.
 4. **`main` changes by review.** Every substantive change arrives as a pull
    request with a named human approver.
-5. **Classification, not visibility.** Hosted-CI availability is never a reason
-   to change this repository's visibility. Validation runs on the
-   repository-scoped Seabone self-hosted runner. Material classified
-   `Confidential` or `Restricted` does not belong here and is referenced from
-   the system that holds it. ADR 0003 (`Proposed`) narrows this rule from the
-   private-by-default form stated in ADR 0001; until it is approved, that form
-   stands.
+5. **Public repository, `Public` records.** This repository is public so that
+   branch protection is enforceable. Every record here is classified `Public`;
+   anything requiring `Internal` or above is referenced from the system that
+   holds it, never stored here. Validation runs on GitHub-hosted runners — no
+   self-hosted runner while the repository is public. Hosted-CI availability
+   remains an invalid reason to change visibility. See ADR 0003 (`Proposed`).
 
 ## Layout
 

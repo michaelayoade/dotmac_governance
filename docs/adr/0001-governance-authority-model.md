@@ -6,7 +6,7 @@
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Dotmac organization-wide engineering governance
-- Classification: Internal
+- Classification: Public
 
 ## Context
 

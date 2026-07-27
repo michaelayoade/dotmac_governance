@@ -6,7 +6,7 @@
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Canonical Dotmac engineering repositories listed under "Governed scope"
-- Classification: Internal
+- Classification: Public
 - Amends: 0001 — the standards baseline, the conformity posture it implied, and the independent evidence-verification role
 
 ## Context

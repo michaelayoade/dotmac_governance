@@ -11,12 +11,12 @@ scaffold and deliberately did not infer scope, identity, or evidence claims.
 | 4 | Evidence schema, retention, freshness, and tamper-evident export | Deliberately deferred. Under ADR 0002 this is derived from adopted processes and their information items, so it cannot be designed until the six processes exist. | Control owners |
 | 5 | Human/agent identity separation in GitHub and Knowledge | An agent operating through Michael's account is not distinguishable from Michael's own action. Under ADR 0002 this blocks the agent-participation process being verifiable, so it moves ahead of the process definitions. | Michael |
 | 6 | Relationship to `dotmac_sub`'s source-of-truth standard | Under ADR 0002 this becomes the architecture-and-design process definition rather than a standalone policy. Confirm that framing. | Michael |
-| 7 | Enforced branch protection | Resolution corrected 2026-07-26: pay for the capability rather than publish. Closes when GitHub Pro is active and protection is verified by API **on the private repository**. Protection configured while public does not evidence it. | Michael |
+| 7 | ~~Enforced branch protection~~ | **Closed** 2026-07-27 by ADR 0003: the repository is public, protection is configured and verified by API. Verified: required check `Governance record validation`, strict, `enforce_admins`, linear history, no force pushes or deletions. | — |
 | 8 | Managed Codex/Claude policy rollout and cutover | Still gated on decision 5, but under ADR 0002 it is the distribution mechanism for the agent-participation process rather than a separate programme. | Michael |
 | 9 | ~~Governed scope beyond the initial six repositories~~ | **Decided** 2026-07-26: the initial six are the governed set. Every other repository stays out until explicitly onboarded by an amendment to ADR 0002. Silence never onboards. | — |
 | 10 | ~~Canonical location of `dotmac_field`~~ | **Decided** 2026-07-26: out of scope until a canonical repository exists. A governed system cannot be identified by operational practice alone. | — |
-| 11 | Visibility per governed repository | **Framing decided** 2026-07-26: visibility is decided per repository from its classification and threat model, never as a global rule. `dotmac_governance` is private (ADR 0003). `dotmac_sub`, `dotmac_crm`, `dotmac_erp`, and `dotmac-integration-client` are public and each still needs its own assessment — starting with whether any uses a self-hosted runner. | Michael |
-| 12 | ~~Self-hosted runner exposure on a public repository~~ | **Dissolved** by ADR 0003: restoring private removes the condition rather than mitigating it. Reopens for any governed repository that is public *and* uses a self-hosted runner — see decision 11. | — |
+| 11 | Visibility per governed repository | **Framing stands**: visibility is decided per repository from its classification and threat model, never as a global rule. `dotmac_governance` is public with `Public` records and hosted runners (ADR 0003). The other four public repositories each still need their own assessment — starting with whether any pairs a public repository with a self-hosted runner. | Michael |
+| 12 | ~~Self-hosted runner exposure on a public repository~~ | **Closed** by ADR 0003: this repository moved to GitHub-hosted runners, removing the runner host rather than mitigating access to it. Reopens for any governed repository that is public *and* uses a self-hosted runner — see decision 11. | — |
 
 Decisions 1 and 2 are closed by accepted ADR 0002. Decision 3 is narrowed
 rather than closed: human approval stays mandatory everywhere, and separate
@@ -31,11 +31,12 @@ here is closed by a `Proposed` ADR.
 
 Michael has already directed:
 
-- `dotmac_governance` is private and owns organization-wide policies, control
-  definitions, global ADRs, templates, and generated indexes. It was briefly
-  published on 2026-07-26 to obtain branch protection; that was reversed as
-  conflicting with accepted ADR 0001, and ADR 0003 closes the enforcement gap
-  by paying for the capability instead. Hard rule 5 is unchanged.
+- `dotmac_governance` owns organization-wide policies, control definitions,
+  global ADRs, templates, and generated indexes. It is public so that branch
+  protection is enforceable, with all records classified `Public` and
+  validation on GitHub-hosted runners (ADR 0003). Hard rule 5 is amended from
+  visibility to content: no secrets, no ISO text, nothing above `Public`.
+  The publication that preceded the record is issue #3.
 - Initial standards scope is ISO/IEC 27001 and ISO/IEC 42001, with
   ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 as engineering
   references. ADR 0002 proposes inverting this — 12207 and 15289 as the spine,

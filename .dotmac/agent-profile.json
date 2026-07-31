@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "profile_id": "dotmac-governance",
+  "repository_name": "dotmac_governance",
+  "summary": "Organization-wide governance records and validation for Dotmac engineering.",
+  "canonical_repository": "https://github.com/michaelayoade/dotmac_governance",
+  "default_branch": "main",
+  "governance_model": {
+    "version": "0.1.0",
+    "source": "docs/adr/0005-agent-bootstrap-conformance-control-plane.md",
+    "status": "accepted"
+  },
+  "instructions": {
+    "agents_path": "AGENTS.md",
+    "claude_path": "CLAUDE.md",
+    "claude_import": "@AGENTS.md",
+    "render_mode": "validate",
+    "max_combined_bytes": 32768,
+    "warn_combined_bytes": 24576,
+    "required_agents_markers": [
+      "# Agent constraints",
+      "## Authority and status",
+      "## Required workflow",
+      "## Reporting"
+    ],
+    "required_claude_markers": [
+      "# Claude-specific additions"
+    ],
+    "authoritative_sources": [
+      "README.md",
+      "docs/adr/0001-governance-authority-model.md",
+      "docs/adr/README.md",
+      "docs/agent-client-contracts.md",
+      "docs/agent-guidance/global.md",
+      "docs/agent-guidance/claude-user.md",
+      "docs/open-decisions.md"
+    ],
+    "claude_additions": [
+      "Treat every Proposed ADR and draft policy as non-normative.",
+      "Use the same checked-in validation commands as Codex.",
+      "Keep shared governance instructions in AGENTS.md."
+    ]
+  },
+  "validation_commands": [
+    "python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control tests/test_agent_control.py tools/dotmac-agent",
+    "python3 -m ruff format --check agent_control tests/test_agent_control.py tools/dotmac-agent",
+    "python3 -m mypy --strict agent_control tools/dotmac-agent",
+    "python3 -m unittest discover --start-directory tests --verbose",
+    "python3 tools/check_adrs.py",
+    "python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json"
+  ],
+  "allowed_surfaces": [
+    "codex",
+    "claude-code"
+  ],
+  "rollout": {
+    "mode": "pilot",
+    "managed_configuration": false,
+    "authorized_endpoint_classes": [
+      "developer-workstation",
+      "ci-runner"
+    ],
+    "blocked_by": [
+      "docs/open-decisions.md decision 5: human/agent identity separation",
+      "docs/open-decisions.md decision 8: managed policy rollout and cutover"
+    ]
+  }
+}

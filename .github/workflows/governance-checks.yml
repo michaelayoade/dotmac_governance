@@ -36,8 +36,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install pinned development validators
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Check agent-control lint and formatting
+        run: |
+          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control tests/test_agent_control.py tools/dotmac-agent
+          python3 -m ruff format --check agent_control tests/test_agent_control.py tools/dotmac-agent
+
+      - name: Check typed agent-control boundaries
+        run: python3 -m mypy --strict agent_control tools/dotmac-agent
+
       - name: Exercise known-good and known-bad controls
-        run: python -m unittest discover --start-directory tests --verbose
+        run: python3 -m unittest discover --start-directory tests --verbose
 
       - name: Validate governance records
-        run: python tools/check_adrs.py
+        run: python3 tools/check_adrs.py
+
+      - name: Validate the agent-control pilot profile
+        run: python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json

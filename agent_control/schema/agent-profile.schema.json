@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/michaelayoade/dotmac_governance/agent_control/schema/agent-profile.schema.json",
+  "title": "Dotmac agent repository profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "repository_name",
+    "summary",
+    "canonical_repository",
+    "default_branch",
+    "governance_model",
+    "instructions",
+    "validation_commands",
+    "allowed_surfaces",
+    "rollout"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "repository_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonical_repository": {
+      "type": "string",
+      "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+(?:\\.git)?$"
+    },
+    "default_branch": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$"
+    },
+    "governance_model": {
+      "$ref": "#/$defs/governance_model"
+    },
+    "instructions": {
+      "$ref": "#/$defs/instructions"
+    },
+    "validation_commands": {
+      "$ref": "#/$defs/non_empty_unique_strings"
+    },
+    "allowed_surfaces": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "codex",
+          "claude-code"
+        ]
+      }
+    },
+    "rollout": {
+      "$ref": "#/$defs/rollout"
+    }
+  },
+  "$defs": {
+    "non_empty_unique_strings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "pattern": "(^/)|(^|/)\\.\\.(/|$)"
+      }
+    },
+    "governance_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "source",
+        "status"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z0-9.-]+)?$"
+        },
+        "source": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "status": {
+          "enum": [
+            "proposed",
+            "accepted"
+          ]
+        }
+      }
+    },
+    "instructions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agents_path",
+        "claude_path",
+        "claude_import",
+        "render_mode",
+        "max_combined_bytes",
+        "warn_combined_bytes",
+        "required_agents_markers",
+        "required_claude_markers",
+        "authoritative_sources",
+        "claude_additions"
+      ],
+      "properties": {
+        "agents_path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "claude_path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "claude_import": {
+          "type": "string",
+          "minLength": 1
+        },
+        "render_mode": {
+          "enum": [
+            "validate",
+            "managed"
+          ]
+        },
+        "max_combined_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warn_combined_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "required_agents_markers": {
+          "$ref": "#/$defs/non_empty_unique_strings"
+        },
+        "required_claude_markers": {
+          "$ref": "#/$defs/non_empty_unique_strings"
+        },
+        "authoritative_sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/relative_path"
+          }
+        },
+        "claude_additions": {
+          "$ref": "#/$defs/non_empty_unique_strings"
+        }
+      }
+    },
+    "rollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "managed_configuration",
+        "authorized_endpoint_classes",
+        "blocked_by"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "pilot",
+            "managed"
+          ]
+        },
+        "managed_configuration": {
+          "type": "boolean"
+        },
+        "authorized_endpoint_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "developer-workstation",
+              "ci-runner"
+            ]
+          }
+        },
+        "blocked_by": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

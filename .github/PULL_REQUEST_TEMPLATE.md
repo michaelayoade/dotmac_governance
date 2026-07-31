@@ -14,6 +14,10 @@
       wording only
 - [ ] No secret values; only paths or OpenBao references
 - [ ] Any new ADR has a unique number and a valid `Status`
+- [ ] Any agent profile change passes `python3 -m agent_control verify`
+- [ ] Any managed policy or endpoint change passes strict typing, known-bad
+      deployment tests, and reviewed staging; no bundle contains a credential
+      value
 - [ ] Any control mapping cites evidence from a named controlled source, or is
       honestly marked `implemented-unevidenced`
 - [ ] Evidence references name the producer, subject, immutable identity, and

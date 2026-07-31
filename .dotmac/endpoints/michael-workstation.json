@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "endpoint_id": "michael-workstation",
+  "endpoint_class": "developer-workstation",
+  "platform": "macos",
+  "principal": "agent:michael-workstation",
+  "local_user": "michaelayoade",
+  "credential_pointer": "openbao:secret/claude-knowledge#client_michael_workstation_token",
+  "credential_environment_variable": "DOTMAC_KNOWLEDGE_MCP_TOKEN",
+  "user_home": "/Users/michaelayoade",
+  "allowed_surfaces": [
+    "codex",
+    "claude-code"
+  ],
+  "policy_id": "dotmac-agent-baseline"
+}

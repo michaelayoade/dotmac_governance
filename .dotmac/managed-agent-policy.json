@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "policy_id": "dotmac-agent-baseline",
+  "version": "0.1.0",
+  "canonical_repository": "https://github.com/michaelayoade/dotmac_governance",
+  "default_branch": "main",
+  "governance_model": {
+    "version": "0.1.0",
+    "source": "docs/adr/0005-agent-bootstrap-conformance-control-plane.md",
+    "status": "accepted"
+  },
+  "allowed_surfaces": [
+    "codex",
+    "claude-code"
+  ],
+  "allowed_endpoint_classes": [
+    "developer-workstation"
+  ],
+  "allowed_endpoint_ids": [
+    "michael-workstation"
+  ],
+  "blocked_by": [],
+  "managed_configuration": true,
+  "global_instruction_source": "docs/agent-guidance/global.md",
+  "claude_user_instruction_source": "docs/agent-guidance/claude-user.md",
+  "codex": {
+    "allowed_approval_policies": [
+      "on-request"
+    ],
+    "allowed_permission_profiles": [
+      ":read-only",
+      ":workspace"
+    ],
+    "default_permission_profile": ":workspace",
+    "allowed_web_search_modes": [
+      "cached",
+      "live"
+    ],
+    "allow_managed_hooks_only": false,
+    "disable_remote_control": true,
+    "disable_computer_use": true
+  },
+  "claude": {
+    "update_channel": "stable",
+    "allow_managed_hooks_only": false,
+    "allow_managed_mcp_servers_only": true,
+    "allow_managed_permission_rules_only": false,
+    "sandbox_enabled": true,
+    "sandbox_fail_if_unavailable": true,
+    "sandbox_allow_unsandboxed_commands": false
+  },
+  "mcp_servers": [
+    {
+      "name": "knowledge",
+      "url": "https://observability.dotmac.io/knowledge/mcp"
+    }
+  ]
+}

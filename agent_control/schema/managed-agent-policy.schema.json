@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/michaelayoade/dotmac_governance/agent_control/schema/managed-agent-policy.schema.json",
+  "title": "Dotmac managed agent policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "version",
+    "canonical_repository",
+    "default_branch",
+    "governance_model",
+    "allowed_surfaces",
+    "allowed_endpoint_classes",
+    "allowed_endpoint_ids",
+    "blocked_by",
+    "managed_configuration",
+    "global_instruction_source",
+    "claude_user_instruction_source",
+    "codex",
+    "claude",
+    "mcp_servers"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "policy_id": {
+      "$ref": "#/$defs/kebab_id"
+    },
+    "version": {
+      "$ref": "#/$defs/version"
+    },
+    "canonical_repository": {
+      "type": "string",
+      "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+(?:\\.git)?$"
+    },
+    "default_branch": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$"
+    },
+    "governance_model": {
+      "$ref": "#/$defs/governance_model"
+    },
+    "allowed_surfaces": {
+      "$ref": "#/$defs/surfaces"
+    },
+    "allowed_endpoint_classes": {
+      "$ref": "#/$defs/endpoint_classes"
+    },
+    "allowed_endpoint_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/kebab_id"
+      }
+    },
+    "blocked_by": {
+      "$ref": "#/$defs/unique_strings"
+    },
+    "managed_configuration": {
+      "type": "boolean"
+    },
+    "global_instruction_source": {
+      "$ref": "#/$defs/repository_path"
+    },
+    "claude_user_instruction_source": {
+      "$ref": "#/$defs/repository_path"
+    },
+    "codex": {
+      "$ref": "#/$defs/codex"
+    },
+    "claude": {
+      "$ref": "#/$defs/claude"
+    },
+    "mcp_servers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/kebab_id"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "kebab_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z0-9.-]+)?$"
+    },
+    "repository_path": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "pattern": "(^/)|(^|/)\\.\\.(/|$)"
+      }
+    },
+    "unique_strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "non_empty_unique_strings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "governance_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "source",
+        "status"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "pattern": "(^/)|(^|/)\\.\\.(/|$)"
+          }
+        },
+        "status": {
+          "enum": [
+            "proposed",
+            "accepted"
+          ]
+        }
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "codex",
+          "claude-code"
+        ]
+      }
+    },
+    "endpoint_classes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "developer-workstation",
+          "ci-runner"
+        ]
+      }
+    },
+    "codex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_approval_policies",
+        "allowed_permission_profiles",
+        "default_permission_profile",
+        "allowed_web_search_modes",
+        "allow_managed_hooks_only",
+        "disable_remote_control",
+        "disable_computer_use"
+      ],
+      "properties": {
+        "allowed_approval_policies": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "on-request",
+              "untrusted"
+            ]
+          }
+        },
+        "allowed_permission_profiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              ":read-only",
+              ":workspace"
+            ]
+          }
+        },
+        "default_permission_profile": {
+          "enum": [
+            ":read-only",
+            ":workspace"
+          ]
+        },
+        "allowed_web_search_modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "disabled",
+              "cached",
+              "indexed",
+              "live"
+            ]
+          }
+        },
+        "allow_managed_hooks_only": {
+          "type": "boolean"
+        },
+        "disable_remote_control": {
+          "type": "boolean"
+        },
+        "disable_computer_use": {
+          "type": "boolean"
+        }
+      }
+    },
+    "claude": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "update_channel",
+        "allow_managed_hooks_only",
+        "allow_managed_mcp_servers_only",
+        "allow_managed_permission_rules_only",
+        "sandbox_enabled",
+        "sandbox_fail_if_unavailable",
+        "sandbox_allow_unsandboxed_commands"
+      ],
+      "properties": {
+        "update_channel": {
+          "enum": [
+            "stable",
+            "latest"
+          ]
+        },
+        "allow_managed_hooks_only": {
+          "type": "boolean"
+        },
+        "allow_managed_mcp_servers_only": {
+          "type": "boolean"
+        },
+        "allow_managed_permission_rules_only": {
+          "type": "boolean"
+        },
+        "sandbox_enabled": {
+          "type": "boolean"
+        },
+        "sandbox_fail_if_unavailable": {
+          "type": "boolean"
+        },
+        "sandbox_allow_unsandboxed_commands": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

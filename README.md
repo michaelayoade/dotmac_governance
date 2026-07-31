@@ -4,8 +4,9 @@ Normative governance for Dotmac engineering: policies, architecture decisions,
 control interpretations, and evidence mappings for the Dotmac management system.
 
 **Status: governance source of truth. ADR 0001 was accepted by Michael Ayoade
-effective 2026-07-25; no policy has been approved yet. ADR 0002 (development
-model) and ADR 0003 (repository visibility) are `Proposed` and non-normative.**
+effective 2026-07-25. ADR 0005 is accepted only for the
+`michael-workstation` non-production agent pilot. ADR 0002 (development model)
+and ADR 0003 (repository visibility) remain `Proposed` and non-normative.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
@@ -78,15 +79,36 @@ not reproduce standard text and does not itself establish conformity.
 - `processes/` — adopted life-cycle process definitions. Empty until ADR 0002
   is approved.
 - `docs/` — scope, evidence model, and open decisions.
+- `agent_control/` — typed repository, policy, endpoint, artifact, attestation,
+  conformance, staging, reconciliation, backup-backed activation, and rollback
+  contracts for the ADR 0005 pilot.
+- `.dotmac/agent-profile.json` — this repository's checked-in pilot profile.
+- `.dotmac/managed-agent-policy.json` — accepted Codex/Claude policy restricted
+  to endpoint ID `michael-workstation`.
+- `.dotmac/endpoints/michael-workstation.json` — reviewed non-production pilot
+  enrollment; it contains identity and an OpenBao pointer, never a credential
+  value.
 - `AGENTS.md` — vendor-neutral agent constraints.
 - `CLAUDE.md` — Claude's import boundary for `AGENTS.md`.
 
 ## Validation
 
 ```bash
-python -m unittest discover --start-directory tests --verbose
-python tools/check_adrs.py
+python3 -m pip install -r requirements-dev.txt
+python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control tests/test_agent_control.py tools/dotmac-agent
+python3 -m ruff format --check agent_control tests/test_agent_control.py tools/dotmac-agent
+python3 -m mypy --strict agent_control tools/dotmac-agent
+python3 -m unittest discover --start-directory tests --verbose
+python3 tools/check_adrs.py
+python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
 ```
 
 CI records the authoritative result. A local or agent-reported pass is useful
 diagnostic context, not governance evidence.
+
+See [`docs/agent-control.md`](docs/agent-control.md) for repository, staging,
+reconciliation, activation, and rollback commands, and
+[`docs/agent-client-contracts.md`](docs/agent-client-contracts.md) for the
+official vendor behavior behind them. Activation remains impossible until this
+accepted revision reaches clean canonical `main`; no command retrieves a
+credential value.

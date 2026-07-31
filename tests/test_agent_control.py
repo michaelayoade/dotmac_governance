@@ -584,13 +584,25 @@ class ManagedDeploymentTests(unittest.TestCase):
             endpoint_path = root / "endpoint.json"
             output = root / "bundle"
             write_json(endpoint_path, valid_endpoint())
-            result = deploy_endpoint(
-                self.policy_path,
-                endpoint_path,
-                REPOSITORY_ROOT,
-                output,
-                mode=DeploymentMode.STAGE,
+            identity = RepositoryIdentity(
+                canonical_repository=(
+                    "https://github.com/michaelayoade/dotmac_governance"
+                ),
+                revision="c" * 40,
+                dirty=True,
+                branch="feature/test-source-gate",
             )
+            with patch(
+                "agent_control.managed.detect_repository_identity",
+                return_value=identity,
+            ):
+                result = deploy_endpoint(
+                    self.policy_path,
+                    endpoint_path,
+                    REPOSITORY_ROOT,
+                    output,
+                    mode=DeploymentMode.STAGE,
+                )
             self.assertTrue(result.succeeded)
             self.assertEqual(len(result.created), len(result.plan.artifacts))
             self.assertIn(
@@ -640,13 +652,17 @@ class ManagedDeploymentTests(unittest.TestCase):
             self.assertIn("Bearer ${DOTMAC_KNOWLEDGE_MCP_TOKEN}", bundle_text)
             self.assertIn("DOTMAC_KNOWLEDGE_MCP_TOKEN", bundle_text)
 
-            repeated = deploy_endpoint(
-                self.policy_path,
-                endpoint_path,
-                REPOSITORY_ROOT,
-                output,
-                mode=DeploymentMode.STAGE,
-            )
+            with patch(
+                "agent_control.managed.detect_repository_identity",
+                return_value=identity,
+            ):
+                repeated = deploy_endpoint(
+                    self.policy_path,
+                    endpoint_path,
+                    REPOSITORY_ROOT,
+                    output,
+                    mode=DeploymentMode.STAGE,
+                )
             self.assertTrue(repeated.succeeded)
             self.assertFalse(repeated.created)
             self.assertEqual(

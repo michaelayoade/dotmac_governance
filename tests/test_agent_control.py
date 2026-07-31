@@ -1018,22 +1018,40 @@ class ManagedDeploymentTests(unittest.TestCase):
             endpoint_path = root / "endpoint.json"
             target_root = root / "endpoint-root"
             write_json(endpoint_path, valid_endpoint())
-            staged = deploy_endpoint(
-                self.policy_path,
-                endpoint_path,
-                REPOSITORY_ROOT,
-                root / "bundle",
-                mode=DeploymentMode.STAGE,
+            identity = RepositoryIdentity(
+                canonical_repository=(
+                    "https://github.com/michaelayoade/dotmac_governance"
+                ),
+                revision="3" * 40,
+                dirty=False,
+                branch="main",
             )
+            with patch(
+                "agent_control.managed.detect_repository_identity",
+                return_value=identity,
+            ):
+                staged = deploy_endpoint(
+                    self.policy_path,
+                    endpoint_path,
+                    REPOSITORY_ROOT,
+                    root / "bundle",
+                    mode=DeploymentMode.STAGE,
+                )
             for artifact in staged.plan.artifacts:
                 if artifact.kind is ArtifactKind.ATTESTATION:
                     continue
                 target = target_root.joinpath(*artifact.target.parts[1:])
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(artifact.content, encoding="utf-8")
-            with patch.dict(
-                os.environ,
-                {"DOTMAC_KNOWLEDGE_MCP_TOKEN": "test-only-present"},
+            with (
+                patch.dict(
+                    os.environ,
+                    {"DOTMAC_KNOWLEDGE_MCP_TOKEN": "test-only-present"},
+                ),
+                patch(
+                    "agent_control.managed.detect_repository_identity",
+                    return_value=identity,
+                ),
             ):
                 report = reconcile_endpoint(
                     self.policy_path,
@@ -1053,8 +1071,8 @@ class ManagedDeploymentTests(unittest.TestCase):
                     for observation in report.observations
                 )
             )
-            self.assertFalse(report.plan.activation_permitted)
-            self.assertFalse(report.ready_for_activation)
+            self.assertTrue(report.plan.activation_permitted)
+            self.assertTrue(report.ready_for_activation)
 
     def test_reconcile_reports_missing_and_drifted_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:

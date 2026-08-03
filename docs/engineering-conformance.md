@@ -10,6 +10,13 @@ tests, and exact Python contract surfaces. The typed gate rejects `Any`, missing
 or bare public annotations, unannotated record fields, and mutable boundary
 records. Schema version 2 has no waiver mechanism.
 
+`owner_implementation` is repository-relative while `decision_interface` is an
+importable Python symbol. Flat layouts map directly; for a standard `src`
+layout, the module begins after the nearest `src` segment. For example,
+`src/vendor_cp/licensing/service.py` owns
+`vendor_cp.licensing.service.issue_licence`, and
+`packages/kernel/src/dotmac_kernel/db.py` owns `dotmac_kernel.db.get_db`.
+
 Only `dotmac_governance` may select a `local` governance source. Every product
 uses `kind: pinned`, naming the canonical Governance repository, exact
 40-character accepted commit, ADR path, and accepted status. The composite

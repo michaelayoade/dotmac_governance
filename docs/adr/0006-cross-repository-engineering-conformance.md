@@ -160,3 +160,12 @@ source-identity hardening was merged in Governance PR 10. This amendment makes
 the local profile required and this ADR effective when the acceptance change
 reaches canonical `main`. Agent-authored code and records remain distinct from
 the named human approval recorded here.
+
+### 2026-08-03 implementation clarification — source layouts
+
+Repository paths and import symbols are different contracts. An owner in a
+flat layout maps directly from its repository-relative Python path; an owner
+under a standard `src` source root maps from the segment after `src`, including
+monorepo paths such as `packages/<package>/src/<import-package>/...`. Requiring
+the repository prefix in `decision_interface` would accept a non-importable
+symbol and reject the real owner, defeating the gate's purpose.

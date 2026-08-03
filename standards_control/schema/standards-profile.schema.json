@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "profile_id", "repository", "governance_model", "enforcement_mode", "authorities", "typed_contract_surfaces"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "profile_id": {"$ref": "#/$defs/slug"},
     "repository": {"$ref": "#/$defs/repository"},
     "governance_model": {"$ref": "#/$defs/governance_model"},
@@ -27,9 +27,27 @@
       }
     },
     "governance_model": {
+      "oneOf": [
+        {"$ref": "#/$defs/local_governance_model"},
+        {"$ref": "#/$defs/pinned_governance_model"}
+      ]
+    },
+    "local_governance_model": {
       "type": "object", "additionalProperties": false,
-      "required": ["source", "status"],
+      "required": ["kind", "source", "status"],
       "properties": {
+        "kind": {"const": "local"},
+        "source": {"$ref": "#/$defs/path"},
+        "status": {"type": "string", "enum": ["proposed", "accepted"]}
+      }
+    },
+    "pinned_governance_model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "canonical_url", "revision", "source", "status"],
+      "properties": {
+        "kind": {"const": "pinned"},
+        "canonical_url": {"type": "string", "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+$"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         "source": {"$ref": "#/$defs/path"},
         "status": {"type": "string", "enum": ["proposed", "accepted"]}
       }

@@ -4,11 +4,17 @@
 checked-in profile is `candidate` because the ADR is `Proposed`; a green run is
 not activated policy or a compliance claim.
 
-Each strict profile names repository URL/default branch, its checked-in
+Each strict schema-version-2 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
 tests, and exact Python contract surfaces. The typed gate rejects `Any`, missing
 or bare public annotations, unannotated record fields, and mutable boundary
-records. Schema version 1 has no waiver mechanism.
+records. Schema version 2 has no waiver mechanism.
+
+Only `dotmac_governance` may select a `local` governance source. Every product
+uses `kind: pinned`, naming the canonical Governance repository, exact
+40-character accepted commit, ADR path, and accepted status. The composite
+action supplies its actual repository and `github.action_ref`; mismatched,
+missing, branch-named, or tag-named identities fail before product rules run.
 
 Run locally (where `origin/HEAD` resolves the default branch):
 
@@ -39,6 +45,18 @@ The action invokes the Governance-owned engine against the caller workspace.
 It installs nothing into the product runtime and retrieves no credential.
 Repository access for private actions remains runner configuration, not logic
 copied into the action.
+
+A product profile's governance reference therefore has this shape:
+
+```json
+{
+  "kind": "pinned",
+  "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
+  "revision": "<accepted-40-character-sha>",
+  "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
+  "status": "accepted"
+}
+```
 
 Product rollout is inventory, candidate profile, local repairs with sabotage
 proofs, accepted governance plus required mode, green CI merge, then protected

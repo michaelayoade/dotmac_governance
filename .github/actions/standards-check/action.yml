@@ -28,9 +28,14 @@ runs:
         DOTMAC_STANDARDS_PROFILE: ${{ inputs.profile }}
         DOTMAC_STANDARDS_DEFAULT_BRANCH: ${{ inputs.default-branch }}
         DOTMAC_STANDARDS_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        DOTMAC_STANDARDS_GOVERNANCE_REPOSITORY: ${{ github.action_repository }}
+        DOTMAC_STANDARDS_GOVERNANCE_REVISION: ${{ github.action_ref }}
       run: |
         python3 "${GITHUB_ACTION_PATH}/../../../tools/dotmac-standards" verify \
           --root "${DOTMAC_STANDARDS_ROOT}" \
           --profile "${DOTMAC_STANDARDS_PROFILE}" \
           --default-branch "${DOTMAC_STANDARDS_DEFAULT_BRANCH}" \
+          --governance-root "${GITHUB_ACTION_PATH}/../../.." \
+          --governance-repository "${DOTMAC_STANDARDS_GOVERNANCE_REPOSITORY}" \
+          --governance-revision "${DOTMAC_STANDARDS_GOVERNANCE_REVISION}" \
           --format "${DOTMAC_STANDARDS_OUTPUT_FORMAT}"

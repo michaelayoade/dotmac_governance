@@ -13,8 +13,12 @@ from .contracts import (
     BranchName,
     CanonicalRepository,
     EnforcementMode,
+    GitRevision,
     GovernanceModelRef,
+    GovernanceSourceKind,
     GovernanceStatus,
+    LocalGovernanceModelRef,
+    PinnedGovernanceModelRef,
     ProfileId,
     PythonSymbol,
     RepositoryContract,
@@ -28,6 +32,7 @@ SLUG = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
 HTTPS_REPOSITORY = re.compile(r"^https://[^/\s]+/[^/\s]+/[^/\s]+$")
 PYTHON_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
 
 
 class ProfileError(ValueError):
@@ -109,7 +114,19 @@ def _repository(value: object) -> RepositoryContract:
 
 def _governance(value: object) -> GovernanceModelRef:
     data = _object(value, "governance_model")
-    _keys(data, frozenset({"source", "status"}), "governance_model")
+    raw_kind = _string(data.get("kind"), "governance_model.kind")
+    try:
+        kind = GovernanceSourceKind(raw_kind)
+    except ValueError as error:
+        raise ProfileError("governance_model.kind must be local or pinned") from error
+    if kind is GovernanceSourceKind.LOCAL:
+        _keys(data, frozenset({"kind", "source", "status"}), "governance_model")
+    else:
+        _keys(
+            data,
+            frozenset({"kind", "canonical_url", "revision", "source", "status"}),
+            "governance_model",
+        )
     raw = _string(data["status"], "governance_model.status")
     try:
         status = GovernanceStatus(raw)
@@ -117,8 +134,25 @@ def _governance(value: object) -> GovernanceModelRef:
         raise ProfileError(
             "governance_model.status must be proposed or accepted"
         ) from error
-    return GovernanceModelRef(
-        source=_path(data["source"], "governance_model.source"), status=status
+    source = _path(data["source"], "governance_model.source")
+    if kind is GovernanceSourceKind.LOCAL:
+        return LocalGovernanceModelRef(kind=kind, source=source, status=status)
+    canonical_url = _string(data["canonical_url"], "governance_model.canonical_url")
+    if not HTTPS_REPOSITORY.fullmatch(canonical_url):
+        raise ProfileError(
+            "governance_model.canonical_url must be a canonical HTTPS URL"
+        )
+    revision = _string(data["revision"], "governance_model.revision")
+    if not GIT_REVISION.fullmatch(revision):
+        raise ProfileError(
+            "governance_model.revision must be a lower-case 40-character Git SHA"
+        )
+    return PinnedGovernanceModelRef(
+        kind=kind,
+        canonical_url=CanonicalRepository(canonical_url.removesuffix(".git")),
+        revision=GitRevision(revision),
+        source=source,
+        status=status,
     )
 
 
@@ -226,8 +260,8 @@ def parse_profile(value: object) -> StandardsProfile:
         "profile",
     )
     version = data["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
-        raise ProfileError("schema_version must be integer 1")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 2:
+        raise ProfileError("schema_version must be integer 2")
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -256,7 +290,7 @@ def parse_profile(value: object) -> StandardsProfile:
     if len({item.surface_id for item in surfaces}) != len(surfaces):
         raise ProfileError("surface_id values must be unique")
     return StandardsProfile(
-        schema_version=1,
+        schema_version=2,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,

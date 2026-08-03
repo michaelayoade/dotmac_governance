@@ -15,6 +15,8 @@ from .contracts import (
     ConformanceReport,
     Diagnostic,
     DiagnosticCode,
+    GitRevision,
+    PinnedGovernanceModelRef,
     Severity,
     StandardsProfile,
     TypedContractSurface,
@@ -24,6 +26,9 @@ from .profile import ProfileError, load_profile
 STATUS_LINE = re.compile(r"^- Status:\s*(Proposed|Accepted)\s*$", re.MULTILINE)
 BARE_CONTAINERS = frozenset(
     {"dict", "list", "set", "tuple", "Mapping", "Sequence", "Iterable"}
+)
+CONTROL_PLANE_REPOSITORY = CanonicalRepository(
+    "https://github.com/michaelayoade/dotmac_governance"
 )
 
 
@@ -81,40 +86,109 @@ def _git_default_branch(root: Path) -> BranchName | None:
     return BranchName(observed.removeprefix("origin/"))
 
 
-def _governance(root: Path, profile: StandardsProfile) -> list[Diagnostic]:
-    relative = profile.governance_model.source
-    source = root / relative
+def _governance(
+    root: Path,
+    profile: StandardsProfile,
+    *,
+    governance_root: Path | None,
+    observed_governance_repository: CanonicalRepository | None,
+    observed_governance_revision: GitRevision | None,
+) -> list[Diagnostic]:
+    findings: list[Diagnostic] = []
+    model = profile.governance_model
+    source_root = root
+    if not isinstance(model, PinnedGovernanceModelRef):
+        if profile.repository.canonical_url != CONTROL_PLANE_REPOSITORY:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_LOCAL_SOURCE_FORBIDDEN,
+                    "only the Governance control-plane repository may use a "
+                    "local governance source",
+                )
+            )
+    else:
+        if model.canonical_url != CONTROL_PLANE_REPOSITORY:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_REPOSITORY_MISMATCH,
+                    f"profile must pin the Governance control plane "
+                    f"{CONTROL_PLANE_REPOSITORY!r}, found {model.canonical_url!r}",
+                )
+            )
+        if governance_root is None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_ROOT_UNAVAILABLE,
+                    "pinned governance source root is unavailable",
+                )
+            )
+        else:
+            source_root = governance_root
+        if observed_governance_repository is None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_REPOSITORY_UNAVAILABLE,
+                    "pinned governance repository identity is unavailable",
+                )
+            )
+        elif observed_governance_repository != model.canonical_url:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_REPOSITORY_MISMATCH,
+                    f"expected governance repository {model.canonical_url!r}, "
+                    f"found {observed_governance_repository!r}",
+                )
+            )
+        if observed_governance_revision is None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_REVISION_UNAVAILABLE,
+                    "pinned governance revision is unavailable",
+                )
+            )
+        elif observed_governance_revision != model.revision:
+            findings.append(
+                _finding(
+                    DiagnosticCode.GOVERNANCE_REVISION_MISMATCH,
+                    f"expected governance revision {model.revision!r}, "
+                    f"found {observed_governance_revision!r}",
+                )
+            )
+    relative = model.source
+    source = source_root / relative
     if not source.is_file():
-        return [
+        findings.append(
             _finding(
                 DiagnosticCode.GOVERNANCE_SOURCE_MISSING,
                 "governance source is missing",
                 path=relative,
             )
-        ]
+        )
+        return findings
     try:
         statuses = STATUS_LINE.findall(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeError):
         statuses = []
     if len(statuses) != 1:
-        return [
+        findings.append(
             _finding(
                 DiagnosticCode.GOVERNANCE_SOURCE_STATUS_MISSING,
                 "governance source needs exactly one controlled status",
                 path=relative,
             )
-        ]
+        )
+        return findings
     observed = statuses[0].lower()
-    expected = profile.governance_model.status.value
+    expected = model.status.value
     if observed != expected:
-        return [
+        findings.append(
             _finding(
                 DiagnosticCode.GOVERNANCE_SOURCE_STATUS_MISMATCH,
                 f"profile expects status {expected!r}, found {observed!r}",
                 path=relative,
             )
-        ]
-    return []
+        )
+    return findings
 
 
 def _symbols(path: Path) -> frozenset[str]:
@@ -410,6 +484,9 @@ def verify_repository(
     *,
     observed_repository: CanonicalRepository | None = None,
     observed_default_branch: BranchName | None = None,
+    governance_root: Path | None = None,
+    observed_governance_repository: CanonicalRepository | None = None,
+    observed_governance_revision: GitRevision | None = None,
 ) -> ConformanceReport:
     """Evaluate one repository through the single typed policy owner."""
     try:
@@ -449,7 +526,15 @@ def verify_repository(
                 f"expected branch {profile.repository.default_branch!r}, found {default_branch!r}",
             )
         )
-    findings.extend(_governance(root, profile))
+    findings.extend(
+        _governance(
+            root,
+            profile,
+            governance_root=governance_root,
+            observed_governance_repository=observed_governance_repository,
+            observed_governance_revision=observed_governance_revision,
+        )
+    )
     findings.extend(_authorities(root, profile))
     for surface in profile.typed_contract_surfaces:
         findings.extend(_typed(root, surface))

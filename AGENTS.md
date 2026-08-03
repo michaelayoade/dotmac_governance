@@ -48,12 +48,13 @@ on this repository or producing governance material for Dotmac.
 4. Run:
 
    ```bash
-   python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control tests/test_agent_control.py tools/dotmac-agent
-   python3 -m ruff format --check agent_control tests/test_agent_control.py tools/dotmac-agent
-   python3 -m mypy --strict agent_control tools/dotmac-agent
+   python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control standards_control tests/test_agent_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-standards
+   python3 -m ruff format --check agent_control standards_control tests/test_agent_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-standards
+   python3 -m mypy --strict --scripts-are-modules agent_control standards_control tools/dotmac-agent tools/dotmac-standards
    python3 -m unittest discover --start-directory tests --verbose
    python3 tools/check_adrs.py
    python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
+   python3 -m standards_control verify --root . --profile .dotmac/standards-profile.json --default-branch main
    ```
 
 5. Open a pull request that states the governance effect, the authority status,

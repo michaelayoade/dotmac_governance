@@ -28,7 +28,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, seabone, dotmac-governance]
     timeout-minutes: 10
     steps:
-      - name: Check out the proposed source
+      - name: Check out the evaluated source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Select the validation runtime
@@ -56,7 +56,7 @@ jobs:
       - name: Validate the agent-control pilot profile
         run: python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
 
-      - name: Validate the candidate engineering standards profile
+      - name: Validate the required engineering standards profile
         uses: ./.github/actions/standards-check
         with:
           default-branch: ${{ github.event.repository.default_branch }}

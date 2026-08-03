@@ -1,8 +1,8 @@
 # Cross-repository engineering conformance
 
-`standards_control` is the development-only engine proposed by ADR 0006. The
-checked-in profile is `candidate` because the ADR is `Proposed`; a green run is
-not activated policy or a compliance claim.
+`standards_control` is the development-only engine accepted by ADR 0006. The
+checked-in Governance profile is `required`; a green run is conformance
+evidence for the evaluated revision, not a certification or compliance claim.
 
 Each strict schema-version-2 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift

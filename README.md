@@ -7,8 +7,8 @@ control interpretations, and evidence mappings for the Dotmac management system.
 effective 2026-07-25. ADR 0005 is accepted only for the
 `michael-workstation` non-production agent pilot. ADR 0002 (development model)
 and ADR 0003 (repository visibility) remain `Proposed` and non-normative.
-ADR 0006 (engineering conformance) is also `Proposed`; its profile runs only in
-candidate mode.**
+ADR 0006 (engineering conformance) is accepted effective 2026-08-03; its
+profile runs in required mode.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
@@ -85,9 +85,9 @@ not reproduce standard text and does not itself establish conformity.
   conformance, staging, reconciliation, backup-backed activation, and rollback
   contracts for the ADR 0005 pilot.
 - `standards_control/` — typed, development-only ownership and contract-boundary
-  conformance engine proposed by ADR 0006.
+  conformance engine accepted by ADR 0006.
 - `.dotmac/agent-profile.json` — this repository's checked-in pilot profile.
-- `.dotmac/standards-profile.json` — the candidate engineering profile.
+- `.dotmac/standards-profile.json` — the required engineering profile.
 - `.dotmac/managed-agent-policy.json` — accepted Codex/Claude policy restricted
   to endpoint ID `michael-workstation`.
 - `.dotmac/endpoints/michael-workstation.json` — reviewed non-production pilot
@@ -120,4 +120,4 @@ accepted revision reaches clean canonical `main`; no command retrieves a
 credential value.
 
 See [`docs/engineering-conformance.md`](docs/engineering-conformance.md) for
-the candidate standards contract and product rollout.
+the required standards contract and product rollout.

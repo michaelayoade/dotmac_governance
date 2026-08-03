@@ -203,6 +203,20 @@ def _symbols(path: Path) -> frozenset[str]:
     )
 
 
+def _implementation_modules(path: PurePosixPath) -> frozenset[str]:
+    """Return importable module names represented by a repository path.
+
+    Flat layouts map the whole repository-relative path. Standard ``src``
+    layouts map from the segment after ``src``; this also covers a package in a
+    monorepo such as ``packages/kernel/src/dotmac_kernel/db.py`` without
+    pretending that ``packages.kernel.src`` is importable.
+    """
+    parts = PurePosixPath(path.as_posix().removesuffix(".py")).parts
+    source_roots = [index for index, part in enumerate(parts[:-1]) if part == "src"]
+    module_parts = parts[source_roots[-1] + 1 :] if source_roots else parts
+    return frozenset({".".join(module_parts)})
+
+
 def _authorities(root: Path, profile: StandardsProfile) -> list[Diagnostic]:
     findings: list[Diagnostic] = []
     owners: dict[str, str] = {}
@@ -255,12 +269,8 @@ def _authorities(root: Path, profile: StandardsProfile) -> list[Diagnostic]:
                     )
                 )
         module, _, symbol = str(authority.decision_interface).rpartition(".")
-        expected_module = (
-            authority.owner_implementation.as_posix()
-            .removesuffix(".py")
-            .replace("/", ".")
-        )
-        if module != expected_module or symbol not in _symbols(
+        expected_modules = _implementation_modules(authority.owner_implementation)
+        if module not in expected_modules or symbol not in _symbols(
             root / authority.owner_implementation
         ):
             findings.append(

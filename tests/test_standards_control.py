@@ -328,6 +328,58 @@ class StandardsTests(unittest.TestCase):
             DiagnosticCode.AUTHORITY_INTERFACE_MISSING,
         )
 
+    def test_src_layout_uses_the_importable_decision_interface(self) -> None:
+        value = profile()
+        authority = self.authority(value)
+        authority["owner_implementation"] = "src/example/service.py"
+        authority["decision_interface"] = "example.service.decide"
+        authority["canonical_writer_paths"] = ["src/example/service.py"]
+        authority["adapter_paths"] = ["src/example/router.py"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = Fixture(root).write(value)
+            source = root / "src/example"
+            source.mkdir(parents=True)
+            (source / "service.py").write_text(
+                "def decide() -> bool:\n    return True\n", encoding="utf-8"
+            )
+            (source / "router.py").write_text(
+                "def route() -> None:\n    return None\n", encoding="utf-8"
+            )
+            report = verify_repository(
+                root,
+                path,
+                observed_repository=REPOSITORY,
+                observed_default_branch=BranchName("main"),
+            )
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_src_layout_rejects_the_repository_path_as_an_import_symbol(self) -> None:
+        value = profile()
+        authority = self.authority(value)
+        authority["owner_implementation"] = "src/example/service.py"
+        authority["decision_interface"] = "src.example.service.decide"
+        authority["canonical_writer_paths"] = ["src/example/service.py"]
+        authority["adapter_paths"] = ["src/example/router.py"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = Fixture(root).write(value)
+            source = root / "src/example"
+            source.mkdir(parents=True)
+            (source / "service.py").write_text(
+                "def decide() -> bool:\n    return True\n", encoding="utf-8"
+            )
+            (source / "router.py").write_text(
+                "def route() -> None:\n    return None\n", encoding="utf-8"
+            )
+            report = verify_repository(
+                root,
+                path,
+                observed_repository=REPOSITORY,
+                observed_default_branch=BranchName("main"),
+            )
+        self.assert_code(report, DiagnosticCode.AUTHORITY_INTERFACE_MISSING)
+
     def test_any_fails(self) -> None:
         source = "from typing import Any\ndef send(value: Any) -> str:\n    return str(value)\n"
         self.assert_code(

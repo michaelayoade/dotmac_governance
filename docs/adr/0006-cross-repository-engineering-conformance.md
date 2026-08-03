@@ -1,9 +1,10 @@
 # 0006. Cross-repository engineering conformance control plane
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
+- Effective: 2026-08-03
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (intended while Proposed)
+- Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards and explicitly enrolled Dotmac repositories
 - Classification: Internal
 
@@ -26,9 +27,9 @@ ADR 0005 implements the same pattern for agent configuration, but is purposely
 limited to one non-production endpoint and is not a product-code checker.
 
 Michael directed on 2026-08-03 that `dotmac_governance` own cross-repository
-policy and enforcement. This agent-authored record remains `Proposed` until he
-records approval through repository review. Its implementation therefore runs
-in candidate mode and makes no organization-wide activation claim.
+policy and enforcement, and subsequently directed activation after the source
+identity controls were merged. The acceptance record below preserves that
+approval separately from the agent-authored implementation.
 
 ## Decision
 
@@ -126,9 +127,9 @@ expiry, and shrink-only review.
 
 - One engine can enforce structural standards across Sub, ERP, starter, vendor,
   kernel and later products while domain ownership stays local.
-- The first profile validates this repository in candidate mode. Activation
-  needs human acceptance, a required profile, product CI integration, and
-  protected-branch configuration.
+- The control-plane profile validates this repository in required mode.
+  Product activation additionally needs a pinned profile, green product CI,
+  and protected-branch configuration.
 - Explicit inventories add review friction and make undeclared scope visible.
 - Product-specific canaries remain necessary; the ownership gate does not
   overclaim exhaustive source analysis.
@@ -143,7 +144,7 @@ expiry, and shrink-only review.
 - Known-bad tests cover duplicate ownership, owner/adapter overlap, owner not in
   writer set, missing paths/interfaces, URL/branch/status drift, `Any`, missing
   and bare annotations, and mutable dataclass/Pydantic records.
-- The checked-in candidate profile uses the production engine; CI has no second
+- The checked-in required profile uses the production engine; CI has no second
   decision path.
 - A temporary removal of duplicate-resource detection makes its canary fail.
 - Product activation requires local profile, CI job, required-check readback,
@@ -151,3 +152,11 @@ expiry, and shrink-only review.
 - Governance CI exercises the same composite action products consume, so a
   broken distribution adapter cannot hide behind direct engine tests.
 - Future rules require their own stable findings and sabotage proof.
+
+## Acceptance record
+
+On 2026-08-03, Michael Ayoade explicitly approved activation after the product
+source-identity hardening was merged in Governance PR 10. This amendment makes
+the local profile required and this ADR effective when the acceptance change
+reaches canonical `main`. Agent-authored code and records remain distinct from
+the named human approval recorded here.

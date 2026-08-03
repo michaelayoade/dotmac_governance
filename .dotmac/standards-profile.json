@@ -8,9 +8,9 @@
   "governance_model": {
     "kind": "local",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
-    "status": "proposed"
+    "status": "accepted"
   },
-  "enforcement_mode": "candidate",
+  "enforcement_mode": "required",
   "authorities": [
     {
       "authority_id": "cross-repository-engineering-conformance",

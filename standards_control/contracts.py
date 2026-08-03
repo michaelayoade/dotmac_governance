@@ -14,6 +14,7 @@ SurfaceId = NewType("SurfaceId", str)
 CanonicalRepository = NewType("CanonicalRepository", str)
 BranchName = NewType("BranchName", str)
 PythonSymbol = NewType("PythonSymbol", str)
+GitRevision = NewType("GitRevision", str)
 
 
 class Severity(str, Enum):
@@ -30,6 +31,11 @@ class EnforcementMode(str, Enum):
     REQUIRED = "required"
 
 
+class GovernanceSourceKind(str, Enum):
+    LOCAL = "local"
+    PINNED = "pinned"
+
+
 class DiagnosticCode(str, Enum):
     PROFILE_INVALID = "profile.invalid"
     REPOSITORY_IDENTITY_UNAVAILABLE = "repository.identity.unavailable"
@@ -39,6 +45,12 @@ class DiagnosticCode(str, Enum):
     GOVERNANCE_SOURCE_MISSING = "governance.source.missing"
     GOVERNANCE_SOURCE_STATUS_MISSING = "governance.source.status-missing"
     GOVERNANCE_SOURCE_STATUS_MISMATCH = "governance.source.status-mismatch"
+    GOVERNANCE_ROOT_UNAVAILABLE = "governance.root.unavailable"
+    GOVERNANCE_LOCAL_SOURCE_FORBIDDEN = "governance.local-source.forbidden"
+    GOVERNANCE_REPOSITORY_UNAVAILABLE = "governance.repository.unavailable"
+    GOVERNANCE_REPOSITORY_MISMATCH = "governance.repository.mismatch"
+    GOVERNANCE_REVISION_UNAVAILABLE = "governance.revision.unavailable"
+    GOVERNANCE_REVISION_MISMATCH = "governance.revision.mismatch"
     AUTHORITY_RESOURCE_DUPLICATE = "authority.resource.duplicate"
     AUTHORITY_PATH_MISSING = "authority.path.missing"
     AUTHORITY_INTERFACE_MISSING = "authority.interface.missing"
@@ -59,9 +71,22 @@ class RepositoryContract:
 
 
 @dataclass(frozen=True)
-class GovernanceModelRef:
+class LocalGovernanceModelRef:
+    kind: GovernanceSourceKind
     source: PurePosixPath
     status: GovernanceStatus
+
+
+@dataclass(frozen=True)
+class PinnedGovernanceModelRef:
+    kind: GovernanceSourceKind
+    canonical_url: CanonicalRepository
+    revision: GitRevision
+    source: PurePosixPath
+    status: GovernanceStatus
+
+
+GovernanceModelRef = LocalGovernanceModelRef | PinnedGovernanceModelRef
 
 
 @dataclass(frozen=True)

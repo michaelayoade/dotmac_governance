@@ -65,6 +65,15 @@ default branch, governing ADR/status, enforcement mode, protected authorities,
 and exact typed contract surfaces. CI passes the trusted repository default
 branch from event metadata; local checks use `origin/HEAD` when available.
 
+Schema version 2 has two closed governance-source variants. `local` is admitted
+only when the evaluated repository is the canonical `dotmac_governance`
+control plane. Every product uses `pinned`, naming that canonical repository,
+an exact lower-case 40-character Git revision, the ADR path, and status. The
+composite action reports its actual `github.action_repository` and
+`github.action_ref` plus its source root; missing or mismatched identity fails.
+A product cannot authenticate copied policy prose from its own tree, another
+repository, or a mutable Governance branch/tag.
+
 `candidate` proves internal consistency but is not normative. `required` is
 representable only with an `Accepted` checked-in governance source. A green
 candidate is never described as activated policy or compliance.
@@ -109,7 +118,7 @@ reusable defaults.
 
 A rule is extracted only with the same contract, a named owner, a migration
 path, and a detector that fails under sabotage. Similarity is insufficient.
-Schema version 1 has no waiver field. A future waiver mechanism requires a
+Schema version 2 has no waiver field. A future waiver mechanism requires a
 separate accepted decision and at least a named owner, Issue, scope, rationale,
 expiry, and shrink-only review.
 

@@ -11,10 +11,16 @@ from standards_control.contracts import (
     CanonicalRepository,
     ConformanceReport,
     DiagnosticCode,
+    GitRevision,
 )
 from standards_control.engine import verify_repository
 
-REPOSITORY = CanonicalRepository("https://github.com/michaelayoade/example")
+REPOSITORY = CanonicalRepository("https://github.com/michaelayoade/dotmac_governance")
+PRODUCT_REPOSITORY = CanonicalRepository("https://github.com/michaelayoade/example")
+GOVERNANCE_REPOSITORY = CanonicalRepository(
+    "https://github.com/michaelayoade/dotmac_governance"
+)
+GOVERNANCE_REVISION = GitRevision("a" * 40)
 ROOT = Path(__file__).resolve().parent.parent
 GOOD_CONTRACT = """\
 from dataclasses import dataclass
@@ -28,10 +34,14 @@ def serialize(value: Envelope) -> str:
 
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
-        "governance_model": {"source": "docs/adr/0006.md", "status": "proposed"},
+        "governance_model": {
+            "kind": "local",
+            "source": "docs/adr/0006.md",
+            "status": "proposed",
+        },
         "enforcement_mode": "candidate",
         "authorities": [
             {
@@ -114,6 +124,45 @@ class StandardsTests(unittest.TestCase):
     def assert_code(self, report: ConformanceReport, code: DiagnosticCode) -> None:
         self.assertIn(code, {item.code for item in report.diagnostics})
 
+    def evaluate_pinned(
+        self,
+        *,
+        governance_root: bool = True,
+        repository: CanonicalRepository | None = GOVERNANCE_REPOSITORY,
+        revision: GitRevision | None = GOVERNANCE_REVISION,
+        source_status: str = "Accepted",
+        model_repository: str = ("https://github.com/michaelayoade/dotmac_governance"),
+    ) -> ConformanceReport:
+        value = profile()
+        repository_contract = value["repository"]
+        assert isinstance(repository_contract, dict)
+        repository_contract["canonical_url"] = PRODUCT_REPOSITORY
+        value["governance_model"] = {
+            "kind": "pinned",
+            "canonical_url": model_repository,
+            "revision": "a" * 40,
+            "source": "docs/adr/0006.md",
+            "status": "accepted",
+        }
+        value["enforcement_mode"] = "required"
+        with tempfile.TemporaryDirectory() as product_directory:
+            with tempfile.TemporaryDirectory() as governance_directory:
+                product = Path(product_directory)
+                governance = Path(governance_directory)
+                path = Fixture(product).write(value)
+                source = governance / "docs/adr/0006.md"
+                source.parent.mkdir(parents=True)
+                source.write_text(f"- Status: {source_status}\n", encoding="utf-8")
+                return verify_repository(
+                    product,
+                    path,
+                    observed_repository=PRODUCT_REPOSITORY,
+                    observed_default_branch=BranchName("main"),
+                    governance_root=governance if governance_root else None,
+                    observed_governance_repository=repository,
+                    observed_governance_revision=revision,
+                )
+
     def authority(self, value: dict[str, object]) -> dict[str, object]:
         authorities = value["authorities"]
         assert isinstance(authorities, list)
@@ -130,7 +179,7 @@ class StandardsTests(unittest.TestCase):
         self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
 
     def test_schema_version_rejects_boolean_and_float_aliases(self) -> None:
-        for invalid in (True, 1.0):
+        for invalid in (True, 1.0, 1):
             with self.subTest(invalid=invalid):
                 value = profile()
                 value["schema_version"] = invalid
@@ -175,6 +224,71 @@ class StandardsTests(unittest.TestCase):
     def test_governance_status_is_enforced(self) -> None:
         self.assert_code(
             self.evaluate(status="Accepted"),
+            DiagnosticCode.GOVERNANCE_SOURCE_STATUS_MISMATCH,
+        )
+
+    def test_product_cannot_claim_a_local_governance_source(self) -> None:
+        value = profile()
+        repository = value["repository"]
+        assert isinstance(repository, dict)
+        repository["canonical_url"] = PRODUCT_REPOSITORY
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = Fixture(root).write(value)
+            report = verify_repository(
+                root,
+                path,
+                observed_repository=PRODUCT_REPOSITORY,
+                observed_default_branch=BranchName("main"),
+            )
+        self.assert_code(report, DiagnosticCode.GOVERNANCE_LOCAL_SOURCE_FORBIDDEN)
+
+    def test_pinned_governance_source_passes_with_exact_identity(self) -> None:
+        self.assertTrue(self.evaluate_pinned().conforms)
+
+    def test_pinned_governance_root_is_required(self) -> None:
+        self.assert_code(
+            self.evaluate_pinned(governance_root=False),
+            DiagnosticCode.GOVERNANCE_ROOT_UNAVAILABLE,
+        )
+
+    def test_pinned_governance_repository_is_required_and_exact(self) -> None:
+        cases = (
+            (None, DiagnosticCode.GOVERNANCE_REPOSITORY_UNAVAILABLE),
+            (
+                CanonicalRepository("https://github.com/michaelayoade/other"),
+                DiagnosticCode.GOVERNANCE_REPOSITORY_MISMATCH,
+            ),
+        )
+        for repository, code in cases:
+            with self.subTest(code=code):
+                self.assert_code(
+                    self.evaluate_pinned(repository=repository),
+                    code,
+                )
+
+    def test_pinned_governance_revision_is_required_and_exact(self) -> None:
+        cases = (
+            (None, DiagnosticCode.GOVERNANCE_REVISION_UNAVAILABLE),
+            (GitRevision("b" * 40), DiagnosticCode.GOVERNANCE_REVISION_MISMATCH),
+        )
+        for revision, code in cases:
+            with self.subTest(code=code):
+                self.assert_code(self.evaluate_pinned(revision=revision), code)
+
+    def test_pinned_profile_cannot_select_an_alternate_policy_owner(self) -> None:
+        alternate = "https://github.com/michaelayoade/other"
+        self.assert_code(
+            self.evaluate_pinned(
+                repository=CanonicalRepository(alternate),
+                model_repository=alternate,
+            ),
+            DiagnosticCode.GOVERNANCE_REPOSITORY_MISMATCH,
+        )
+
+    def test_pinned_governance_status_comes_from_governance_root(self) -> None:
+        self.assert_code(
+            self.evaluate_pinned(source_status="Proposed"),
             DiagnosticCode.GOVERNANCE_SOURCE_STATUS_MISMATCH,
         )
 
@@ -296,6 +410,9 @@ class StandardsTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/governance-checks.yml").read_text()
 
         self.assertIn("tools/dotmac-standards", action)
+        self.assertIn("github.action_repository", action)
+        self.assertIn("github.action_ref", action)
+        self.assertIn("--governance-root", action)
         self.assertIn("uses: ./.github/actions/standards-check", workflow)
         self.assertIn("github.event.repository.default_branch", workflow)
         self.assertNotIn("token:", action.lower())

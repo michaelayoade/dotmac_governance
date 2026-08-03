@@ -1,11 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profile_id": "dotmac-governance-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
     "default_branch": "main"
   },
   "governance_model": {
+    "kind": "local",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
     "status": "proposed"
   },

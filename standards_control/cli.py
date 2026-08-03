@@ -7,7 +7,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from .contracts import BranchName
+from .contracts import BranchName, CanonicalRepository, GitRevision
 from .engine import verify_repository
 
 
@@ -20,6 +20,9 @@ def _parser() -> argparse.ArgumentParser:
         "--profile", type=Path, default=Path(".dotmac/standards-profile.json")
     )
     verify.add_argument("--default-branch")
+    verify.add_argument("--governance-root", type=Path)
+    verify.add_argument("--governance-repository")
+    verify.add_argument("--governance-revision")
     verify.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
@@ -31,7 +34,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not profile.is_absolute():
         profile = root / profile
     branch = BranchName(arguments.default_branch) if arguments.default_branch else None
-    report = verify_repository(root, profile, observed_default_branch=branch)
+    governance_repository = None
+    if arguments.governance_repository:
+        raw_repository = arguments.governance_repository
+        if "://" not in raw_repository:
+            raw_repository = f"https://github.com/{raw_repository}"
+        governance_repository = CanonicalRepository(raw_repository.removesuffix(".git"))
+    governance_revision = (
+        GitRevision(arguments.governance_revision)
+        if arguments.governance_revision
+        else None
+    )
+    governance_root = (
+        arguments.governance_root.resolve()
+        if arguments.governance_root is not None
+        else None
+    )
+    report = verify_repository(
+        root,
+        profile,
+        observed_default_branch=branch,
+        governance_root=governance_root,
+        observed_governance_repository=governance_repository,
+        observed_governance_revision=governance_revision,
+    )
     if arguments.format == "json":
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     else:

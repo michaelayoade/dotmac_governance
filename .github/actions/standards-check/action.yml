@@ -1,0 +1,36 @@
+name: Dotmac engineering standards
+description: Run the one Governance-owned repository conformance engine.
+
+inputs:
+  root:
+    description: Repository root to evaluate.
+    required: false
+    default: .
+  profile:
+    description: Standards profile relative to the repository root.
+    required: false
+    default: .dotmac/standards-profile.json
+  default-branch:
+    description: Trusted default branch from repository event metadata.
+    required: true
+  output-format:
+    description: Conformance report format (text or json).
+    required: false
+    default: text
+
+runs:
+  using: composite
+  steps:
+    - name: Verify repository engineering standards
+      shell: bash
+      env:
+        DOTMAC_STANDARDS_ROOT: ${{ inputs.root }}
+        DOTMAC_STANDARDS_PROFILE: ${{ inputs.profile }}
+        DOTMAC_STANDARDS_DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        DOTMAC_STANDARDS_OUTPUT_FORMAT: ${{ inputs.output-format }}
+      run: |
+        python3 "${GITHUB_ACTION_PATH}/../../../tools/dotmac-standards" verify \
+          --root "${DOTMAC_STANDARDS_ROOT}" \
+          --profile "${DOTMAC_STANDARDS_PROFILE}" \
+          --default-branch "${DOTMAC_STANDARDS_DEFAULT_BRANCH}" \
+          --format "${DOTMAC_STANDARDS_OUTPUT_FORMAT}"

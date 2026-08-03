@@ -15,6 +15,8 @@
 - [ ] No secret values; only paths or OpenBao references
 - [ ] Any new ADR has a unique number and a valid `Status`
 - [ ] Any agent profile change passes `python3 -m agent_control verify`
+- [ ] Any standards profile passes `python3 -m standards_control verify`;
+      Proposed governance remains `candidate`, never `required`
 - [ ] Any managed policy or endpoint change passes strict typing, known-bad
       deployment tests, and reviewed staging; no bundle contains a credential
       value

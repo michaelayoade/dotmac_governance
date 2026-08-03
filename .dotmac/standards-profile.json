@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "profile_id": "dotmac-governance-engineering-standards",
+  "repository": {
+    "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
+    "default_branch": "main"
+  },
+  "governance_model": {
+    "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
+    "status": "proposed"
+  },
+  "enforcement_mode": "candidate",
+  "authorities": [
+    {
+      "authority_id": "cross-repository-engineering-conformance",
+      "subject": "Cross-repository engineering policy decisions and conformance evaluation.",
+      "protected_resources": [
+        "engineering-conformance-policy",
+        "engineering-conformance-diagnostics",
+        "repository-standards-profile"
+      ],
+      "owner_component": "standards-control",
+      "owner_implementation": "standards_control/engine.py",
+      "decision_interface": "standards_control.engine.verify_repository",
+      "canonical_writer_paths": ["standards_control/engine.py"],
+      "adapter_paths": [
+        ".github/actions/standards-check/action.yml",
+        "standards_control/cli.py",
+        "standards_control/profile.py",
+        "tools/dotmac-standards"
+      ],
+      "drift_test_paths": ["tests/test_standards_control.py"]
+    }
+  ],
+  "typed_contract_surfaces": [
+    {
+      "surface_id": "standards-control-contracts",
+      "paths": ["standards_control/contracts.py"],
+      "require_public_annotations": true,
+      "forbid_any": true,
+      "require_immutable_records": true
+    }
+  ]
+}

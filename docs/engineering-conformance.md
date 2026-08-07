@@ -4,11 +4,47 @@
 checked-in Governance profile is `required`; a green run is conformance
 evidence for the evaluated revision, not a certification or compliance claim.
 
-Each strict schema-version-2 profile names repository URL/default branch, its
+Each strict schema-version-3 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
-tests, and exact Python contract surfaces. The typed gate rejects `Any`, missing
-or bare public annotations, unannotated record fields, and mutable boundary
-records. Schema version 2 has no waiver mechanism.
+tests, exact Python contract surfaces, and its module-declared vocabularies. The
+typed gate rejects `Any`, missing or bare public annotations, unannotated record
+fields, and mutable boundary records. Schema version 3 has no waiver mechanism.
+
+## Module-declared vocabularies (ADR 0007)
+
+A vocabulary whose members belong to modules is declared by those modules and
+validated by a registry; the layer that hosts it never enumerates the members,
+and the backing column is never pinned to a fixed member list. Each
+`module_declared_vocabularies` entry names the member type, the registry symbol
+that validates a member, the manifest field a module declares members on, and
+the persisted column:
+
+```json
+{
+  "vocabulary_id": "setting-domain",
+  "subject": "Setting domains a module owns.",
+  "member_type": "SettingDomain",
+  "member_type_path": "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py",
+  "registry_interface": "dotmac_kernel.setting_domains.SettingDomainRegistry",
+  "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/setting_domains.py",
+  "declaration_field": "setting_domains",
+  "declaration_paths": [
+    "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+    "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+  ],
+  "storage_column": "domain",
+  "storage_paths": ["packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"]
+}
+```
+
+The engine reads syntax and never imports product code. It reports
+`vocabulary.member-type.closed` when the member type subclasses an enum,
+`vocabulary.registry.missing` when nothing validates a member,
+`vocabulary.declaration.missing` when no manifest carries the declaration field,
+and `vocabulary.storage.closed` when a database enum type or a `CheckConstraint`
+with a literal `IN (...)` list re-closes the column. An empty array is legal and
+means the repository hosts no such vocabulary — a claim reviewed in the profile
+diff, since the engine evaluates declarations rather than discovering them.
 
 `owner_implementation` is repository-relative while `decision_interface` is an
 importable Python symbol. Flat layouts map directly; for a standard `src`
@@ -67,5 +103,8 @@ A product profile's governance reference therefore has this shape:
 
 Product rollout is inventory, candidate profile, local repairs with sabotage
 proofs, accepted governance plus required mode, green CI merge, then protected
-branch read-modify-write and independent readback. Git and product CI remain
+branch read-modify-write and independent readback. A product repins to the
+accepted revision carrying ADR 0007 and moves its profile to schema version 3 in
+the same change; a product pinned to an earlier revision is unaffected until it
+repins. Git and product CI remain
 authoritative; Knowledge may index only source pointers and structured results.

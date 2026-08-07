@@ -18,6 +18,7 @@ from .contracts import (
     GovernanceSourceKind,
     GovernanceStatus,
     LocalGovernanceModelRef,
+    ModuleDeclaredVocabulary,
     PinnedGovernanceModelRef,
     ProfileId,
     PythonSymbol,
@@ -26,6 +27,7 @@ from .contracts import (
     StandardsProfile,
     SurfaceId,
     TypedContractSurface,
+    VocabularyId,
 )
 
 SLUG = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
@@ -33,6 +35,7 @@ BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
 HTTPS_REPOSITORY = re.compile(r"^https://[^/\s]+/[^/\s]+/[^/\s]+$")
 PYTHON_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
+IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ProfileError(ValueError):
@@ -241,6 +244,62 @@ def _surface(value: object, index: int) -> TypedContractSurface:
     )
 
 
+def _identifier(value: object, location: str) -> str:
+    raw = _string(value, location)
+    if not IDENTIFIER.fullmatch(raw):
+        raise ProfileError(f"{location} must be a Python identifier")
+    return raw
+
+
+def _vocabulary(value: object, index: int) -> ModuleDeclaredVocabulary:
+    location = f"module_declared_vocabularies[{index}]"
+    data = _object(value, location)
+    required = frozenset(
+        {
+            "vocabulary_id",
+            "subject",
+            "member_type",
+            "member_type_path",
+            "registry_interface",
+            "registry_implementation",
+            "declaration_field",
+            "declaration_paths",
+            "storage_column",
+            "storage_paths",
+        }
+    )
+    _keys(data, required, location)
+    interface = _string(data["registry_interface"], f"{location}.registry_interface")
+    if not PYTHON_SYMBOL.fullmatch(interface):
+        raise ProfileError(f"{location}.registry_interface must be a dotted symbol")
+    declarations = _paths(data["declaration_paths"], f"{location}.declaration_paths")
+    storage = _paths(data["storage_paths"], f"{location}.storage_paths")
+    if not declarations or not storage:
+        raise ProfileError(f"{location} needs declaration and storage paths")
+    return ModuleDeclaredVocabulary(
+        vocabulary_id=VocabularyId(
+            _slug(data["vocabulary_id"], f"{location}.vocabulary_id")
+        ),
+        subject=_string(data["subject"], f"{location}.subject"),
+        member_type=_identifier(data["member_type"], f"{location}.member_type"),
+        member_type_path=_path(
+            data["member_type_path"], f"{location}.member_type_path"
+        ),
+        registry_interface=PythonSymbol(interface),
+        registry_implementation=_path(
+            data["registry_implementation"], f"{location}.registry_implementation"
+        ),
+        declaration_field=_identifier(
+            data["declaration_field"], f"{location}.declaration_field"
+        ),
+        declaration_paths=declarations,
+        storage_column=_identifier(
+            data["storage_column"], f"{location}.storage_column"
+        ),
+        storage_paths=storage,
+    )
+
+
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
@@ -255,13 +314,14 @@ def parse_profile(value: object) -> StandardsProfile:
                 "enforcement_mode",
                 "authorities",
                 "typed_contract_surfaces",
+                "module_declared_vocabularies",
             }
         ),
         "profile",
     )
     version = data["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version != 2:
-        raise ProfileError("schema_version must be integer 2")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 3:
+        raise ProfileError("schema_version must be integer 3")
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -283,20 +343,31 @@ def parse_profile(value: object) -> StandardsProfile:
             _sequence(data["typed_contract_surfaces"], "typed_contract_surfaces")
         )
     )
+    vocabularies = tuple(
+        _vocabulary(item, index)
+        for index, item in enumerate(
+            _sequence(
+                data["module_declared_vocabularies"], "module_declared_vocabularies"
+            )
+        )
+    )
     if not authorities or not surfaces:
         raise ProfileError("authorities and typed_contract_surfaces must not be empty")
     if len({item.authority_id for item in authorities}) != len(authorities):
         raise ProfileError("authority_id values must be unique")
     if len({item.surface_id for item in surfaces}) != len(surfaces):
         raise ProfileError("surface_id values must be unique")
+    if len({item.vocabulary_id for item in vocabularies}) != len(vocabularies):
+        raise ProfileError("vocabulary_id values must be unique")
     return StandardsProfile(
-        schema_version=2,
+        schema_version=3,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,
         enforcement_mode=mode,
         authorities=authorities,
         typed_contract_surfaces=surfaces,
+        module_declared_vocabularies=vocabularies,
     )
 
 

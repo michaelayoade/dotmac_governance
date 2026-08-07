@@ -30,11 +30,65 @@ class Envelope:
 def serialize(value: Envelope) -> str:
     return value.payload
 """
+OPEN_MEMBER_TYPE = """\
+class Topic(str):
+    __slots__ = ()
+"""
+CLOSED_MEMBER_TYPE = """\
+import enum
+class Topic(str, enum.Enum):
+    alpha = "alpha"
+"""
+REGISTRY = """\
+class TopicRegistry:
+    def require(self, topic: str) -> str:
+        return topic
+"""
+MANIFEST = """\
+from dataclasses import dataclass, field
+@dataclass(frozen=True)
+class Manifest:
+    topics: tuple[str, ...] = field(default_factory=tuple)
+"""
+OPEN_STORAGE = """\
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+class Row:
+    topic: Mapped[str] = mapped_column(String(120), nullable=False)
+"""
+CLOSED_STORAGE_ENUM = """\
+import sqlalchemy as sa
+from sqlalchemy.orm import Mapped, mapped_column
+class Row:
+    topic: Mapped[str] = mapped_column(sa.Enum("alpha", name="ck_topic"))
+"""
+CLOSED_STORAGE_CHECK = """\
+from sqlalchemy import CheckConstraint, String
+from sqlalchemy.orm import Mapped, mapped_column
+class Row:
+    __table_args__ = (CheckConstraint("topic IN ('alpha')", name="ck_topic"),)
+    topic: Mapped[str] = mapped_column(String(120), nullable=False)
+"""
+
+
+def vocabulary() -> dict[str, object]:
+    return {
+        "vocabulary_id": "topic",
+        "subject": "Topics a module owns.",
+        "member_type": "Topic",
+        "member_type_path": "example/member.py",
+        "registry_interface": "example.registry.TopicRegistry",
+        "registry_implementation": "example/registry.py",
+        "declaration_field": "topics",
+        "declaration_paths": ["example/manifest.py"],
+        "storage_column": "topic",
+        "storage_paths": ["example/models.py"],
+    }
 
 
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
         "governance_model": {
@@ -65,6 +119,7 @@ def profile() -> dict[str, object]:
                 "require_immutable_records": True,
             }
         ],
+        "module_declared_vocabularies": [vocabulary()],
     }
 
 
@@ -79,6 +134,9 @@ class Fixture:
         contract: str = GOOD_CONTRACT,
         owner: str = "def decide() -> bool:\n    return True\n",
         status: str = "Proposed",
+        member: str = OPEN_MEMBER_TYPE,
+        manifest: str = MANIFEST,
+        storage: str = OPEN_STORAGE,
     ) -> Path:
         profile_path = self.root / ".dotmac/standards-profile.json"
         files = {
@@ -89,6 +147,10 @@ class Fixture:
             self.root / "example/contracts.py": contract,
             self.root
             / "tests/test_example.py": "def test_drift() -> None:\n    assert True\n",
+            self.root / "example/member.py": member,
+            self.root / "example/registry.py": REGISTRY,
+            self.root / "example/manifest.py": manifest,
+            self.root / "example/models.py": storage,
         }
         for path, body in files.items():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +167,9 @@ class StandardsTests(unittest.TestCase):
         owner: str = "def decide() -> bool:\n    return True\n",
         status: str = "Proposed",
         branch: str = "main",
+        member: str = OPEN_MEMBER_TYPE,
+        manifest: str = MANIFEST,
+        storage: str = OPEN_STORAGE,
     ) -> ConformanceReport:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -113,6 +178,9 @@ class StandardsTests(unittest.TestCase):
                 contract=contract,
                 owner=owner,
                 status=status,
+                member=member,
+                manifest=manifest,
+                storage=storage,
             )
             return verify_repository(
                 root,
@@ -469,3 +537,91 @@ class StandardsTests(unittest.TestCase):
         self.assertIn("github.event.repository.default_branch", workflow)
         self.assertNotIn("token:", action.lower())
         self.assertNotIn("secret", action.lower())
+
+    # ── Module-declared vocabularies (ADR 0007) ─────────────────────────────
+    #
+    # One sabotage proof per diagnostic code. Each plants exactly one violation
+    # against an otherwise-conformant fixture, so a check that stops firing is a
+    # failing test rather than a silently vacuous one.
+
+    def test_open_vocabulary_passes(self) -> None:
+        """Positive control: the fixture is conformant, so every negative case
+        below is attributable to the one thing it changes."""
+        report = self.evaluate()
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_enumerated_member_type_fails(self) -> None:
+        report = self.evaluate(member=CLOSED_MEMBER_TYPE)
+        self.assert_code(report, DiagnosticCode.VOCABULARY_MEMBER_TYPE_CLOSED)
+
+    def test_absent_member_type_fails(self) -> None:
+        report = self.evaluate(member="class Other(str):\n    __slots__ = ()\n")
+        self.assert_code(report, DiagnosticCode.VOCABULARY_MEMBER_TYPE_MISSING)
+
+    def test_absent_registry_interface_fails(self) -> None:
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["registry_interface"] = "example.registry.AbsentRegistry"
+        self.assert_code(
+            self.evaluate(value), DiagnosticCode.VOCABULARY_REGISTRY_MISSING
+        )
+
+    def test_missing_declaration_field_fails(self) -> None:
+        """A vocabulary nothing can be declared on is not a vocabulary."""
+        report = self.evaluate(
+            manifest=(
+                "from dataclasses import dataclass\n"
+                "@dataclass(frozen=True)\n"
+                "class Manifest:\n"
+                "    name: str\n"
+            )
+        )
+        self.assert_code(report, DiagnosticCode.VOCABULARY_DECLARATION_MISSING)
+
+    def test_database_enum_storage_fails(self) -> None:
+        report = self.evaluate(storage=CLOSED_STORAGE_ENUM)
+        self.assert_code(report, DiagnosticCode.VOCABULARY_STORAGE_CLOSED)
+
+    def test_check_constraint_storage_fails(self) -> None:
+        """A CHECK naming the column with a literal IN list re-closes exactly
+        what the open member type opened."""
+        report = self.evaluate(storage=CLOSED_STORAGE_CHECK)
+        self.assert_code(report, DiagnosticCode.VOCABULARY_STORAGE_CLOSED)
+
+    def test_missing_vocabulary_path_fails(self) -> None:
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["member_type_path"] = "example/absent.py"
+        self.assert_code(self.evaluate(value), DiagnosticCode.VOCABULARY_PATH_MISSING)
+
+    def test_unparseable_vocabulary_path_fails(self) -> None:
+        report = self.evaluate(member="class Topic(str)\n")
+        self.assert_code(report, DiagnosticCode.VOCABULARY_SYNTAX_INVALID)
+
+    def test_no_declared_vocabulary_is_legal_and_checks_nothing(self) -> None:
+        """An empty list is a claim, not an error — see ADR 0007's drift note on
+        what the engine does and does not detect."""
+        value = profile()
+        value["module_declared_vocabularies"] = []
+        report = self.evaluate(value, member=CLOSED_MEMBER_TYPE)
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_duplicate_vocabulary_id_is_rejected(self) -> None:
+        value = profile()
+        value["module_declared_vocabularies"] = [vocabulary(), vocabulary()]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_schema_version_two_profiles_are_rejected(self) -> None:
+        """Version 3 is a closed contract, not an additive one: a profile that
+        predates the vocabulary family must be migrated, not silently accepted
+        with the new rule family switched off."""
+        value = profile()
+        value["schema_version"] = 2
+        del value["module_declared_vocabularies"]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)

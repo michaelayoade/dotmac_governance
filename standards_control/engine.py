@@ -16,6 +16,7 @@ from .contracts import (
     Diagnostic,
     DiagnosticCode,
     GitRevision,
+    ModuleDeclaredVocabulary,
     PinnedGovernanceModelRef,
     Severity,
     StandardsProfile,
@@ -30,6 +31,12 @@ BARE_CONTAINERS = frozenset(
 CONTROL_PLANE_REPOSITORY = CanonicalRepository(
     "https://github.com/michaelayoade/dotmac_governance"
 )
+# Base names that make a class a CLOSED vocabulary: its members are fixed at the
+# hosting layer's source, which is exactly what a module-declared vocabulary
+# must not be. Matched on the terminal name, so `enum.Enum` and `Enum` both hit.
+CLOSED_MEMBER_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"})
+# Callables that pin a database column to a fixed member list.
+CLOSED_STORAGE_CALLS = frozenset({"Enum", "ENUM"})
 
 
 def _finding(
@@ -376,6 +383,160 @@ def _pydantic_frozen(node: ast.ClassDef) -> bool:
     return False
 
 
+def _parse(root: Path, relative: PurePosixPath) -> ast.Module | Diagnostic:
+    source = root / relative
+    if not source.is_file():
+        return _finding(
+            DiagnosticCode.VOCABULARY_PATH_MISSING,
+            "declared vocabulary path is missing",
+            path=relative,
+        )
+    try:
+        return ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    except (OSError, UnicodeError, SyntaxError) as error:
+        return _finding(
+            DiagnosticCode.VOCABULARY_SYNTAX_INVALID,
+            "declared vocabulary path is not valid UTF-8 Python",
+            path=relative,
+            line=error.lineno if isinstance(error, SyntaxError) else None,
+        )
+
+
+def _annotated_field(tree: ast.Module, field: str) -> bool:
+    """True when some class in `tree` annotates `field` — the declaration slot."""
+    return any(
+        isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == field
+        for klass in ast.walk(tree)
+        if isinstance(klass, ast.ClassDef)
+        for node in klass.body
+    )
+
+
+def _closed_storage(tree: ast.Module, column: str) -> int | None:
+    """Line of a column definition that pins `column` to a fixed member list.
+
+    Two shapes close a column: a database enum type (`Enum(...)`/`ENUM(...)`
+    anywhere in the column expression) and a CHECK constraint naming the column
+    with a literal `IN (...)` list. Both re-impose the closed set the registry
+    exists to open, and both cost the hosting layer a migration per consumer.
+    """
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == column
+            and node.value is not None
+        ):
+            for child in ast.walk(node.value):
+                if isinstance(child, ast.Call) and _name(child.func) in (
+                    CLOSED_STORAGE_CALLS
+                ):
+                    return child.lineno
+        # Only inside a CheckConstraint call, never any string that happens to
+        # contain the phrase: a docstring explaining the rule must not trip it.
+        if isinstance(node, ast.Call) and _name(node.func) == "CheckConstraint":
+            for child in ast.walk(node):
+                if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                    text = " ".join(child.value.split()).lower()
+                    if f"{column.lower()} in (" in text:
+                        return child.lineno
+    return None
+
+
+def _vocabulary(root: Path, vocabulary: ModuleDeclaredVocabulary) -> list[Diagnostic]:
+    """One module-declared vocabulary is open, registered, and unpinned.
+
+    The three failures this catches are the three ways the rule is broken in
+    practice: the member type is an enum again; nothing validates a member; the
+    column re-closes what the type opened.
+    """
+    findings: list[Diagnostic] = []
+    identifier = str(vocabulary.vocabulary_id)
+
+    member_tree = _parse(root, vocabulary.member_type_path)
+    if isinstance(member_tree, Diagnostic):
+        findings.append(member_tree)
+    else:
+        declared = [
+            node
+            for node in ast.walk(member_tree)
+            if isinstance(node, ast.ClassDef) and node.name == vocabulary.member_type
+        ]
+        if not declared:
+            findings.append(
+                _finding(
+                    DiagnosticCode.VOCABULARY_MEMBER_TYPE_MISSING,
+                    f"member type for {identifier!r} is absent from its declared path",
+                    path=vocabulary.member_type_path,
+                )
+            )
+        for node in declared:
+            if any(_name(base) in CLOSED_MEMBER_BASES for base in node.bases):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.VOCABULARY_MEMBER_TYPE_CLOSED,
+                        f"member type for {identifier!r} enumerates its members; a "
+                        "module-declared vocabulary is an open registered value",
+                        path=vocabulary.member_type_path,
+                        line=node.lineno,
+                    )
+                )
+
+    registry_tree = _parse(root, vocabulary.registry_implementation)
+    if isinstance(registry_tree, Diagnostic):
+        findings.append(registry_tree)
+    else:
+        module, _, symbol = str(vocabulary.registry_interface).rpartition(".")
+        expected = _implementation_modules(vocabulary.registry_implementation)
+        if module not in expected or symbol not in _symbols(
+            root / vocabulary.registry_implementation
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.VOCABULARY_REGISTRY_MISSING,
+                    f"registry interface for {identifier!r} is absent from its "
+                    "declared implementation",
+                    path=vocabulary.registry_implementation,
+                )
+            )
+
+    for relative in vocabulary.declaration_paths:
+        tree = _parse(root, relative)
+        if isinstance(tree, Diagnostic):
+            findings.append(tree)
+        elif not _annotated_field(tree, vocabulary.declaration_field):
+            findings.append(
+                _finding(
+                    DiagnosticCode.VOCABULARY_DECLARATION_MISSING,
+                    f"{vocabulary.declaration_field!r} is not a declared field here, "
+                    f"so a module cannot declare a member of {identifier!r}",
+                    path=relative,
+                )
+            )
+
+    for relative in vocabulary.storage_paths:
+        tree = _parse(root, relative)
+        if isinstance(tree, Diagnostic):
+            findings.append(tree)
+            continue
+        line = _closed_storage(tree, vocabulary.storage_column)
+        if line is not None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.VOCABULARY_STORAGE_CLOSED,
+                    f"storage for {identifier!r} pins {vocabulary.storage_column!r} "
+                    "to a fixed member list; the write boundary is the enforcement "
+                    "point, not the column",
+                    path=relative,
+                    line=line,
+                )
+            )
+
+    return findings
+
+
 def _typed(root: Path, surface: TypedContractSurface) -> list[Diagnostic]:
     findings: list[Diagnostic] = []
     for relative in surface.paths:
@@ -548,6 +709,8 @@ def verify_repository(
     findings.extend(_authorities(root, profile))
     for surface in profile.typed_contract_surfaces:
         findings.extend(_typed(root, surface))
+    for vocabulary in profile.module_declared_vocabularies:
+        findings.extend(_vocabulary(root, vocabulary))
     return ConformanceReport(
         profile.profile_id,
         profile.enforcement_mode,

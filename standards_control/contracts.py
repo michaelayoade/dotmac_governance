@@ -11,6 +11,7 @@ ProfileId = NewType("ProfileId", str)
 AuthorityId = NewType("AuthorityId", str)
 ResourceId = NewType("ResourceId", str)
 SurfaceId = NewType("SurfaceId", str)
+VocabularyId = NewType("VocabularyId", str)
 CanonicalRepository = NewType("CanonicalRepository", str)
 BranchName = NewType("BranchName", str)
 PythonSymbol = NewType("PythonSymbol", str)
@@ -62,6 +63,13 @@ class DiagnosticCode(str, Enum):
     CONTRACT_ANNOTATION_MISSING = "contract.annotation.missing"
     CONTRACT_BARE_CONTAINER = "contract.bare-container"
     CONTRACT_RECORD_MUTABLE = "contract.record.mutable"
+    VOCABULARY_PATH_MISSING = "vocabulary.path.missing"
+    VOCABULARY_SYNTAX_INVALID = "vocabulary.syntax.invalid"
+    VOCABULARY_MEMBER_TYPE_MISSING = "vocabulary.member-type.missing"
+    VOCABULARY_MEMBER_TYPE_CLOSED = "vocabulary.member-type.closed"
+    VOCABULARY_REGISTRY_MISSING = "vocabulary.registry.missing"
+    VOCABULARY_DECLARATION_MISSING = "vocabulary.declaration.missing"
+    VOCABULARY_STORAGE_CLOSED = "vocabulary.storage.closed"
 
 
 @dataclass(frozen=True)
@@ -112,6 +120,20 @@ class TypedContractSurface:
 
 
 @dataclass(frozen=True)
+class ModuleDeclaredVocabulary:
+    vocabulary_id: VocabularyId
+    subject: str
+    member_type: str
+    member_type_path: PurePosixPath
+    registry_interface: PythonSymbol
+    registry_implementation: PurePosixPath
+    declaration_field: str
+    declaration_paths: tuple[PurePosixPath, ...]
+    storage_column: str
+    storage_paths: tuple[PurePosixPath, ...]
+
+
+@dataclass(frozen=True)
 class StandardsProfile:
     schema_version: int
     profile_id: ProfileId
@@ -120,6 +142,7 @@ class StandardsProfile:
     enforcement_mode: EnforcementMode
     authorities: tuple[AuthorityContract, ...]
     typed_contract_surfaces: tuple[TypedContractSurface, ...]
+    module_declared_vocabularies: tuple[ModuleDeclaredVocabulary, ...]
 
 
 @dataclass(frozen=True)

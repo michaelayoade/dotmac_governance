@@ -70,6 +70,10 @@ class DiagnosticCode(str, Enum):
     VOCABULARY_REGISTRY_MISSING = "vocabulary.registry.missing"
     VOCABULARY_DECLARATION_MISSING = "vocabulary.declaration.missing"
     VOCABULARY_STORAGE_CLOSED = "vocabulary.storage.closed"
+    TESTING_KIT_PATH_MISSING = "testing-kit.path.missing"
+    TESTING_KIT_SYNTAX_INVALID = "testing-kit.syntax.invalid"
+    TESTING_KIT_IMPORT_FORBIDDEN = "testing-kit.import.forbidden"
+    TESTING_KIT_PROBE_COUNT_MISMATCH = "testing-kit.probe.count-mismatch"
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,19 @@ class ModuleDeclaredVocabulary:
 
 
 @dataclass(frozen=True)
+class ConformanceProbe:
+    path: PurePosixPath
+    expected_import_count: int
+
+
+@dataclass(frozen=True)
+class TestingKitBoundary:
+    test_roots: tuple[PurePosixPath, ...]
+    kit_source_roots: tuple[PurePosixPath, ...]
+    conformance_probes: tuple[ConformanceProbe, ...]
+
+
+@dataclass(frozen=True)
 class StandardsProfile:
     schema_version: int
     profile_id: ProfileId
@@ -143,6 +160,7 @@ class StandardsProfile:
     authorities: tuple[AuthorityContract, ...]
     typed_contract_surfaces: tuple[TypedContractSurface, ...]
     module_declared_vocabularies: tuple[ModuleDeclaredVocabulary, ...]
+    testing_kit_boundary: TestingKitBoundary
 
 
 @dataclass(frozen=True)

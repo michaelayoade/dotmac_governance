@@ -20,6 +20,7 @@ from .contracts import (
     PinnedGovernanceModelRef,
     Severity,
     StandardsProfile,
+    TestingKitBoundary,
     TypedContractSurface,
 )
 from .profile import ProfileError, load_profile
@@ -37,6 +38,7 @@ CONTROL_PLANE_REPOSITORY = CanonicalRepository(
 CLOSED_MEMBER_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"})
 # Callables that pin a database column to a fixed member list.
 CLOSED_STORAGE_CALLS = frozenset({"Enum", "ENUM"})
+TESTING_KIT_MODULE = "dotmac_kernel.testing"
 
 
 def _finding(
@@ -649,6 +651,149 @@ def _typed(root: Path, surface: TypedContractSurface) -> list[Diagnostic]:
     return findings
 
 
+def _testing_kit_import_lines(tree: ast.Module) -> tuple[int, ...]:
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == TESTING_KIT_MODULE or alias.name.startswith(
+                    f"{TESTING_KIT_MODULE}."
+                ):
+                    lines.append(node.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module == TESTING_KIT_MODULE or module.startswith(
+                f"{TESTING_KIT_MODULE}."
+            ):
+                lines.append(node.lineno)
+            elif module == "dotmac_kernel" and any(
+                alias.name == "testing" for alias in node.names
+            ):
+                lines.append(node.lineno)
+    return tuple(lines)
+
+
+def _repository_python_files(root: Path) -> tuple[PurePosixPath, ...]:
+    """Return repository Python sources, including untracked non-ignored files."""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*.py",
+            ],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        result = None
+    if result is not None and result.returncode == 0:
+        candidates = (PurePosixPath(raw) for raw in result.stdout.split("\0") if raw)
+    else:
+        candidates = (
+            PurePosixPath(path.relative_to(root).as_posix())
+            for path in root.rglob("*.py")
+        )
+    return tuple(
+        sorted(
+            {relative for relative in candidates if (root / relative).is_file()},
+            key=lambda path: path.as_posix(),
+        )
+    )
+
+
+def _inside(relative: PurePosixPath, roots: tuple[PurePosixPath, ...]) -> bool:
+    return any(relative == root or root in relative.parents for root in roots)
+
+
+def _testing_kit(root: Path, boundary: TestingKitBoundary) -> list[Diagnostic]:
+    findings: list[Diagnostic] = []
+    for relative in (*boundary.test_roots, *boundary.kit_source_roots):
+        if not (root / relative).is_dir():
+            findings.append(
+                _finding(
+                    DiagnosticCode.TESTING_KIT_PATH_MISSING,
+                    "declared testing-kit boundary root is missing",
+                    path=relative,
+                )
+            )
+    probe_by_path = {probe.path: probe for probe in boundary.conformance_probes}
+    existing_probes: set[PurePosixPath] = set()
+    for probe in boundary.conformance_probes:
+        if not (root / probe.path).is_file():
+            findings.append(
+                _finding(
+                    DiagnosticCode.TESTING_KIT_PATH_MISSING,
+                    "declared testing-kit conformance probe is missing",
+                    path=probe.path,
+                )
+            )
+        else:
+            existing_probes.add(probe.path)
+
+    observed_probe_counts: dict[PurePosixPath, int] = {}
+    unparseable: set[PurePosixPath] = set()
+    for relative in _repository_python_files(root):
+        source = root / relative
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        except (OSError, UnicodeError, SyntaxError) as error:
+            unparseable.add(relative)
+            line = error.lineno if isinstance(error, SyntaxError) else None
+            findings.append(
+                _finding(
+                    DiagnosticCode.TESTING_KIT_SYNTAX_INVALID,
+                    f"cannot inspect Python source for testing-kit imports: {error}",
+                    path=relative,
+                    line=line,
+                )
+            )
+            continue
+        lines = _testing_kit_import_lines(tree)
+        if relative in probe_by_path:
+            observed_probe_counts[relative] = len(lines)
+            continue
+        if (
+            not lines
+            or _inside(relative, boundary.test_roots)
+            or _inside(relative, boundary.kit_source_roots)
+        ):
+            continue
+        findings.extend(
+            _finding(
+                DiagnosticCode.TESTING_KIT_IMPORT_FORBIDDEN,
+                "dotmac_kernel.testing is development-only; import it from a "
+                "structural test root or an exact declared conformance probe",
+                path=relative,
+                line=line,
+            )
+            for line in lines
+        )
+
+    for probe in boundary.conformance_probes:
+        if probe.path not in existing_probes or probe.path in unparseable:
+            continue
+        observed = observed_probe_counts.get(probe.path, 0)
+        if observed != probe.expected_import_count:
+            findings.append(
+                _finding(
+                    DiagnosticCode.TESTING_KIT_PROBE_COUNT_MISMATCH,
+                    "testing-kit conformance probe import count drifted: "
+                    f"expected {probe.expected_import_count}, found {observed}",
+                    path=probe.path,
+                )
+            )
+    return findings
+
+
 def verify_repository(
     root: Path,
     profile_path: Path,
@@ -711,6 +856,7 @@ def verify_repository(
         findings.extend(_typed(root, surface))
     for vocabulary in profile.module_declared_vocabularies:
         findings.extend(_vocabulary(root, vocabulary))
+    findings.extend(_testing_kit(root, profile.testing_kit_boundary))
     return ConformanceReport(
         profile.profile_id,
         profile.enforcement_mode,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,7 +89,7 @@ def vocabulary() -> dict[str, object]:
 
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
         "governance_model": {
@@ -120,6 +121,11 @@ def profile() -> dict[str, object]:
             }
         ],
         "module_declared_vocabularies": [vocabulary()],
+        "testing_kit_boundary": {
+            "test_roots": ["tests"],
+            "kit_source_roots": [],
+            "conformance_probes": [],
+        },
     }
 
 
@@ -137,6 +143,10 @@ class Fixture:
         member: str = OPEN_MEMBER_TYPE,
         manifest: str = MANIFEST,
         storage: str = OPEN_STORAGE,
+        runtime: str = "def runtime() -> None:\n    return None\n",
+        test_source: str = "def test_drift() -> None:\n    assert True\n",
+        probe_source: str | None = None,
+        kit_source: str | None = None,
     ) -> Path:
         profile_path = self.root / ".dotmac/standards-profile.json"
         files = {
@@ -145,13 +155,20 @@ class Fixture:
             self.root / "example/service.py": owner,
             self.root / "example/router.py": "def route() -> None:\n    return None\n",
             self.root / "example/contracts.py": contract,
-            self.root
-            / "tests/test_example.py": "def test_drift() -> None:\n    assert True\n",
+            self.root / "tests/test_example.py": test_source,
             self.root / "example/member.py": member,
             self.root / "example/registry.py": REGISTRY,
             self.root / "example/manifest.py": manifest,
             self.root / "example/models.py": storage,
+            self.root / "example/runtime.py": runtime,
         }
+        if probe_source is not None:
+            files[self.root / "scripts/floor/probe.py"] = probe_source
+        if kit_source is not None:
+            files[
+                self.root
+                / "packages/dotmac-kernel/src/dotmac_kernel/testing/__init__.py"
+            ] = kit_source
         for path, body in files.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
@@ -170,6 +187,10 @@ class StandardsTests(unittest.TestCase):
         member: str = OPEN_MEMBER_TYPE,
         manifest: str = MANIFEST,
         storage: str = OPEN_STORAGE,
+        runtime: str = "def runtime() -> None:\n    return None\n",
+        test_source: str = "def test_drift() -> None:\n    assert True\n",
+        probe_source: str | None = None,
+        kit_source: str | None = None,
     ) -> ConformanceReport:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -181,6 +202,10 @@ class StandardsTests(unittest.TestCase):
                 member=member,
                 manifest=manifest,
                 storage=storage,
+                runtime=runtime,
+                test_source=test_source,
+                probe_source=probe_source,
+                kit_source=kit_source,
             )
             return verify_repository(
                 root,
@@ -524,6 +549,8 @@ class StandardsTests(unittest.TestCase):
             schema["properties"]["enforcement_mode"]["enum"],
             ["candidate", "required"],
         )
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 4)
+        self.assertIn("testing_kit_boundary", schema["required"])
 
     def test_composite_action_uses_the_one_engine_without_secret_inputs(self) -> None:
         action = (ROOT / ".github/actions/standards-check/action.yml").read_text()
@@ -617,11 +644,184 @@ class StandardsTests(unittest.TestCase):
         value["module_declared_vocabularies"] = [vocabulary(), vocabulary()]
         self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
 
-    def test_schema_version_two_profiles_are_rejected(self) -> None:
-        """Version 3 is a closed contract, not an additive one: a profile that
-        predates the vocabulary family must be migrated, not silently accepted
-        with the new rule family switched off."""
+    def test_schema_version_three_profiles_are_rejected(self) -> None:
+        """Version 4 is a closed contract, not an additive one: a profile that
+        predates the testing-kit boundary must be migrated, not silently
+        accepted with the new rule family switched off."""
         value = profile()
-        value["schema_version"] = 2
-        del value["module_declared_vocabularies"]
+        value["schema_version"] = 3
+        del value["testing_kit_boundary"]
         self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    # -- Kernel testing-kit import locality (ADR 0008) -----------------------
+
+    def test_runtime_imports_of_the_testing_kit_fail_in_every_spelling(self) -> None:
+        imports = (
+            "import dotmac_kernel.testing\n",
+            "import dotmac_kernel.testing.harness\n",
+            "from dotmac_kernel.testing import FakeClock\n",
+            "from dotmac_kernel.testing.fakes import FakeClock\n",
+            "from dotmac_kernel import testing\n",
+        )
+        for source in imports:
+            with self.subTest(source=source.strip()):
+                report = self.evaluate(runtime=source)
+                self.assert_code(report, DiagnosticCode.TESTING_KIT_IMPORT_FORBIDDEN)
+                finding = next(
+                    item
+                    for item in report.diagnostics
+                    if item.code is DiagnosticCode.TESTING_KIT_IMPORT_FORBIDDEN
+                )
+                self.assertEqual(finding.path, Path("example/runtime.py"))
+                self.assertEqual(finding.line, 1)
+
+    def test_git_inventory_scans_a_real_untracked_runtime_file(self) -> None:
+        """Production uses Git inventory; the fallback canary is not enough."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = Fixture(root).write(
+                profile(), runtime="import dotmac_kernel.testing\n"
+            )
+            subprocess.run(
+                ["git", "init", "--quiet"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            report = verify_repository(
+                root,
+                path,
+                observed_repository=REPOSITORY,
+                observed_default_branch=BranchName("main"),
+            )
+        self.assert_code(report, DiagnosticCode.TESTING_KIT_IMPORT_FORBIDDEN)
+
+    def test_testing_kit_detector_ignores_near_misses(self) -> None:
+        source = (
+            "from dotmac_kernel import db\n"
+            "import dotmac_kernel\n"
+            "# from dotmac_kernel.testing import FakeClock\n"
+            'NAME = "dotmac_kernel.testing"\n'
+        )
+        self.assertTrue(self.evaluate(runtime=source).conforms)
+
+    def test_structural_test_root_may_import_the_testing_kit(self) -> None:
+        report = self.evaluate(
+            test_source="from dotmac_kernel.testing import FakeClock\n"
+        )
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_kit_source_root_may_assemble_itself(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["kit_source_roots"] = [
+            "packages/dotmac-kernel/src/dotmac_kernel/testing"
+        ]
+        report = self.evaluate(
+            value,
+            kit_source="from dotmac_kernel.testing.fakes import FakeClock\n",
+        )
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_exact_conformance_probe_may_import_the_testing_kit(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["conformance_probes"] = [
+            {"path": "scripts/floor/probe.py", "expected_import_count": 1}
+        ]
+        report = self.evaluate(
+            value,
+            probe_source="from dotmac_kernel.testing import FakeClock\n",
+        )
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_missing_declared_testing_kit_path_fails(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["conformance_probes"] = [
+            {"path": "scripts/floor/probe.py", "expected_import_count": 1}
+        ]
+        self.assert_code(self.evaluate(value), DiagnosticCode.TESTING_KIT_PATH_MISSING)
+
+    def test_testing_kit_probe_import_count_is_a_two_way_ratchet(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["conformance_probes"] = [
+            {"path": "scripts/floor/probe.py", "expected_import_count": 1}
+        ]
+        for source in (
+            "def probe() -> None:\n    return None\n",
+            (
+                "import dotmac_kernel.testing\n"
+                "from dotmac_kernel.testing import FakeClock\n"
+            ),
+        ):
+            with self.subTest(source=source):
+                self.assert_code(
+                    self.evaluate(value, probe_source=source),
+                    DiagnosticCode.TESTING_KIT_PROBE_COUNT_MISMATCH,
+                )
+
+    def test_missing_declared_testing_kit_root_fails(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["test_roots"] = ["quality/tests"]
+        self.assert_code(self.evaluate(value), DiagnosticCode.TESTING_KIT_PATH_MISSING)
+
+    def test_missing_declared_kit_source_root_fails(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["kit_source_roots"] = [
+            "packages/dotmac-kernel/src/dotmac_kernel/testing"
+        ]
+        self.assert_code(self.evaluate(value), DiagnosticCode.TESTING_KIT_PATH_MISSING)
+
+    def test_non_test_directory_cannot_be_declared_as_a_test_root(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["test_roots"] = ["example"]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_unrelated_source_cannot_be_declared_as_the_kit_root(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["kit_source_roots"] = ["example"]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_probe_cannot_hide_inside_an_already_allowed_root(self) -> None:
+        value = profile()
+        boundary = value["testing_kit_boundary"]
+        assert isinstance(boundary, dict)
+        boundary["conformance_probes"] = [
+            {"path": "tests/test_example.py", "expected_import_count": 1}
+        ]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_probe_import_count_must_be_positive(self) -> None:
+        for count in (True, 0, -1):
+            with self.subTest(count=count):
+                value = profile()
+                boundary = value["testing_kit_boundary"]
+                assert isinstance(boundary, dict)
+                boundary["conformance_probes"] = [
+                    {
+                        "path": "scripts/floor/probe.py",
+                        "expected_import_count": count,
+                    }
+                ]
+                self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_unparseable_runtime_source_fails_closed(self) -> None:
+        self.assert_code(
+            self.evaluate(runtime="if True print('broken')\n"),
+            DiagnosticCode.TESTING_KIT_SYNTAX_INVALID,
+        )

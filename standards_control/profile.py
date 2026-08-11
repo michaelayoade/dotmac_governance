@@ -12,6 +12,7 @@ from .contracts import (
     AuthorityId,
     BranchName,
     CanonicalRepository,
+    ConformanceProbe,
     EnforcementMode,
     GitRevision,
     GovernanceModelRef,
@@ -26,6 +27,7 @@ from .contracts import (
     ResourceId,
     StandardsProfile,
     SurfaceId,
+    TestingKitBoundary,
     TypedContractSurface,
     VocabularyId,
 )
@@ -66,6 +68,12 @@ def _string(value: object, location: str) -> str:
 def _bool(value: object, location: str) -> bool:
     if not isinstance(value, bool):
         raise ProfileError(f"{location} must be a boolean")
+    return value
+
+
+def _positive_int(value: object, location: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ProfileError(f"{location} must be a positive integer")
     return value
 
 
@@ -300,6 +308,65 @@ def _vocabulary(value: object, index: int) -> ModuleDeclaredVocabulary:
     )
 
 
+def _testing_kit_boundary(value: object) -> TestingKitBoundary:
+    location = "testing_kit_boundary"
+    data = _object(value, location)
+    _keys(
+        data,
+        frozenset({"test_roots", "kit_source_roots", "conformance_probes"}),
+        location,
+    )
+    test_roots = _paths(data["test_roots"], f"{location}.test_roots")
+    if not test_roots:
+        raise ProfileError(f"{location}.test_roots must not be empty")
+    for index, path in enumerate(test_roots):
+        if path.name != "tests":
+            raise ProfileError(
+                f"{location}.test_roots[{index}] must name a structural tests directory"
+            )
+    kit_source_roots = _paths(data["kit_source_roots"], f"{location}.kit_source_roots")
+    for index, path in enumerate(kit_source_roots):
+        if path.parts[-2:] != ("dotmac_kernel", "testing"):
+            raise ProfileError(
+                f"{location}.kit_source_roots[{index}] must end in "
+                "dotmac_kernel/testing"
+            )
+    probes: list[ConformanceProbe] = []
+    for index, raw_probe in enumerate(
+        _sequence(data["conformance_probes"], f"{location}.conformance_probes")
+    ):
+        probe_location = f"{location}.conformance_probes[{index}]"
+        probe = _object(raw_probe, probe_location)
+        _keys(probe, frozenset({"path", "expected_import_count"}), probe_location)
+        path = _path(probe["path"], f"{probe_location}.path")
+        if path.suffix != ".py":
+            raise ProfileError(f"{probe_location}.path must name a Python file")
+        if any(path == root or root in path.parents for root in test_roots):
+            raise ProfileError(
+                f"{probe_location}.path is already inside a declared test root"
+            )
+        if any(path == root or root in path.parents for root in kit_source_roots):
+            raise ProfileError(
+                f"{probe_location}.path is already inside a kit source root"
+            )
+        probes.append(
+            ConformanceProbe(
+                path=path,
+                expected_import_count=_positive_int(
+                    probe["expected_import_count"],
+                    f"{probe_location}.expected_import_count",
+                ),
+            )
+        )
+    if len({probe.path for probe in probes}) != len(probes):
+        raise ProfileError(f"{location}.conformance_probes paths must be unique")
+    return TestingKitBoundary(
+        test_roots=test_roots,
+        kit_source_roots=kit_source_roots,
+        conformance_probes=tuple(probes),
+    )
+
+
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
@@ -315,13 +382,14 @@ def parse_profile(value: object) -> StandardsProfile:
                 "authorities",
                 "typed_contract_surfaces",
                 "module_declared_vocabularies",
+                "testing_kit_boundary",
             }
         ),
         "profile",
     )
     version = data["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version != 3:
-        raise ProfileError("schema_version must be integer 3")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 4:
+        raise ProfileError("schema_version must be integer 4")
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -360,7 +428,7 @@ def parse_profile(value: object) -> StandardsProfile:
     if len({item.vocabulary_id for item in vocabularies}) != len(vocabularies):
         raise ProfileError("vocabulary_id values must be unique")
     return StandardsProfile(
-        schema_version=3,
+        schema_version=4,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,
@@ -368,6 +436,7 @@ def parse_profile(value: object) -> StandardsProfile:
         authorities=authorities,
         typed_contract_surfaces=surfaces,
         module_declared_vocabularies=vocabularies,
+        testing_kit_boundary=_testing_kit_boundary(data["testing_kit_boundary"]),
     )
 
 

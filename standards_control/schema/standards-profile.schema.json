@@ -3,16 +3,17 @@
   "title": "Dotmac repository engineering conformance profile",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "profile_id", "repository", "governance_model", "enforcement_mode", "authorities", "typed_contract_surfaces", "module_declared_vocabularies"],
+  "required": ["schema_version", "profile_id", "repository", "governance_model", "enforcement_mode", "authorities", "typed_contract_surfaces", "module_declared_vocabularies", "testing_kit_boundary"],
   "properties": {
-    "schema_version": {"const": 3},
+    "schema_version": {"const": 4},
     "profile_id": {"$ref": "#/$defs/slug"},
     "repository": {"$ref": "#/$defs/repository"},
     "governance_model": {"$ref": "#/$defs/governance_model"},
     "enforcement_mode": {"type": "string", "enum": ["candidate", "required"]},
     "authorities": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/authority"}},
     "typed_contract_surfaces": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/surface"}},
-    "module_declared_vocabularies": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/vocabulary"}}
+    "module_declared_vocabularies": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/vocabulary"}},
+    "testing_kit_boundary": {"$ref": "#/$defs/testing_kit_boundary"}
   },
   "$defs": {
     "slug": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
@@ -94,6 +95,23 @@
         "require_public_annotations": {"type": "boolean"},
         "forbid_any": {"type": "boolean"},
         "require_immutable_records": {"type": "boolean"}
+      }
+    },
+    "testing_kit_boundary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["test_roots", "kit_source_roots", "conformance_probes"],
+      "properties": {
+        "test_roots": {"$ref": "#/$defs/nonempty_paths"},
+        "kit_source_roots": {"$ref": "#/$defs/paths"},
+        "conformance_probes": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/conformance_probe"}}
+      }
+    },
+    "conformance_probe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "expected_import_count"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "expected_import_count": {"type": "integer", "minimum": 1}
       }
     }
   }

@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "profile_id": "dotmac-governance-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
@@ -42,5 +42,10 @@
       "require_immutable_records": true
     }
   ],
-  "module_declared_vocabularies": []
+  "module_declared_vocabularies": [],
+  "testing_kit_boundary": {
+    "test_roots": ["tests"],
+    "kit_source_roots": [],
+    "conformance_probes": []
+  }
 }

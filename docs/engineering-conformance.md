@@ -4,11 +4,41 @@
 checked-in Governance profile is `required`; a green run is conformance
 evidence for the evaluated revision, not a certification or compliance claim.
 
-Each strict schema-version-3 profile names repository URL/default branch, its
+Each strict schema-version-4 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
-tests, exact Python contract surfaces, and its module-declared vocabularies. The
+tests, exact Python contract surfaces, its module-declared vocabularies, and the
+kernel testing-kit import boundary. The
 typed gate rejects `Any`, missing or bare public annotations, unannotated record
-fields, and mutable boundary records. Schema version 3 has no waiver mechanism.
+fields, and mutable boundary records. Schema version 4 has no waiver mechanism.
+
+## Kernel testing-kit import locality (ADR 0008)
+
+`dotmac_kernel.testing` ships in the runtime wheel but is development-only. The
+engine AST-scans every repository Python source and admits its imports only
+under structural `tests` roots, under the kit's own exact source roots, or from
+an exact conformance probe with a pinned import count:
+
+```json
+{
+  "test_roots": ["tests"],
+  "kit_source_roots": [
+    "packages/dotmac-kernel/src/dotmac_kernel/testing"
+  ],
+  "conformance_probes": [
+    {
+      "path": "scripts/floor/probe.py",
+      "expected_import_count": 1
+    }
+  ]
+}
+```
+
+The object is mandatory even when `kit_source_roots` and
+`conformance_probes` are empty. Declared roots and probes must exist. Test roots
+must end in `tests`; kit roots must end in `dotmac_kernel/testing`; probes must
+be exact Python files outside both. Probe counts are two-direction ratchets, so
+an added import and a stale exemption both fail. There is no blanket `scripts/`
+or runtime-package exclusion.
 
 ## Module-declared vocabularies (ADR 0007)
 
@@ -104,7 +134,7 @@ A product profile's governance reference therefore has this shape:
 Product rollout is inventory, candidate profile, local repairs with sabotage
 proofs, accepted governance plus required mode, green CI merge, then protected
 branch read-modify-write and independent readback. A product repins to the
-accepted revision carrying ADR 0007 and moves its profile to schema version 3 in
-the same change; a product pinned to an earlier revision is unaffected until it
-repins. Git and product CI remain
+accepted revision carrying the required rule family and moves its profile to
+the matching schema version in the same change; a product pinned to an earlier
+revision is unaffected until it repins. Git and product CI remain
 authoritative; Knowledge may index only source pointers and structured results.

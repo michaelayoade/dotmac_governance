@@ -8,7 +8,9 @@ effective 2026-07-25. ADR 0005 is accepted only for the
 `michael-workstation` non-production agent pilot. ADR 0002 (development model)
 and ADR 0003 (repository visibility) remain `Proposed` and non-normative.
 ADR 0006 (engineering conformance) is accepted effective 2026-08-03; its
-profile runs in required mode.**
+profile runs in required mode. ADR 0007 (module-declared vocabularies) and ADR
+0008 (kernel testing-kit import locality) are accepted amendments to that
+engine.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
@@ -85,7 +87,7 @@ not reproduce standard text and does not itself establish conformity.
   conformance, staging, reconciliation, backup-backed activation, and rollback
   contracts for the ADR 0005 pilot.
 - `standards_control/` — typed, development-only ownership and contract-boundary
-  conformance engine accepted by ADR 0006.
+  conformance engine accepted by ADR 0006 and extended by ADRs 0007 and 0008.
 - `.dotmac/agent-profile.json` — this repository's checked-in pilot profile.
 - `.dotmac/standards-profile.json` — the required engineering profile.
 - `.dotmac/managed-agent-policy.json` — accepted Codex/Claude policy restricted

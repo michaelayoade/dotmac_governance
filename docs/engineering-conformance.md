@@ -4,12 +4,12 @@
 checked-in Governance profile is `required`; a green run is conformance
 evidence for the evaluated revision, not a certification or compliance claim.
 
-Each strict schema-version-4 profile names repository URL/default branch, its
+Each strict schema-version-5 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
 tests, exact Python contract surfaces, its module-declared vocabularies, and the
 kernel testing-kit import boundary. The
 typed gate rejects `Any`, missing or bare public annotations, unannotated record
-fields, and mutable boundary records. Schema version 4 has no waiver mechanism.
+fields, and mutable boundary records. Schema version 5 has no waiver mechanism.
 
 ## Kernel testing-kit import locality (ADR 0008)
 
@@ -44,17 +44,20 @@ or runtime-package exclusion.
 
 A vocabulary whose members belong to modules is declared by those modules and
 validated by a registry; the layer that hosts it never enumerates the members,
-and the backing column is never pinned to a fixed member list. Each
-`module_declared_vocabularies` entry names the member type, the registry symbol
-that validates a member, the manifest field a module declares members on, and
-the persisted column:
+and a backing column, when one exists, is never pinned to a fixed member list.
+Each `module_declared_vocabularies` entry names the member shape, the registry
+symbol that validates a member, the manifest field a module declares members
+on, and its explicit storage shape:
 
 ```json
 {
   "vocabulary_id": "setting-domain",
   "subject": "Setting domains a module owns.",
-  "member_type": "SettingDomain",
-  "member_type_path": "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py",
+  "member_type": {
+    "kind": "declared",
+    "name": "SettingDomain",
+    "path": "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"
+  },
   "registry_interface": "dotmac_kernel.setting_domains.SettingDomainRegistry",
   "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/setting_domains.py",
   "declaration_field": "setting_domains",
@@ -62,19 +65,53 @@ the persisted column:
     "packages/dotmac-kernel/src/dotmac_kernel/features.py",
     "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
   ],
-  "storage_column": "domain",
-  "storage_paths": ["packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"]
+  "storage": {
+    "column": "domain",
+    "paths": ["packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"]
+  }
 }
 ```
+
+The alternatives are independent. An audit-action-shaped vocabulary can use an
+open built-in member and still name its real store; a permission-shaped
+vocabulary can name its declared spec while stating that no override store
+exists yet:
+
+```json
+{
+  "member_type": {"kind": "builtin", "name": "str"},
+  "storage": {
+    "column": "action",
+    "paths": ["packages/dotmac-kernel/src/dotmac_kernel/audit.py"]
+  }
+}
+```
+
+```json
+{
+  "member_type": {
+    "kind": "declared",
+    "name": "PermissionSpec",
+    "path": "packages/dotmac-kernel/src/dotmac_kernel/permissions.py"
+  },
+  "storage": null
+}
+```
+
+`str` is the only built-in member type. `storage` is required even when null;
+that makes "no store exists" part of the review surface instead of an inference
+from an omitted field.
 
 The engine reads syntax and never imports product code. It reports
 `vocabulary.member-type.closed` when the member type subclasses an enum,
 `vocabulary.registry.missing` when nothing validates a member,
 `vocabulary.declaration.missing` when no manifest carries the declaration field,
-and `vocabulary.storage.closed` when a database enum type or a `CheckConstraint`
-with a literal `IN (...)` list re-closes the column. An empty array is legal and
-means the repository hosts no such vocabulary — a claim reviewed in the profile
-diff, since the engine evaluates declarations rather than discovering them.
+and `vocabulary.storage.closed` when a declared database store uses an enum type
+or a `CheckConstraint` with a literal `IN (...)` list. An empty array is legal
+and means the repository hosts no such vocabulary — a claim reviewed in the
+profile diff, since the engine evaluates declarations rather than discovering
+them. A false `storage: null` is the same class of review failure; the syntax
+engine does not claim it can discover semantic ownership reliably.
 
 `owner_implementation` is repository-relative while `decision_interface` is an
 importable Python symbol. Flat layouts map directly; for a standard `src`

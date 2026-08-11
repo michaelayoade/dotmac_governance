@@ -22,6 +22,7 @@ from .contracts import (
     StandardsProfile,
     TestingKitBoundary,
     TypedContractSurface,
+    VocabularyMemberKind,
 )
 from .profile import ProfileError, load_profile
 
@@ -450,41 +451,45 @@ def _closed_storage(tree: ast.Module, column: str) -> int | None:
 def _vocabulary(root: Path, vocabulary: ModuleDeclaredVocabulary) -> list[Diagnostic]:
     """One module-declared vocabulary is open, registered, and unpinned.
 
-    The three failures this catches are the three ways the rule is broken in
-    practice: the member type is an enum again; nothing validates a member; the
-    column re-closes what the type opened.
+    The failures correspond to the ways the rule is broken in practice: a
+    declared member type is an enum again; nothing validates a member; or a
+    real persisted column re-closes what the registry opened.
     """
     findings: list[Diagnostic] = []
     identifier = str(vocabulary.vocabulary_id)
 
-    member_tree = _parse(root, vocabulary.member_type_path)
-    if isinstance(member_tree, Diagnostic):
-        findings.append(member_tree)
-    else:
-        declared = [
-            node
-            for node in ast.walk(member_tree)
-            if isinstance(node, ast.ClassDef) and node.name == vocabulary.member_type
-        ]
-        if not declared:
-            findings.append(
-                _finding(
-                    DiagnosticCode.VOCABULARY_MEMBER_TYPE_MISSING,
-                    f"member type for {identifier!r} is absent from its declared path",
-                    path=vocabulary.member_type_path,
-                )
-            )
-        for node in declared:
-            if any(_name(base) in CLOSED_MEMBER_BASES for base in node.bases):
+    member = vocabulary.member_type
+    if member.kind is VocabularyMemberKind.DECLARED:
+        if member.path is None:  # impossible after strict profile parsing
+            raise AssertionError("declared vocabulary member has no source path")
+        member_tree = _parse(root, member.path)
+        if isinstance(member_tree, Diagnostic):
+            findings.append(member_tree)
+        else:
+            declared = [
+                node
+                for node in ast.walk(member_tree)
+                if isinstance(node, ast.ClassDef) and node.name == member.name
+            ]
+            if not declared:
                 findings.append(
                     _finding(
-                        DiagnosticCode.VOCABULARY_MEMBER_TYPE_CLOSED,
-                        f"member type for {identifier!r} enumerates its members; a "
-                        "module-declared vocabulary is an open registered value",
-                        path=vocabulary.member_type_path,
-                        line=node.lineno,
+                        DiagnosticCode.VOCABULARY_MEMBER_TYPE_MISSING,
+                        f"member type for {identifier!r} is absent from its declared path",
+                        path=member.path,
                     )
                 )
+            for node in declared:
+                if any(_name(base) in CLOSED_MEMBER_BASES for base in node.bases):
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.VOCABULARY_MEMBER_TYPE_CLOSED,
+                            f"member type for {identifier!r} enumerates its members; a "
+                            "module-declared vocabulary is an open registered value",
+                            path=member.path,
+                            line=node.lineno,
+                        )
+                    )
 
     registry_tree = _parse(root, vocabulary.registry_implementation)
     if isinstance(registry_tree, Diagnostic):
@@ -518,23 +523,24 @@ def _vocabulary(root: Path, vocabulary: ModuleDeclaredVocabulary) -> list[Diagno
                 )
             )
 
-    for relative in vocabulary.storage_paths:
-        tree = _parse(root, relative)
-        if isinstance(tree, Diagnostic):
-            findings.append(tree)
-            continue
-        line = _closed_storage(tree, vocabulary.storage_column)
-        if line is not None:
-            findings.append(
-                _finding(
-                    DiagnosticCode.VOCABULARY_STORAGE_CLOSED,
-                    f"storage for {identifier!r} pins {vocabulary.storage_column!r} "
-                    "to a fixed member list; the write boundary is the enforcement "
-                    "point, not the column",
-                    path=relative,
-                    line=line,
+    if vocabulary.storage is not None:
+        for relative in vocabulary.storage.paths:
+            tree = _parse(root, relative)
+            if isinstance(tree, Diagnostic):
+                findings.append(tree)
+                continue
+            line = _closed_storage(tree, vocabulary.storage.column)
+            if line is not None:
+                findings.append(
+                    _finding(
+                        DiagnosticCode.VOCABULARY_STORAGE_CLOSED,
+                        f"storage for {identifier!r} pins "
+                        f"{vocabulary.storage.column!r} to a fixed member list; "
+                        "the write boundary is the enforcement point, not the column",
+                        path=relative,
+                        line=line,
+                    )
                 )
-            )
 
     return findings
 

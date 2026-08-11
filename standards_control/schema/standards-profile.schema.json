@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "profile_id", "repository", "governance_model", "enforcement_mode", "authorities", "typed_contract_surfaces", "module_declared_vocabularies", "testing_kit_boundary"],
   "properties": {
-    "schema_version": {"const": 4},
+    "schema_version": {"const": 5},
     "profile_id": {"$ref": "#/$defs/slug"},
     "repository": {"$ref": "#/$defs/repository"},
     "governance_model": {"$ref": "#/$defs/governance_model"},
@@ -72,18 +72,41 @@
     },
     "vocabulary": {
       "type": "object", "additionalProperties": false,
-      "required": ["vocabulary_id", "subject", "member_type", "member_type_path", "registry_interface", "registry_implementation", "declaration_field", "declaration_paths", "storage_column", "storage_paths"],
+      "required": ["vocabulary_id", "subject", "member_type", "registry_interface", "registry_implementation", "declaration_field", "declaration_paths", "storage"],
       "properties": {
         "vocabulary_id": {"$ref": "#/$defs/slug"},
         "subject": {"type": "string", "minLength": 1},
-        "member_type": {"$ref": "#/$defs/identifier"},
-        "member_type_path": {"$ref": "#/$defs/path"},
+        "member_type": {"oneOf": [{"$ref": "#/$defs/declared_member_type"}, {"$ref": "#/$defs/builtin_member_type"}]},
         "registry_interface": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"},
         "registry_implementation": {"$ref": "#/$defs/path"},
         "declaration_field": {"$ref": "#/$defs/identifier"},
         "declaration_paths": {"$ref": "#/$defs/nonempty_paths"},
-        "storage_column": {"$ref": "#/$defs/identifier"},
-        "storage_paths": {"$ref": "#/$defs/nonempty_paths"}
+        "storage": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/vocabulary_storage"}]}
+      }
+    },
+    "declared_member_type": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "name", "path"],
+      "properties": {
+        "kind": {"const": "declared"},
+        "name": {"$ref": "#/$defs/identifier"},
+        "path": {"$ref": "#/$defs/path"}
+      }
+    },
+    "builtin_member_type": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {"const": "builtin"},
+        "name": {"const": "str"}
+      }
+    },
+    "vocabulary_storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["column", "paths"],
+      "properties": {
+        "column": {"$ref": "#/$defs/identifier"},
+        "paths": {"$ref": "#/$defs/nonempty_paths"}
       }
     },
     "surface": {

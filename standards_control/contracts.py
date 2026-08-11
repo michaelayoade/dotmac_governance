@@ -37,6 +37,11 @@ class GovernanceSourceKind(str, Enum):
     PINNED = "pinned"
 
 
+class VocabularyMemberKind(str, Enum):
+    DECLARED = "declared"
+    BUILTIN = "builtin"
+
+
 class DiagnosticCode(str, Enum):
     PROFILE_INVALID = "profile.invalid"
     REPOSITORY_IDENTITY_UNAVAILABLE = "repository.identity.unavailable"
@@ -124,17 +129,28 @@ class TypedContractSurface:
 
 
 @dataclass(frozen=True)
+class VocabularyMemberType:
+    kind: VocabularyMemberKind
+    name: str
+    path: PurePosixPath | None
+
+
+@dataclass(frozen=True)
+class VocabularyStorage:
+    column: str
+    paths: tuple[PurePosixPath, ...]
+
+
+@dataclass(frozen=True)
 class ModuleDeclaredVocabulary:
     vocabulary_id: VocabularyId
     subject: str
-    member_type: str
-    member_type_path: PurePosixPath
+    member_type: VocabularyMemberType
     registry_interface: PythonSymbol
     registry_implementation: PurePosixPath
     declaration_field: str
     declaration_paths: tuple[PurePosixPath, ...]
-    storage_column: str
-    storage_paths: tuple[PurePosixPath, ...]
+    storage: VocabularyStorage | None
 
 
 @dataclass(frozen=True)

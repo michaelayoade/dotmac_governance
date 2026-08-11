@@ -30,6 +30,9 @@ from .contracts import (
     TestingKitBoundary,
     TypedContractSurface,
     VocabularyId,
+    VocabularyMemberKind,
+    VocabularyMemberType,
+    VocabularyStorage,
 )
 
 SLUG = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
@@ -259,6 +262,39 @@ def _identifier(value: object, location: str) -> str:
     return raw
 
 
+def _vocabulary_member(value: object, location: str) -> VocabularyMemberType:
+    data = _object(value, location)
+    raw_kind = _string(data.get("kind"), f"{location}.kind")
+    try:
+        kind = VocabularyMemberKind(raw_kind)
+    except ValueError as error:
+        raise ProfileError(f"{location}.kind must be declared or builtin") from error
+    if kind is VocabularyMemberKind.DECLARED:
+        _keys(data, frozenset({"kind", "name", "path"}), location)
+        path: PurePosixPath | None = _path(data["path"], f"{location}.path")
+    else:
+        _keys(data, frozenset({"kind", "name"}), location)
+        path = None
+    name = _identifier(data["name"], f"{location}.name")
+    if kind is VocabularyMemberKind.BUILTIN and name != "str":
+        raise ProfileError(f"{location}.name must be str for a builtin member")
+    return VocabularyMemberType(kind=kind, name=name, path=path)
+
+
+def _vocabulary_storage(value: object, location: str) -> VocabularyStorage | None:
+    if value is None:
+        return None
+    data = _object(value, location)
+    _keys(data, frozenset({"column", "paths"}), location)
+    paths = _paths(data["paths"], f"{location}.paths")
+    if not paths:
+        raise ProfileError(f"{location}.paths must not be empty")
+    return VocabularyStorage(
+        column=_identifier(data["column"], f"{location}.column"),
+        paths=paths,
+    )
+
+
 def _vocabulary(value: object, index: int) -> ModuleDeclaredVocabulary:
     location = f"module_declared_vocabularies[{index}]"
     data = _object(value, location)
@@ -267,13 +303,11 @@ def _vocabulary(value: object, index: int) -> ModuleDeclaredVocabulary:
             "vocabulary_id",
             "subject",
             "member_type",
-            "member_type_path",
             "registry_interface",
             "registry_implementation",
             "declaration_field",
             "declaration_paths",
-            "storage_column",
-            "storage_paths",
+            "storage",
         }
     )
     _keys(data, required, location)
@@ -281,18 +315,14 @@ def _vocabulary(value: object, index: int) -> ModuleDeclaredVocabulary:
     if not PYTHON_SYMBOL.fullmatch(interface):
         raise ProfileError(f"{location}.registry_interface must be a dotted symbol")
     declarations = _paths(data["declaration_paths"], f"{location}.declaration_paths")
-    storage = _paths(data["storage_paths"], f"{location}.storage_paths")
-    if not declarations or not storage:
-        raise ProfileError(f"{location} needs declaration and storage paths")
+    if not declarations:
+        raise ProfileError(f"{location} needs declaration paths")
     return ModuleDeclaredVocabulary(
         vocabulary_id=VocabularyId(
             _slug(data["vocabulary_id"], f"{location}.vocabulary_id")
         ),
         subject=_string(data["subject"], f"{location}.subject"),
-        member_type=_identifier(data["member_type"], f"{location}.member_type"),
-        member_type_path=_path(
-            data["member_type_path"], f"{location}.member_type_path"
-        ),
+        member_type=_vocabulary_member(data["member_type"], f"{location}.member_type"),
         registry_interface=PythonSymbol(interface),
         registry_implementation=_path(
             data["registry_implementation"], f"{location}.registry_implementation"
@@ -301,10 +331,7 @@ def _vocabulary(value: object, index: int) -> ModuleDeclaredVocabulary:
             data["declaration_field"], f"{location}.declaration_field"
         ),
         declaration_paths=declarations,
-        storage_column=_identifier(
-            data["storage_column"], f"{location}.storage_column"
-        ),
-        storage_paths=storage,
+        storage=_vocabulary_storage(data["storage"], f"{location}.storage"),
     )
 
 
@@ -388,8 +415,8 @@ def parse_profile(value: object) -> StandardsProfile:
         "profile",
     )
     version = data["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version != 4:
-        raise ProfileError("schema_version must be integer 4")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 5:
+        raise ProfileError("schema_version must be integer 5")
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -428,7 +455,7 @@ def parse_profile(value: object) -> StandardsProfile:
     if len({item.vocabulary_id for item in vocabularies}) != len(vocabularies):
         raise ProfileError("vocabulary_id values must be unique")
     return StandardsProfile(
-        schema_version=4,
+        schema_version=5,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,

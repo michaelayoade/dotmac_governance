@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "profile_id": "dotmac-governance-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",

@@ -76,20 +76,25 @@ def vocabulary() -> dict[str, object]:
     return {
         "vocabulary_id": "topic",
         "subject": "Topics a module owns.",
-        "member_type": "Topic",
-        "member_type_path": "example/member.py",
+        "member_type": {
+            "kind": "declared",
+            "name": "Topic",
+            "path": "example/member.py",
+        },
         "registry_interface": "example.registry.TopicRegistry",
         "registry_implementation": "example/registry.py",
         "declaration_field": "topics",
         "declaration_paths": ["example/manifest.py"],
-        "storage_column": "topic",
-        "storage_paths": ["example/models.py"],
+        "storage": {
+            "column": "topic",
+            "paths": ["example/models.py"],
+        },
     }
 
 
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
         "governance_model": {
@@ -549,8 +554,30 @@ class StandardsTests(unittest.TestCase):
             schema["properties"]["enforcement_mode"]["enum"],
             ["candidate", "required"],
         )
-        self.assertEqual(schema["properties"]["schema_version"]["const"], 4)
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 5)
         self.assertIn("testing_kit_boundary", schema["required"])
+        vocabulary_schema = schema["$defs"]["vocabulary"]
+        self.assertEqual(
+            vocabulary_schema["required"],
+            [
+                "vocabulary_id",
+                "subject",
+                "member_type",
+                "registry_interface",
+                "registry_implementation",
+                "declaration_field",
+                "declaration_paths",
+                "storage",
+            ],
+        )
+        self.assertEqual(
+            schema["$defs"]["builtin_member_type"]["properties"]["name"]["const"],
+            "str",
+        )
+        self.assertEqual(
+            vocabulary_schema["properties"]["storage"]["oneOf"][0],
+            {"type": "null"},
+        )
 
     def test_composite_action_uses_the_one_engine_without_secret_inputs(self) -> None:
         action = (ROOT / ".github/actions/standards-check/action.yml").read_text()
@@ -577,9 +604,76 @@ class StandardsTests(unittest.TestCase):
         report = self.evaluate()
         self.assertTrue(report.conforms, report.to_dict())
 
+    def test_builtin_open_member_with_storage_passes(self) -> None:
+        """An audit-action-shaped vocabulary may use a primitive open member
+        while still declaring its real persisted column."""
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["member_type"] = {"kind": "builtin", "name": "str"}
+
+        report = self.evaluate(value, member=CLOSED_MEMBER_TYPE)
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_declared_open_member_without_storage_passes(self) -> None:
+        """A permission-shaped vocabulary may have a real member type and
+        registry before any persisted override store exists. Requiring a made-up
+        column would turn the profile into a compliance-shaped fiction."""
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["storage"] = None
+
+        report = self.evaluate(value, storage=CLOSED_STORAGE_ENUM)
+        self.assertTrue(report.conforms, report.to_dict())
+
     def test_enumerated_member_type_fails(self) -> None:
         report = self.evaluate(member=CLOSED_MEMBER_TYPE)
         self.assert_code(report, DiagnosticCode.VOCABULARY_MEMBER_TYPE_CLOSED)
+
+    def test_builtin_member_type_is_restricted_to_open_string(self) -> None:
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["member_type"] = {"kind": "builtin", "name": "int"}
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_builtin_member_type_cannot_smuggle_a_source_path(self) -> None:
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["member_type"] = {
+            "kind": "builtin",
+            "name": "str",
+            "path": "example/member.py",
+        }
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_declared_member_type_requires_its_source_path(self) -> None:
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        entry["member_type"] = {"kind": "declared", "name": "Topic"}
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
+
+    def test_storage_absence_must_be_explicit(self) -> None:
+        value = profile()
+        vocabularies = value["module_declared_vocabularies"]
+        assert isinstance(vocabularies, list)
+        entry = vocabularies[0]
+        assert isinstance(entry, dict)
+        del entry["storage"]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
 
     def test_absent_member_type_fails(self) -> None:
         report = self.evaluate(member="class Other(str):\n    __slots__ = ()\n")
@@ -624,7 +718,9 @@ class StandardsTests(unittest.TestCase):
         assert isinstance(vocabularies, list)
         entry = vocabularies[0]
         assert isinstance(entry, dict)
-        entry["member_type_path"] = "example/absent.py"
+        member_type = entry["member_type"]
+        assert isinstance(member_type, dict)
+        member_type["path"] = "example/absent.py"
         self.assert_code(self.evaluate(value), DiagnosticCode.VOCABULARY_PATH_MISSING)
 
     def test_unparseable_vocabulary_path_fails(self) -> None:
@@ -644,13 +740,11 @@ class StandardsTests(unittest.TestCase):
         value["module_declared_vocabularies"] = [vocabulary(), vocabulary()]
         self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
 
-    def test_schema_version_three_profiles_are_rejected(self) -> None:
-        """Version 4 is a closed contract, not an additive one: a profile that
-        predates the testing-kit boundary must be migrated, not silently
-        accepted with the new rule family switched off."""
+    def test_schema_version_four_profiles_are_rejected(self) -> None:
+        """Version 5 changes the vocabulary shape, so a version-4 profile must
+        migrate explicitly rather than inherit new meaning under an old number."""
         value = profile()
-        value["schema_version"] = 3
-        del value["testing_kit_boundary"]
+        value["schema_version"] = 4
         self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
 
     # -- Kernel testing-kit import locality (ADR 0008) -----------------------

@@ -10,7 +10,14 @@ and ADR 0003 (repository visibility) remain `Proposed` and non-normative.
 ADR 0006 (engineering conformance) is accepted effective 2026-08-03; its
 profile runs in required mode. ADR 0007 (module-declared vocabularies) and ADR
 0008 (kernel testing-kit import locality) are accepted amendments to that
-engine.**
+engine. ADR 0011 (external-connector-surface ratchet, schema version 9) is
+`Proposed` and non-normative: no product may pin the revision carrying it until
+a named human accepts it and it merges to canonical `main`. It was drafted as
+ADR 0010 and renumbered chronologically when the askable-decision contract took
+that number; schema versions 7 and 8 are withdrawn and never accepted, and fail
+to load rather than upgrading — version 8 because it named a measured category
+`http_client`, after one transport rather than the concept, leaving a genuine
+SMTP delivery surface with no category at all.**
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting

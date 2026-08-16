@@ -202,7 +202,7 @@ green tree through each of them:
   importable package could be imported and run while appearing in no universe
   derived here.
 
-### Untracked Python is two populations, and one source disposition
+### Untracked Python is two populations, with no disposition
 
 Python on disk but outside the index is enumerated as TWO DISTINCT
 POPULATIONS, and both are errors. `untracked_visible` is what a plain checkout
@@ -216,42 +216,18 @@ bypass the untracked error closes. The ignore query is run separately and used
 only to label the report; when it cannot be answered, nothing is labelled
 ignored.
 
-A third, disjoint outcome is the GOVERNANCE-OWNED SOURCE DISPOSITION. It is
-FILE-LEVEL, not directory-level: a recognised dependency environment proves
-only location. Each removed Python file must also be owned by an exact
-lock-pinned installed distribution and match that distribution's RECORD digest
-and size. The `repository.dependency-environment` notice names the environment
-evidence, exact distribution identities and proved FILE COUNT. It is a
-CLASSIFICATION, not an exemption: there is no profile key for it, no path a
-product can name, and no predicate a product can supply.
+There is no third outcome. A genuine virtualenv, a package below
+`site-packages`, a console shim, and a file named by a matching `RECORD` all
+remain untracked errors. The lock can anchor a distribution name/version, but
+the environment's `METADATA` and `RECORD` are mutable files controlled by the
+same working tree. A matching digest is therefore self-consistency, not an
+independent premise that may remove source from measurement.
 
-The environment-shape predicate is closed — no wildcard, no name match, no
-"looks like" — and all four arms must hold for a directory `E`:
-
-| Arm | Requirement |
-| --- | --- |
-| A1 MARKER | `E/pyvenv.cfg` is a regular file (never a symlink, never over 64 KiB) parsing as `key = value` lines, carrying `home` as a non-empty ABSOLUTE path, `include-system-site-packages` as exactly `true`/`false`, and at least one of `version`/`version_info` beginning `MAJOR.MINOR`. Both version keys present must AGREE. |
-| A2 LAYOUT | a real directory (never a symlink) at exactly `E/lib/python<MAJOR>.<MINOR>/site-packages` or `E/Lib/site-packages`. The name is DERIVED from the marker's version, never globbed — that derivation is the internal-consistency check. |
-| A3 INTERPRETER | a regular file at exactly `E/bin/python`, `E/bin/python<MAJOR>.<MINOR>`, or `E/Scripts/python.exe`. Real environments symlink this out to the base interpreter, which is expected: an interpreter is not measured material. |
-| A4 CONTAINMENT | `E` is not itself a symlink and resolves inside the repository. A symlinked environment proves nothing. |
-
-Then all five file arms must hold:
-
-| Arm | Requirement |
-| --- | --- |
-| F1 LOCATION | A regular, non-symlink `.py`/`.pyw` source below the derived `site-packages`. |
-| F2 IDENTITY | Exactly one real `*.dist-info` directory has bounded regular `METADATA` and `RECORD` files declaring one `Name` and `Version`. |
-| F3 AUTHORITY | The normalised exact pair is pinned by a tracked `poetry.lock`, `uv.lock`, or `requirements*.txt` `name==version` entry. |
-| F4 OWNERSHIP | The distribution's CSV `RECORD` names the relative file without an absolute or `..` component, and no second accepted distribution also owns it. |
-| F5 INTEGRITY | The RECORD entry supplies `sha256` and decimal size, and both match the file's current bytes. |
-
-A directory MERELY NAMED `.venv`, an INCOMPLETE MARKER, and an ORDINARY IGNORED
-PACKAGE therefore all keep reporting `repository.source.untracked`. The
-disposition is independent of `.gitignore` in both directions. A copied,
-unrecorded, unpinned, modified, hashless or symlinked Python file remains an
-untracked error even inside a genuine environment; a genuine pinned
-distribution with matching RECORD evidence is dispositioned whether or not it
-is ignored.
+Canonical product CI evaluates a clean Git checkout, where an in-repository
+environment does not exist. A local run with one fails deliberately; keep the
+environment outside the repository, track the source, or remove it. Building
+wheel retrieval and artifact attestation into a transitional syntax ratchet is
+explicitly out of scope.
 
 Exactly one thing leaves that universe, and an analysis has to earn it. A
 source is removed only when it is PROVEN test-only and UNREACHABLE from

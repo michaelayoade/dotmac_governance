@@ -6,7 +6,7 @@
 > acceptance evidence are recorded in
 > `dependency-provenance-and-precision-repair.md`. Counts and observations below
 > remain evidence of what the earlier revision did; they are not evidence that
-> the current file-proven revision is accepted.
+> the current no-disposition revision is accepted.
 
 - Date: 2026-08-15
 - Adjudicator: independent audit pass, separate from the sessions that

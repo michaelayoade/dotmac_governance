@@ -1607,6 +1607,36 @@ record and the precision adjudication are kept in
 `docs/inventories/dependency-provenance-and-precision-repair.md`; they are
 evidence for this decision, not additional normative clauses.
 
+### File-proven disposition withdrawn on review (2026-08-16)
+
+The preceding disposition is retained as review history and is SUPERSEDED by
+this amendment. It closed the copy-only `.venv` attack but still let the
+measured worktree authorize its own subtraction. A stronger fixture used a
+name/version already present in tracked dependency authority, placed a live
+connector below that distribution, wrote matching untracked `METADATA` and
+`RECORD` files, and imported the connector from tracked application code. The
+engine returned `conforms=True`, with no untracked error and no connector
+finding.
+
+The lock anchored only the NAME and VERSION. It did not authenticate the
+installed `RECORD` or bind it to immutable wheel bytes. Because the measured
+worktree could rewrite both the source and the digest that purported to prove
+it, F2, F4 and F5 were self-authored premises rather than provenance.
+
+There is now NO dependency-environment disposition and no
+`repository.dependency-environment` diagnostic. Every Python source outside the
+Git index reports `repository.source.untracked`, whether visible, ignored,
+inside a genuine virtualenv, named by a matching RECORD, or supplied by a
+distribution whose identity appears in a tracked lock. Tracked Python remains
+measured wherever it lives.
+
+Canonical CI evaluates a clean checkout, so local environment contents are not
+part of the evaluated revision. A local invocation with an in-repository
+environment fails deliberately; the environment belongs outside the repository.
+Artifact retrieval and wheel attestation are rejected for this transitional
+syntax ratchet: they add a network and artifact authority whose cost outlives
+the control's planned sunset.
+
 ### Precision boundaries from the adversarial corpus (2026-08-16)
 
 With no adopter suppression mechanism, a false positive must be repaired once
@@ -1643,7 +1673,7 @@ live connector work invisible.
 ### The four adopter baselines under schema version 9 (2026-08-15)
 
 > Historical measurement, not an adoption floor. These numbers predate the
-> 2026-08-16 file-proven disposition and precision boundaries above. The
+> 2026-08-16 disposition withdrawal and precision boundaries above. The
 > final eight-shard audit must regenerate and adjudicate every changed finding
 > before acceptance; no adopter may transcribe this table into a profile.
 
@@ -1684,7 +1714,6 @@ that policy read as a retry loop around a local queue.
 | `repository.inventory.unavailable` | error | The tracked Python inventory cannot be read, so no universe can be derived. |
 | `repository.source.untracked` | error | A Python source is on disk but outside the index, in either untracked population — visible, or hidden by the repository's own ignore rules. The message says which. |
 | `repository.tree.unmeasured` | error | An index entry grafts a tree the index does not contain: a submodule, or a symlink to a directory outside the repository. |
-| `repository.dependency-environment` | notice | One or more files were proved as lock-pinned installed-distribution material. The notice publishes the environment-shape evidence, exact distribution identities and proved FILE COUNT; unproved neighbours remain errors. |
 | `connector.scope.excluded` | notice | A tracked source was proven test-only and unreachable, and removed from the universe. |
 | `connector.conserved.recorded` | notice | A connector-shaped surface inside an excluded source, published with the exact entry to declare. |
 | `connector.conserved.undeclared` | error | A conserved finding no `conserved_exclusions` entry declares. |
@@ -1722,10 +1751,9 @@ product repins and migrates its profile to schema version 9 in one change.
 - A repository that keeps a vendored dependency tree or generated Python inside
   its working tree without tracking it will report `repository.source.untracked`
   for every such file. This is the deliberate cost of refusing name-based skips:
-  those regions genuinely are unmonitored. Lock-pinned installed-distribution
-  files are the one case now resolved by the governance-owned disposition —
-  and only when environment shape, metadata identity, RECORD ownership, digest
-  and size prove each file rather than merely naming its directory.
+  those regions genuinely are unmonitored. An in-repository dependency
+  environment is not a special case; local environments belong outside the
+  repository, while canonical CI runs from a clean checkout.
 - A test module that offers a public module-level helper stays IN the measured
   universe. That is the safe direction — it can raise a count and fail loudly,
   never hide one — but adopters should expect their first run to measure more

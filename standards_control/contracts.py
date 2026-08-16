@@ -90,7 +90,6 @@ class DiagnosticCode(str, Enum):
     REPOSITORY_INVENTORY_UNAVAILABLE = "repository.inventory.unavailable"
     REPOSITORY_SOURCE_UNTRACKED = "repository.source.untracked"
     REPOSITORY_TREE_UNMEASURED = "repository.tree.unmeasured"
-    REPOSITORY_DEPENDENCY_ENVIRONMENT = "repository.dependency-environment"
     GOVERNANCE_SOURCE_MISSING = "governance.source.missing"
     GOVERNANCE_SOURCE_STATUS_MISSING = "governance.source.status-missing"
     GOVERNANCE_SOURCE_STATUS_MISMATCH = "governance.source.status-mismatch"
@@ -286,31 +285,6 @@ class ExcludedSource:
 
 
 @dataclass(frozen=True)
-class DependencyEnvironment:
-    """One dependency environment holding proven installed distribution files.
-
-    This is a SOURCE CLASSIFICATION, not an exemption, and it is owned by
-    governance alone: there is no profile key for it, no path a product can
-    name, and no predicate a product can supply. The engine proves an
-    environment from the environment's OWN metadata and structure — see
-    `engine._dependency_environment` for the normative, closed predicate.
-
-    Every field exists so the disposition is AUDITABLE FROM THE OUTPUT rather
-    than applied silently: the environment-shape evidence, the exact pinned
-    distribution identities, and `python_source_count`, the number of Python
-    files individually proved by those distributions' RECORD digests. Code in
-    the same directory without that file-level proof remains untracked source.
-    """
-
-    root: PurePosixPath
-    python_version: str
-    site_packages: PurePosixPath
-    interpreter: PurePosixPath
-    python_source_count: int
-    distributions: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class ConnectorScope:
     """The derived, closed measurement universe for one repository.
 
@@ -329,9 +303,10 @@ class ConnectorScope:
     decides nothing about what is measured — and `untracked` remains their
     union so a caller cannot read one half and believe it read the whole.
 
-    `dependency_environments` is the third, disjoint outcome: sources proven
-    file-by-file as lock-pinned installed-distribution material, published with
-    their distribution identities and file counts.
+    No dependency-environment outcome exists. Files below an in-repository
+    virtualenv remain untracked source because its METADATA and RECORD are
+    controlled by the same working tree and cannot authorize themselves out of
+    measurement.
     """
 
     inventory_available: bool
@@ -339,7 +314,6 @@ class ConnectorScope:
     excluded: tuple[ExcludedSource, ...]
     untracked_visible: tuple[PurePosixPath, ...] = ()
     untracked_ignored: tuple[PurePosixPath, ...] = ()
-    dependency_environments: tuple[DependencyEnvironment, ...] = ()
     conserved: tuple[ConservedFinding, ...] = ()
 
     @property

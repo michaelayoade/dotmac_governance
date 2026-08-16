@@ -5,7 +5,6 @@ import base64
 import copy
 import hashlib
 import json
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -5297,156 +5296,47 @@ class StandardsTests(unittest.TestCase):
                 )
 
 
-# -- Governance-owned source disposition: file-proven installed distributions --
+# -- Closed untracked-source rule ------------------------------------------
 #
-# `git ls-files --others` with no `--exclude-standard` made every gitignored
-# Python file a `repository.source.untracked` error: 3119 in one adopter, 407 in
-# another. Adding `--exclude-standard` is REFUSED — with it, a gitignored
-# untracked connector and the environment noise vanish TOGETHER, which reopens
-# bypass D.
-#
-# The disposition below is a SOURCE CLASSIFICATION instead, and it is
-# governance-owned: no product may name a path, supply a predicate, or
-# configure it, and there is no profile surface for it. Environment shape is a
-# prerequisite only; each removed file must also join to tracked exact
-# dependency authority and a matching METADATA/RECORD identity, digest and size.
-# The result is independent of `.gitignore` in both directions.
-#
-# Normatively, a repository-relative directory E is a dependency environment if
-# and only if ALL FOUR arms hold:
-#
-#   A1 MARKER.       `E/pyvenv.cfg` is a regular file (never a symlink, never
-#                    over MARKER_BYTES), parses as `key = value` lines, and
-#                    carries `home` (a non-empty ABSOLUTE path),
-#                    `include-system-site-packages` (exactly `true`/`false`),
-#                    and at least one of `version` / `version_info` beginning
-#                    `MAJOR.MINOR`. When both version keys are present they must
-#                    agree on MAJOR.MINOR.
-#   A2 LAYOUT.       A real directory (never a symlink) at exactly
-#                    `E/lib/python<MAJOR>.<MINOR>/site-packages` or
-#                    `E/Lib/site-packages`, where <MAJOR>.<MINOR> is DERIVED
-#                    from the marker rather than discovered by globbing. That
-#                    derivation is the internal consistency check.
-#   A3 INTERPRETER.  A regular file at exactly `E/bin/python`,
-#                    `E/bin/python<MAJOR>.<MINOR>`, or `E/Scripts/python.exe`.
-#                    A symlink to the base interpreter outside E is expected and
-#                    permitted: an interpreter is not measured material.
-#   A4 CONTAINMENT.  E resolves inside the repository, and a dispositioned file
-#                    must RESOLVE inside E. A symlink inside a genuine
-#                    environment pointing out of it launders nothing.
-#
-# The list is closed. There is no wildcard, no "looks like", no name match: a
-# directory called `.venv` earns nothing by its name.
-#
-# Environment shape proves only where a file lives. A Python source leaves the
-# untracked population only when tracked dependency authority pins its exact
-# distribution identity and that distribution's RECORD names the file with a
-# matching sha256 and size. Shape alone confers no trust.
-
-DEPENDENCY_ENVIRONMENT = "repository.dependency-environment"
-SOURCE_UNTRACKED = "repository.source.untracked"
-
-VIRTUALENV_MARKER = """\
-home = /opt/python/3.13/bin
-implementation = CPython
-version_info = 3.13.7.final.0
-virtualenv = 20.34.0
-include-system-site-packages = false
-base-prefix = /opt/python/3.13
-base-executable = /opt/python/3.13/bin/python3.13
-prompt = example-py3.13
-"""
-
-STDLIB_MARKER = """\
-home = /usr/local/bin
-include-system-site-packages = false
-version = 3.13.7
-executable = /usr/local/bin/python3.13
-command = /usr/local/bin/python3.13 -m venv /srv/example/.venv
-"""
+# A dependency environment is worktree state. Its METADATA and RECORD are
+# controlled by the same party whose sources are being measured, so neither can
+# authorize a Python file out of the untracked population. Canonical CI runs in
+# a clean checkout; local environments belong outside the repository.
 
 
-def installed_distribution_sources(
-    *,
-    layout: str = "lib/python3.13/site-packages",
-    name: str = "provider",
-    version: str = "1.0",
-    files: Mapping[str, str] | None = None,
-    record_hashes: bool = True,
-) -> dict[str, str]:
-    """Build installed files plus the wheel provenance that owns each one."""
-    installed = dict(
-        files
-        or {
-            f"{name}/__init__.py": "",
-            f"{name}/client.py": PLANTED_HTTP_TRANSPORT,
-        }
+def forged_distribution_sources() -> dict[str, str]:
+    """A self-consistent pinned distribution carrying a copied connector."""
+    relative = "provider/copied_connector.py"
+    payload = PLANTED_HTTP_TRANSPORT
+    digest = (
+        base64.urlsafe_b64encode(hashlib.sha256(payload.encode("utf-8")).digest())
+        .decode("ascii")
+        .rstrip("=")
     )
-    record_rows: list[str] = []
-    for relative, body in installed.items():
-        digest = (
-            base64.urlsafe_b64encode(hashlib.sha256(body.encode("utf-8")).digest())
-            .decode("ascii")
-            .rstrip("=")
-        )
-        hash_field = f"sha256={digest}" if record_hashes else ""
-        record_rows.append(f"{relative},{hash_field},{len(body.encode('utf-8'))}\n")
-    dist_info = f"{name.replace('-', '_')}-{version}.dist-info"
-    installed[f"{dist_info}/METADATA"] = (
-        f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n"
-    )
-    installed[f"{dist_info}/RECORD"] = "".join(record_rows)
-    return {f"{layout}/{relative}": body for relative, body in installed.items()}
+    return {
+        f".venv/lib/python3.13/site-packages/{relative}": payload,
+        ".venv/lib/python3.13/site-packages/provider-1.0.dist-info/METADATA": (
+            "Metadata-Version: 2.4\nName: provider\nVersion: 1.0\n"
+        ),
+        ".venv/lib/python3.13/site-packages/provider-1.0.dist-info/RECORD": (
+            f"{relative},sha256={digest},{len(payload.encode('utf-8'))}\n"
+        ),
+    }
 
 
-ENVIRONMENT_SOURCES = installed_distribution_sources()
+class UntrackedSourceTests(unittest.TestCase):
+    """Every Python source outside the index is an error, without disposition."""
 
-
-def plant_environment(
-    base: Path,
-    *,
-    marker: str | None = VIRTUALENV_MARKER,
-    layout: str | None = "lib/python3.13/site-packages",
-    interpreter: str | None = "bin/python",
-    sources: Mapping[str, str] | None = None,
-) -> Path:
-    """Build a real on-disk dependency environment, or a near-miss of one."""
-    base.mkdir(parents=True, exist_ok=True)
-    if marker is not None:
-        (base / "pyvenv.cfg").write_text(marker, encoding="utf-8")
-    if layout is not None:
-        (base / layout).mkdir(parents=True, exist_ok=True)
-    if interpreter is not None:
-        path = base / interpreter
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"\x7fELF stand-in for a real interpreter\n")
-    if sources is None:
-        sources = ENVIRONMENT_SOURCES
-    for name, body in sources.items():
-        path = base / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
-    return base
-
-
-class DependencyEnvironmentDispositionTests(unittest.TestCase):
-    """Three legs for every arm: sensitivity, specificity, and liveness.
-
-    Liveness is PER ARM and is proved by IN-SITU MUTATION of THIS repository's
-    real scan, never a tmp_path fixture. This repository's untracked population
-    is a legitimate zero, so a representative violation is planted into the real
-    working tree, the real scan is run, and the plant is removed again.
-    """
-
-    # -- fixtures -----------------------------------------------------------
-
-    def build(self, root: Path, **kwargs: object) -> Path:
+    def build(
+        self,
+        root: Path,
+        *,
+        extra: Mapping[str, str] | None = None,
+        untracked: Mapping[str, str] | None = None,
+    ) -> Path:
         value = profile()
         value["external_connector_surface"] = connector_surface()
-        extra = dict(cast(Mapping[str, str] | None, kwargs.pop("extra", None)) or {})
-        extra.setdefault("requirements-dev.txt", "provider==1.0\n")
-        kwargs["extra"] = extra
-        return Fixture(root).write(copy.deepcopy(value), **kwargs)  # type: ignore[arg-type]
+        return Fixture(root).write(value, extra=extra, untracked=untracked)
 
     def report_for(self, root: Path, profile_path: Path) -> ConformanceReport:
         return verify_repository(
@@ -5460,669 +5350,90 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
         return {
             item.path.as_posix()
             for item in report.diagnostics
-            if item.code.value == SOURCE_UNTRACKED and item.path is not None
-        }
-
-    def environments(self, report: ConformanceReport) -> dict[str, str]:
-        return {
-            item.path.as_posix(): item.message
-            for item in report.diagnostics
-            if item.code.value == DEPENDENCY_ENVIRONMENT and item.path is not None
+            if item.code is DiagnosticCode.REPOSITORY_SOURCE_UNTRACKED
+            and item.path is not None
         }
 
     def scan(
         self,
         *,
-        plant: Mapping[str, object] | None = None,
         extra: Mapping[str, str] | None = None,
         untracked: Mapping[str, str] | None = None,
-        at: str = ".venv",
     ) -> ConformanceReport:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             profile_path = self.build(root, extra=extra, untracked=untracked)
-            if plant is not None:
-                plant_environment(root / at, **plant)  # type: ignore[arg-type]
             return self.report_for(root, profile_path)
 
-    # -- A1 MARKER ----------------------------------------------------------
-
-    def test_a1_sensitivity_a_genuine_environment_is_dispositioned(self) -> None:
-        """Only RECORD-owned, lock-pinned files leave the untracked population."""
-        report = self.scan(plant={})
-        self.assertEqual(self.untracked(report), set())
-        named = self.environments(report)
-        self.assertEqual(set(named), {".venv"})
-        self.assertIn("2", named[".venv"])
-        self.assertIn("provider==1.0", named[".venv"])
-
-    def test_each_closed_dependency_authority_format_is_accepted(self) -> None:
-        authorities = {
-            "requirements": {"requirements-dev.txt": "provider==1.0\n"},
-            "poetry": {
-                "requirements-dev.txt": "",
-                "poetry.lock": '[[package]]\nname = "provider"\nversion = "1.0"\n',
-            },
-            "uv": {
-                "requirements-dev.txt": "",
-                "uv.lock": '[[package]]\nname = "provider"\nversion = "1.0"\n',
-            },
-        }
-        for name, extra in authorities.items():
-            with self.subTest(authority=name):
-                report = self.scan(plant={}, extra=extra)
-                self.assertEqual(self.untracked(report), set(), report.to_dict())
-                self.assertEqual(set(self.environments(report)), {".venv"})
-
-    def test_a_mutable_requirement_is_not_dependency_authority(self) -> None:
-        report = self.scan(plant={}, extra={"requirements-dev.txt": "provider>=1.0\n"})
-        self.assertEqual(self.environments(report), {})
-        self.assertEqual(
-            self.untracked(report),
-            {
-                ".venv/lib/python3.13/site-packages/provider/__init__.py",
-                ".venv/lib/python3.13/site-packages/provider/client.py",
-            },
-        )
-
-    def test_copied_code_inside_a_genuine_environment_still_errors(self) -> None:
-        report = self.scan(
-            plant={
-                "sources": {
-                    **ENVIRONMENT_SOURCES,
-                    "copied_connector.py": PLANTED_HTTP_TRANSPORT,
-                }
-            }
-        )
-        self.assertEqual(
-            self.untracked(report), {".venv/copied_connector.py"}, report.to_dict()
-        )
-
-    def test_an_unrecorded_site_packages_file_still_errors(self) -> None:
-        report = self.scan(
-            plant={
-                "sources": {
-                    **ENVIRONMENT_SOURCES,
-                    "lib/python3.13/site-packages/hidden.py": PLANTED_HTTP_TRANSPORT,
-                }
-            }
-        )
-        self.assertEqual(
-            self.untracked(report),
-            {".venv/lib/python3.13/site-packages/hidden.py"},
-            report.to_dict(),
-        )
-
-    def test_a_recorded_distribution_absent_from_the_lock_still_errors(self) -> None:
-        report = self.scan(
-            plant={
-                "sources": installed_distribution_sources(
-                    name="undeclared-provider", version="9.9"
-                )
-            }
-        )
-        self.assertEqual(self.environments(report), {})
-        self.assertIn(
-            ".venv/lib/python3.13/site-packages/undeclared-provider/client.py",
-            self.untracked(report),
-        )
-
-    def test_a_record_hash_mismatch_still_errors(self) -> None:
-        sources = installed_distribution_sources()
-        sources["lib/python3.13/site-packages/provider/client.py"] += "# changed\n"
-        report = self.scan(plant={"sources": sources})
-        self.assertEqual(
-            self.untracked(report),
-            {".venv/lib/python3.13/site-packages/provider/client.py"},
-            report.to_dict(),
-        )
-
-    def test_a_record_entry_without_a_hash_still_errors(self) -> None:
-        report = self.scan(
-            plant={"sources": installed_distribution_sources(record_hashes=False)}
-        )
-        self.assertEqual(self.environments(report), {})
-        self.assertEqual(
-            self.untracked(report),
-            {
-                ".venv/lib/python3.13/site-packages/provider/__init__.py",
-                ".venv/lib/python3.13/site-packages/provider/client.py",
-            },
-        )
-
-    def test_tracked_code_inside_an_environment_is_measured(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            profile_path = self.build(root)
-            plant_environment(root / ".venv")
-            copied = root / ".venv/copied_connector.py"
-            copied.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
-            Fixture(root).git("add", "-f", ".venv/copied_connector.py")
-            report = self.report_for(root, profile_path)
-        self.assertEqual(self.untracked(report), set())
-        self.assertTrue(
-            any(
-                item.code is DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED
-                and "outbound_transport" in item.message
-                for item in report.diagnostics
-            ),
-            report.to_dict(),
-        )
-
-    def test_a1_sensitivity_both_real_marker_dialects_are_recognised(self) -> None:
-        """`virtualenv` writes `version_info`; the stdlib `venv` writes
-        `version`. Both are real environments, so both must be recognised."""
-        for name, marker in (
-            ("virtualenv", VIRTUALENV_MARKER),
-            ("stdlib venv", STDLIB_MARKER),
-        ):
-            with self.subTest(marker=name):
-                report = self.scan(plant={"marker": marker})
-                self.assertEqual(self.untracked(report), set())
-                self.assertEqual(set(self.environments(report)), {".venv"})
-
-    def test_a1_specificity_a_directory_merely_named_venv_still_errors(self) -> None:
-        """NEGATIVE 1. A name earns nothing. This directory has the layout and
-        the interpreter and is called `.venv`; it has no marker."""
-        report = self.scan(plant={"marker": None})
-        self.assertEqual(self.environments(report), {})
-        self.assertEqual(
-            self.untracked(report),
-            {
-                ".venv/lib/python3.13/site-packages/provider/__init__.py",
-                ".venv/lib/python3.13/site-packages/provider/client.py",
-            },
-        )
-
-    def test_a1_specificity_an_incomplete_marker_still_errors(self) -> None:
-        """NEGATIVE 2, one mutilation per required field of the metadata."""
-        mutilations = {
-            "no home": "include-system-site-packages = false\nversion = 3.13.7\n",
-            "empty home": (
-                "home =\ninclude-system-site-packages = false\nversion = 3.13.7\n"
-            ),
-            "relative home": (
-                "home = ../python/bin\n"
-                "include-system-site-packages = false\nversion = 3.13.7\n"
-            ),
-            "no system-site-packages": "home = /opt/py/bin\nversion = 3.13.7\n",
-            "non-boolean system-site-packages": (
-                "home = /opt/py/bin\n"
-                "include-system-site-packages = maybe\nversion = 3.13.7\n"
-            ),
-            "no version at all": (
-                "home = /opt/py/bin\ninclude-system-site-packages = false\n"
-            ),
-            "non-numeric version": (
-                "home = /opt/py/bin\n"
-                "include-system-site-packages = false\nversion = three.thirteen\n"
-            ),
-            "major only": (
-                "home = /opt/py/bin\n"
-                "include-system-site-packages = false\nversion = 3\n"
-            ),
-            "version keys disagree": (
-                "home = /opt/py/bin\ninclude-system-site-packages = false\n"
-                "version = 3.13.7\nversion_info = 3.11.9.final.0\n"
-            ),
-            "no key/value structure at all": "this is not a marker\n",
-            "empty marker": "",
-        }
-        for name, marker in mutilations.items():
-            with self.subTest(mutilation=name):
-                report = self.scan(plant={"marker": marker})
-                self.assertEqual(self.environments(report), {})
-                self.assertIn(
-                    ".venv/lib/python3.13/site-packages/provider/client.py",
-                    self.untracked(report),
-                )
-
-    def test_a1_specificity_a_marker_that_is_not_a_regular_file_still_errors(
-        self,
-    ) -> None:
-        """A symlinked or directory marker is not this environment's metadata."""
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            profile_path = self.build(root)
-            (root / "elsewhere").mkdir()
-            (root / "elsewhere/pyvenv.cfg").write_text(
-                VIRTUALENV_MARKER, encoding="utf-8"
-            )
-            plant_environment(root / ".venv", marker=None)
-            (root / ".venv/pyvenv.cfg").symlink_to(root / "elsewhere/pyvenv.cfg")
-            report = self.report_for(root, profile_path)
-        self.assertEqual(self.environments(report), {})
-        self.assertIn(
-            ".venv/lib/python3.13/site-packages/provider/client.py",
-            self.untracked(report),
-        )
-
-    def test_a1_liveness_the_marker_arm_classifies_real_repository_code(
-        self,
-    ) -> None:
-        """IN-SITU: the real scan of THIS repository, mutated and restored."""
-        for name, marker in (
-            ("complete", VIRTUALENV_MARKER),
-            ("incomplete", "home = /opt/py/bin\n"),
-        ):
-            with self.subTest(marker=name):
-                recognised, untracked = self.in_situ(marker=marker)
-                if name == "complete":
-                    self.assertEqual(recognised, {".dmgov-probe-env"})
-                    self.assertEqual(untracked, set())
-                else:
-                    self.assertEqual(recognised, set())
-                    self.assertTrue(untracked)
-
-    # -- A2 LAYOUT ----------------------------------------------------------
-
-    def test_a2_sensitivity_the_windows_layout_is_recognised(self) -> None:
-        report = self.scan(
-            plant={
-                "layout": "Lib/site-packages",
-                "interpreter": "Scripts/python.exe",
-                "sources": installed_distribution_sources(layout="Lib/site-packages"),
-            }
-        )
-        self.assertEqual(self.untracked(report), set())
-        self.assertEqual(set(self.environments(report)), {".venv"})
-
-    def test_a2_specificity_an_inconsistent_layout_still_errors(self) -> None:
-        """The layout directory name is DERIVED from the marker's version, so a
-        marker claiming 3.13 over a 3.11 tree is not internally consistent."""
-        report = self.scan(
-            plant={
-                "layout": "lib/python3.11/site-packages",
-                "sources": {
-                    "lib/python3.11/site-packages/client.py": PLANTED_HTTP_TRANSPORT
-                },
-            }
-        )
-        self.assertEqual(self.environments(report), {})
-        self.assertEqual(
-            self.untracked(report),
-            {".venv/lib/python3.11/site-packages/client.py"},
-        )
-
-    def test_a2_specificity_a_missing_or_symlinked_layout_still_errors(self) -> None:
-        with self.subTest(case="absent"):
-            report = self.scan(
-                plant={
-                    "layout": None,
-                    "sources": {"bin/activate_this.py": PLANTED_HTTP_TRANSPORT},
-                }
-            )
-            self.assertEqual(self.environments(report), {})
-            self.assertEqual(self.untracked(report), {".venv/bin/activate_this.py"})
-        with self.subTest(case="symlinked"):
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                profile_path = self.build(root)
-                (root / "vendored/site-packages").mkdir(parents=True)
-                (root / "vendored/site-packages/client.py").write_text(
-                    PLANTED_HTTP_TRANSPORT, encoding="utf-8"
-                )
-                plant_environment(root / ".venv", layout=None, sources={})
-                (root / ".venv/lib/python3.13").mkdir(parents=True)
-                (root / ".venv/lib/python3.13/site-packages").symlink_to(
-                    root / "vendored/site-packages"
-                )
-                report = self.report_for(root, profile_path)
-            self.assertEqual(self.environments(report), {})
-            self.assertIn("vendored/site-packages/client.py", self.untracked(report))
-
-    def test_a2_liveness_the_layout_arm_classifies_real_repository_code(self) -> None:
-        for name, layout in (
-            ("consistent", "lib/python3.13/site-packages"),
-            ("inconsistent", "lib/python3.11/site-packages"),
-        ):
-            with self.subTest(layout=name):
-                recognised, untracked = self.in_situ(layout=layout)
-                if name == "consistent":
-                    self.assertEqual(recognised, {".dmgov-probe-env"})
-                    self.assertEqual(untracked, set())
-                else:
-                    self.assertEqual(recognised, set())
-                    self.assertTrue(untracked)
-
-    # -- A3 INTERPRETER -----------------------------------------------------
-
-    def test_a3_sensitivity_every_accepted_interpreter_name_is_recognised(
-        self,
-    ) -> None:
-        for interpreter in ("bin/python", "bin/python3.13"):
-            with self.subTest(interpreter=interpreter):
-                report = self.scan(plant={"interpreter": interpreter})
-                self.assertEqual(self.untracked(report), set())
-                self.assertEqual(set(self.environments(report)), {".venv"})
-
-    def test_a3_sensitivity_a_symlinked_base_interpreter_is_still_an_interpreter(
-        self,
-    ) -> None:
-        """A real venv's `bin/python` is a symlink OUT to the base interpreter.
-        The containment arm must not reject the environment because of it: an
-        interpreter is not measured material."""
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            profile_path = self.build(root)
-            outside = Path(directory).parent / f"{root.name}-base-python"
-            outside.write_bytes(b"\x7fELF base interpreter\n")
-            try:
-                plant_environment(root / ".venv", interpreter=None)
-                (root / ".venv/bin").mkdir(parents=True, exist_ok=True)
-                (root / ".venv/bin/python").symlink_to(outside)
-                report = self.report_for(root, profile_path)
-            finally:
-                outside.unlink(missing_ok=True)
-        self.assertEqual(self.untracked(report), set())
-        self.assertEqual(set(self.environments(report)), {".venv"})
-
-    def test_a3_specificity_an_environment_without_an_interpreter_still_errors(
-        self,
-    ) -> None:
-        for case, interpreter in (
-            ("absent", None),
-            ("wrong version", "bin/python3.11"),
-            ("a directory, not a file", "DIRECTORY"),
-        ):
-            with self.subTest(case=case):
-                with tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory)
-                    profile_path = self.build(root)
-                    if interpreter == "DIRECTORY":
-                        plant_environment(root / ".venv", interpreter=None)
-                        (root / ".venv/bin/python").mkdir(parents=True)
-                    else:
-                        plant_environment(root / ".venv", interpreter=interpreter)
-                    report = self.report_for(root, profile_path)
-                self.assertEqual(self.environments(report), {})
-                self.assertIn(
-                    ".venv/lib/python3.13/site-packages/provider/client.py",
-                    self.untracked(report),
-                )
-
-    def test_a3_liveness_the_interpreter_arm_classifies_real_repository_code(
-        self,
-    ) -> None:
-        for name, interpreter in (("present", "bin/python"), ("absent", None)):
-            with self.subTest(interpreter=name):
-                recognised, untracked = self.in_situ(interpreter=interpreter)
-                if name == "present":
-                    self.assertEqual(recognised, {".dmgov-probe-env"})
-                    self.assertEqual(untracked, set())
-                else:
-                    self.assertEqual(recognised, set())
-                    self.assertTrue(untracked)
-
-    # -- A4 CONTAINMENT / NO SYMLINK ESCAPE ---------------------------------
-
-    def escaping_root(self, root: Path, target: Path) -> None:
-        plant_environment(root / ".venv")
-        (root / ".venv/lib/python3.13/site-packages/laundered.py").symlink_to(target)
-
-    def test_a4_specificity_a_symlink_escaping_the_environment_is_not_laundered(
-        self,
-    ) -> None:
-        """A genuine environment, holding a symlink whose target lives OUTSIDE
-        it. Nothing else in the repository lists that target, so without the
-        containment arm the file is dispositioned and vanishes."""
-        with tempfile.TemporaryDirectory() as outside_directory:
-            outside = Path(outside_directory) / "provider_client.py"
-            outside.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                profile_path = self.build(root)
-                self.escaping_root(root, outside)
-                report = self.report_for(root, profile_path)
-        self.assertEqual(set(self.environments(report)), {".venv"})
-        self.assertEqual(
-            self.untracked(report),
-            {".venv/lib/python3.13/site-packages/laundered.py"},
-        )
-
-    def test_a4_specificity_a_dangling_symlink_fails_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            profile_path = self.build(root)
-            self.escaping_root(root, Path("/nonexistent/provider_client.py"))
-            report = self.report_for(root, profile_path)
-        self.assertEqual(
-            self.untracked(report),
-            {".venv/lib/python3.13/site-packages/laundered.py"},
-        )
-
-    def test_a4_sensitivity_a_symlink_inside_the_environment_still_errors(
-        self,
-    ) -> None:
-        """RECORD provenance attaches to bytes, never a mutable link target."""
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            profile_path = self.build(root)
-            plant_environment(root / ".venv")
-            (root / ".venv/lib/python3.13/site-packages/alias.py").symlink_to(
-                root / ".venv/lib/python3.13/site-packages/provider/client.py"
-            )
-            report = self.report_for(root, profile_path)
-        self.assertEqual(
-            self.untracked(report),
-            {".venv/lib/python3.13/site-packages/alias.py"},
-        )
-        self.assertEqual(set(self.environments(report)), {".venv"})
-
-    def test_a4_liveness_the_containment_arm_classifies_real_repository_code(
-        self,
-    ) -> None:
-        clean, honest = self.in_situ()
-        self.assertEqual(clean, {".dmgov-probe-env"})
-        self.assertEqual(
-            honest, set(), "a proven installed source is dependency material"
-        )
-        recognised, untracked = self.in_situ(escape=True)
-        self.assertEqual(recognised, {".dmgov-probe-env"})
-        self.assertEqual(
-            untracked,
-            {".dmgov-probe-env/lib/python3.13/site-packages/laundered.py"},
-        )
-
-    # -- The two populations, and bypass D ----------------------------------
-
-    def test_the_two_untracked_populations_are_reported_separately(self) -> None:
-        """Collapsing them is what hid the problem. An IGNORED untracked source
-        and a VISIBLE one both error, and each says which population it is in.
-        """
+    def test_visible_and_ignored_python_are_separate_loud_errors(self) -> None:
         report = self.scan(
             extra={".gitignore": "hidden/\n"},
             untracked={
-                "hidden/provider_client.py": PLANTED_HTTP_TRANSPORT,
-                "shown/provider_client.py": PLANTED_HTTP_TRANSPORT,
+                "visible/connector.py": PLANTED_HTTP_TRANSPORT,
+                "hidden/connector.py": PLANTED_HTTP_TRANSPORT,
             },
         )
-        messages = {
-            item.path.as_posix(): item.message
-            for item in report.diagnostics
-            if item.code.value == SOURCE_UNTRACKED and item.path is not None
-        }
-        self.assertEqual(
-            set(messages), {"hidden/provider_client.py", "shown/provider_client.py"}
-        )
-        self.assertIn("ignore", messages["hidden/provider_client.py"])
-        self.assertNotIn("ignore", messages["shown/provider_client.py"])
-
-    def test_the_population_split_liveness_classifies_real_repository_code(
-        self,
-    ) -> None:
-        """IN-SITU liveness for the split itself, which the arm tests above do
-        not cover: A1-A4 each prove that a recognised environment LEAVES the
-        untracked population, but nothing proved that the two populations the
-        survivors land in are told apart in a REAL scan.
-
-        `untracked_ignored` is a legitimate zero in every corpus measured, so
-        ADR-0018 as amended forbids proving this from a tmp_path fixture or
-        from existing debt. The plant is made in THIS repository's real working
-        tree and the real scan is run over it.
-
-        The ignored plant needs NO edit to a tracked file: this repository's own
-        `.gitignore` already carries `__pycache__/`, so the plant is classified
-        by a real, product-authored ignore rule rather than one the test wrote
-        for itself.
-        """
-        ignored_plant = ROOT / "__pycache__/dmgov_probe_ignored.py"
-        visible_plant = ROOT / "dmgov_probe_visible.py"
-        self.assertFalse(visible_plant.exists(), "stale probe left behind")
-        self.assertFalse(ignored_plant.exists(), "stale probe left behind")
-        before = connector_scope(ROOT)
-        self.assertEqual(
-            before.untracked, (), "this repository's untracked population is not zero"
-        )
-        try:
-            ignored_plant.parent.mkdir(parents=True, exist_ok=True)
-            ignored_plant.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
-            visible_plant.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
-            scope = connector_scope(ROOT)
-            visible = {path.as_posix() for path in scope.untracked_visible}
-            ignored = {path.as_posix() for path in scope.untracked_ignored}
-        finally:
-            ignored_plant.unlink(missing_ok=True)
-            visible_plant.unlink(missing_ok=True)
-            if ignored_plant.parent.is_dir() and not any(
-                ignored_plant.parent.iterdir()
-            ):
-                ignored_plant.parent.rmdir()
-        # Both arms are live, and each is SPECIFIC: neither population absorbs
-        # the other's member. Collapsing the split — the pre-fix behaviour —
-        # fails this on the ignored arm.
-        self.assertEqual(ignored, {"__pycache__/dmgov_probe_ignored.py"})
-        self.assertEqual(visible, {"dmgov_probe_visible.py"})
-        after = connector_scope(ROOT)
-        self.assertEqual(after.untracked, (), "the in-situ probe was not restored")
-
-    def test_negative_3_an_ordinary_ignored_package_still_errors(self) -> None:
-        """NEGATIVE 3. Ignored, untracked, a plain package — no marker, no
-        layout, no interpreter, and therefore no disposition."""
-        report = self.scan(
-            extra={".gitignore": "vendor/\n"},
-            untracked={
-                "vendor/__init__.py": "",
-                "vendor/provider_client.py": PLANTED_HTTP_TRANSPORT,
-            },
-        )
-        self.assertEqual(self.environments(report), {})
         self.assertEqual(
             self.untracked(report),
-            {"vendor/__init__.py", "vendor/provider_client.py"},
+            {"visible/connector.py", "hidden/connector.py"},
+            report.to_dict(),
+        )
+        self.assertFalse(report.conforms, report.to_dict())
+
+    def test_a_pinned_identity_cannot_self_authorize_a_copied_connector(
+        self,
+    ) -> None:
+        files = forged_distribution_sources()
+        report = self.scan(
+            extra={
+                ".gitignore": ".venv/\n",
+                "requirements-dev.txt": "provider==1.0\n",
+                "app/use_provider.py": (
+                    "from provider.copied_connector import deliver\n\n"
+                    "def run():\n"
+                    "    return deliver()\n"
+                ),
+            },
+            untracked=files,
+        )
+        connector = ".venv/lib/python3.13/site-packages/provider/copied_connector.py"
+        self.assertIn(connector, self.untracked(report), report.to_dict())
+        self.assertFalse(report.conforms, report.to_dict())
+        self.assertNotIn(
+            "repository.dependency-environment",
+            {item.code.value for item in report.diagnostics},
+            report.to_dict(),
         )
 
-    def test_the_repository_root_can_never_be_a_dependency_environment(self) -> None:
-        """The repository root is never an environment candidate.
-
-        This was the largest hole in the directory-level design. File proof is
-        now independently required too, but the ancestor walk still stops
-        before root so a root marker buys nothing at all.
-        """
+    def test_tracked_python_inside_a_venv_is_still_measured(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             profile_path = self.build(
                 root,
-                untracked={"connectors/provider_client.py": PLANTED_HTTP_TRANSPORT},
-            )
-            plant_environment(root, sources={})
-            report = self.report_for(root, profile_path)
-        self.assertEqual(self.environments(report), {})
-        self.assertIn("connectors/provider_client.py", self.untracked(report))
-
-    def test_bypass_d_stays_closed_beside_a_recognised_environment(self) -> None:
-        """The whole point. A gitignored untracked connector in an ORDINARY
-        package still errors, in the same run in which a genuine environment
-        beside it is dispositioned away."""
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            profile_path = self.build(
-                root,
-                extra={".gitignore": ".venv/\nexample/connectors/\n"},
-                untracked={
-                    "example/connectors/provider_client.py": PLANTED_HTTP_TRANSPORT
+                extra={
+                    ".gitignore": ".venv/\n",
+                    ".venv/provider_connector.py": PLANTED_HTTP_TRANSPORT,
                 },
             )
-            plant_environment(root / ".venv")
+            scope = connector_scope(root)
+            self.assertIn(PurePosixPath(".venv/provider_connector.py"), scope.measured)
+            self.assertEqual(scope.untracked, ())
             report = self.report_for(root, profile_path)
-        self.assertEqual(set(self.environments(report)), {".venv"})
-        self.assertEqual(
-            self.untracked(report), {"example/connectors/provider_client.py"}
-        )
+            self.assertFalse(report.conforms, report.to_dict())
 
-    def test_the_disposition_is_independent_of_gitignore(self) -> None:
-        """A `.gitignore` is product-authored, so it decides nothing in either
-        direction: a genuine environment is dispositioned whether or not it is
-        ignored, and being ignored never disposes of anything by itself."""
-        for ignored in (True, False):
-            with self.subTest(ignored=ignored):
-                report = self.scan(
-                    plant={},
-                    extra={".gitignore": ".venv/\n"} if ignored else None,
-                )
-                self.assertEqual(self.untracked(report), set())
-                self.assertEqual(set(self.environments(report)), {".venv"})
-
-    # -- IN-SITU liveness harness -------------------------------------------
-
-    PROBE = ".dmgov-probe-env"
-
-    def in_situ(
-        self,
-        *,
-        marker: str | None = VIRTUALENV_MARKER,
-        layout: str | None = "lib/python3.13/site-packages",
-        interpreter: str | None = "bin/python",
-        escape: bool = False,
-    ) -> tuple[set[str], set[str]]:
-        """Mutate THIS repository's real working tree, scan it, and restore.
-
-        ADR-0018 as amended: a legitimate zero proves liveness by in-situ
-        mutation of the real corpus scan, never by a tmp_path fixture and never
-        by requiring existing debt. The baseline is asserted to be zero first,
-        so the classification observed is provably caused by the plant.
-        """
-        base = ROOT / self.PROBE
-        self.assertFalse(base.exists(), f"stale probe left behind at {base}")
+    def test_the_closed_rule_is_live_on_the_real_repository(self) -> None:
+        """A zero population is proved by an in-situ sensitivity mutation."""
+        probe = ROOT / ".dmgov-untracked-probe.py"
+        self.assertFalse(probe.exists(), f"stale probe left behind at {probe}")
         before = connector_scope(ROOT)
         self.assertEqual(
             before.untracked, (), "this repository's untracked population is not zero"
         )
-        escaped: Path | None = None
         try:
-            # The planted source lives under the layout ACTUALLY planted, so a
-            # mutilated layout is not silently repaired by writing a file into
-            # the consistent one. Getting this wrong made the arm look dead
-            # when it was the fixture that was defeating it.
-            installed_layout = layout or "lib/python3.13/site-packages"
-            sources = installed_distribution_sources(
-                layout=installed_layout,
-                name="mypy",
-                version="1.17.1",
-                files={"mypy/dmgov_probe.py": "installed = True\n"},
-            )
-            plant_environment(
-                base,
-                marker=marker,
-                layout=layout,
-                interpreter=interpreter,
-                sources=sources,
-            )
-            if escape:
-                escaped = ROOT / ".dmgov-probe-target.py"
-                escaped.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
-                link = base / "lib/python3.13/site-packages/laundered.py"
-                link.parent.mkdir(parents=True, exist_ok=True)
-                link.symlink_to(escaped)
-            report = self.report_for(ROOT, ROOT / ".dotmac/standards-profile.json")
-            recognised = set(self.environments(report))
-            untracked = {
-                path for path in self.untracked(report) if path.startswith(self.PROBE)
-            }
+            probe.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
+            during = connector_scope(ROOT)
+            self.assertIn(PurePosixPath(probe.name), during.untracked_visible, during)
         finally:
-            shutil.rmtree(base, ignore_errors=True)
-            if escaped is not None:
-                escaped.unlink(missing_ok=True)
+            probe.unlink(missing_ok=True)
         after = connector_scope(ROOT)
         self.assertEqual(after.untracked, (), "the in-situ probe was not restored")
-        return recognised, untracked

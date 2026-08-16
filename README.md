@@ -32,14 +32,14 @@ default-deny product egress, provider-agnostic ingress, and versioned
 inbox/outbox exchange — is proven. It is not a security control and is not
 cited as one.
 
-The amendment also replaces directory trust for virtual environments with
-file-level installed-distribution provenance: environment shape is only a
-prerequisite, and every dispositioned Python file must join to tracked exact
-dependency authority plus matching METADATA/RECORD identity, sha256 and size.
-Copied, unrecorded, unpinned, changed or symlinked neighbours remain untracked
-errors. In-process HTTP transports, webhook administration pages and local
-scheduled synchronisation are explicit false-friend boundaries. None of these
-changes alters ADR 0011's `Proposed` status.
+The amendment also refuses every untracked Python source. Virtualenv metadata
+cannot create a disposition: `METADATA` and `RECORD` are mutable worktree files,
+so a pinned name/version plus a matching self-authored digest is consistency,
+not provenance. Canonical CI evaluates a clean checkout; local environments
+belong outside the repository. In-process HTTP transports and webhook
+administration pages are explicit false-friend boundaries, while the attempted
+bare scheduled-sync narrowing was rejected after it hid real connector work.
+None of these changes alters ADR 0011's `Proposed` status.
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting

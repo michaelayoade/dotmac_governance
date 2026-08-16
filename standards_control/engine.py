@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 import ast
-import base64
 import copy
-import csv
 import functools
 import hashlib
 import json
 import re
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 from urllib.parse import urlsplit
-
-import tomllib
 
 from .contracts import (
     CONSERVED_MODULE_SYMBOL,
@@ -26,7 +22,6 @@ from .contracts import (
     ConnectorCategory,
     ConnectorScope,
     ConservedFinding,
-    DependencyEnvironment,
     Diagnostic,
     DiagnosticCode,
     ExcludedSource,
@@ -865,421 +860,11 @@ def _tracked_python_sources(root: Path) -> tuple[PurePosixPath, ...] | None:
     )
 
 
-#: Cap on how much of a dependency-environment marker is read. A real
-#: `pyvenv.cfg` is a handful of `key = value` lines; anything larger is not one,
-#: and refusing to read it keeps the disposition from being a file-read primitive.
-MARKER_BYTES = 65536
-
-#: Dependency provenance inputs are deliberately closed. Every accepted file is
-#: tracked in this repository and carries an exact name/version pair; a mutable
-#: requirement or an environment marker cannot confer provenance on source.
-REQUIREMENTS_FILE = re.compile(r"^requirements(?:[-_.].*)?\.txt$")
-PINNED_REQUIREMENT = re.compile(
-    r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)(?:\s|;|\\|$)"
-)
-NORMALIZED_DISTRIBUTION_SEPARATOR = re.compile(r"[-_.]+")
-LOCK_FILES = frozenset({PurePosixPath("poetry.lock"), PurePosixPath("uv.lock")})
-METADATA_BYTES = 1024 * 1024
-RECORD_BYTES = 16 * 1024 * 1024
-
-#: Marker keys a real dependency environment always carries. CLOSED: the
-#: stdlib `venv` and `virtualenv` both write these two, and a forgery that omits
-#: either is not an environment.
-MARKER_REQUIRED_KEYS = frozenset({"home", "include-system-site-packages"})
-
-#: The two — and only two — keys either tool uses to record the interpreter
-#: version. `virtualenv` writes `version_info`; the stdlib `venv` writes
-#: `version`. Enumerated rather than pattern-matched: a third spelling is a new
-#: governance decision, not a wildcard the predicate already grants.
-MARKER_VERSION_KEYS = ("version", "version_info")
-
-#: `include-system-site-packages` is a boolean in both dialects, and a marker
-#: that cannot answer it is not internally consistent.
-MARKER_BOOLEANS = frozenset({"true", "false"})
-
-#: A version value must BEGIN `MAJOR.MINOR`. `3.13.7.final.0` and `3.13.7` both
-#: qualify; `3`, `three.thirteen` and an empty value do not.
-MARKER_VERSION = re.compile(r"^(\d+)\.(\d+)(?:[.\s].*)?$")
-
-
-def _marker_fields(source: Path) -> dict[str, str] | None:
-    """Parse a dependency-environment marker, or None when there is not one.
-
-    The marker must be a REGULAR FILE. A symlinked marker is refused because
-    the metadata would then describe some other directory, and a directory
-    named `pyvenv.cfg` is refused because it is not metadata at all.
-    """
-    try:
-        if source.is_symlink() or not source.is_file():
-            return None
-        if source.stat().st_size > MARKER_BYTES:
-            return None
-        text = source.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return None
-    fields: dict[str, str] = {}
-    for line in text.splitlines():
-        key, separator, value = line.partition("=")
-        if separator:
-            fields[key.strip().lower()] = value.strip()
-    return fields
-
-
-def _marker_version(fields: Mapping[str, str]) -> tuple[int, int] | None:
-    """`(major, minor)` when the marker states one version consistently."""
-    versions: set[tuple[int, int]] = set()
-    for key in MARKER_VERSION_KEYS:
-        raw = fields.get(key)
-        if raw is None:
-            continue
-        match = MARKER_VERSION.match(raw)
-        if match is None:
-            # A version key that is PRESENT and unparseable is a broken marker,
-            # not an absent key: falling back to the other one would let a
-            # forgery pass by supplying one good value beside one bad.
-            return None
-        versions.add((int(match.group(1)), int(match.group(2))))
-    if len(versions) != 1:
-        # Zero: no version at all. Two: the dialects disagree, which is the
-        # internal inconsistency a hand-forged marker produces.
-        return None
-    return versions.pop()
-
-
-def _absolute(raw: str) -> bool:
-    """Is this an absolute path in either of the two path flavours?"""
-    return bool(raw) and (
-        PurePosixPath(raw).is_absolute() or PureWindowsPath(raw).is_absolute()
-    )
-
-
-class EnvironmentShape(NamedTuple):
-    """The evidence that proved one directory is a dependency environment."""
-
-    python_version: str
-    site_packages: PurePosixPath
-    interpreter: PurePosixPath
-
-
-def _normalized_distribution_name(name: str) -> str:
-    """PEP 503 comparison form for a distribution name."""
-    return NORMALIZED_DISTRIBUTION_SEPARATOR.sub("-", name).lower()
-
-
-def _tracked_dependency_pins(root: Path) -> frozenset[tuple[str, str]]:
-    """Exact dependency identities declared by tracked lock authority.
-
-    This is intentionally a small, closed parser: Poetry/uv lock packages and
-    exact ``name==version`` requirement files. A repository may not nominate a
-    path or invent another format at profile time. Unsupported authority leaves
-    installed files unproven, which fails toward the visible untracked error.
-    """
-    tracked = _git_paths(root, "--cached")
-    if tracked is None:
-        return frozenset()
-    pins: set[tuple[str, str]] = set()
-    for relative in tracked:
-        source = root / relative
-        if relative in LOCK_FILES:
-            try:
-                parsed = tomllib.loads(source.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, tomllib.TOMLDecodeError):
-                continue
-            packages = parsed.get("package")
-            if not isinstance(packages, list):
-                continue
-            for package in packages:
-                if not isinstance(package, dict):
-                    continue
-                name = package.get("name")
-                version = package.get("version")
-                if isinstance(name, str) and isinstance(version, str):
-                    pins.add((_normalized_distribution_name(name), version))
-            continue
-        if not REQUIREMENTS_FILE.fullmatch(relative.name):
-            continue
-        try:
-            lines = source.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeError):
-            continue
-        for line in lines:
-            match = PINNED_REQUIREMENT.match(line.strip())
-            if match is not None:
-                pins.add(
-                    (_normalized_distribution_name(match.group(1)), match.group(2))
-                )
-    return frozenset(pins)
-
-
-def _small_regular_text(source: Path, limit: int) -> str | None:
-    try:
-        if source.is_symlink() or not source.is_file() or source.stat().st_size > limit:
-            return None
-        return source.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return None
-
-
-def _distribution_identity(metadata: str) -> tuple[str, str] | None:
-    values: dict[str, list[str]] = {"name": [], "version": []}
-    for line in metadata.splitlines():
-        key, separator, value = line.partition(":")
-        lowered = key.lower()
-        if separator and lowered in values:
-            values[lowered].append(value.strip())
-    if len(values["name"]) != 1 or len(values["version"]) != 1:
-        return None
-    name = values["name"][0]
-    version = values["version"][0]
-    if not name or not version:
-        return None
-    return _normalized_distribution_name(name), version
-
-
-def _record_digest_matches(source: Path, digest: str, size: str) -> bool:
-    """Verify one RECORD sha256 and size without exposing file contents."""
-    algorithm, separator, encoded = digest.partition("=")
-    if algorithm != "sha256" or not separator or not encoded or not size.isdigit():
-        return False
-    try:
-        if source.is_symlink() or not source.is_file():
-            return False
-        payload = source.read_bytes()
-        expected = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-    except (OSError, ValueError):
-        return False
-    return len(payload) == int(size) and hashlib.sha256(payload).digest() == expected
-
-
-def _installed_distribution_files(
-    root: Path,
-    shape: EnvironmentShape,
-    pins: frozenset[tuple[str, str]],
-) -> tuple[dict[PurePosixPath, str], tuple[str, ...]]:
-    """Files proven to belong to pinned installed distributions.
-
-    The proof attaches to EACH file: it is a regular, non-symlink Python file
-    under the environment's site-packages, named in one distribution's RECORD,
-    with a matching sha256 and size. The distribution's METADATA identity must
-    also appear in tracked dependency authority. Merely living in a genuine
-    environment is never enough.
-    """
-    site_packages = root / shape.site_packages
-    owners: dict[PurePosixPath, set[str]] = {}
-    try:
-        metadata_directories = tuple(site_packages.glob("*.dist-info"))
-    except OSError:
-        return {}, ()
-    for directory in metadata_directories:
-        try:
-            if directory.is_symlink() or not directory.is_dir():
-                continue
-        except OSError:
-            continue
-        metadata = _small_regular_text(directory / "METADATA", METADATA_BYTES)
-        record = _small_regular_text(directory / "RECORD", RECORD_BYTES)
-        if metadata is None or record is None:
-            continue
-        identity = _distribution_identity(metadata)
-        if identity is None or identity not in pins:
-            continue
-        label = f"{identity[0]}=={identity[1]}"
-        try:
-            rows = tuple(csv.reader(record.splitlines()))
-        except csv.Error:
-            continue
-        for row in rows:
-            if len(row) != 3:
-                continue
-            recorded = PurePosixPath(row[0])
-            if (
-                recorded.is_absolute()
-                or ".." in recorded.parts
-                or recorded.suffix not in PYTHON_SUFFIXES
-            ):
-                continue
-            source = site_packages / recorded
-            if not _contains(site_packages, source):
-                continue
-            if not _record_digest_matches(source, row[1], row[2]):
-                continue
-            relative = shape.site_packages / recorded
-            owners.setdefault(relative, set()).add(label)
-    proven = {
-        path: next(iter(labels)) for path, labels in owners.items() if len(labels) == 1
-    }
-    return proven, tuple(sorted(set(proven.values())))
-
-
-def _dependency_environment(
-    root: Path, relative: PurePosixPath
-) -> EnvironmentShape | None:
-    """Is this repository-relative directory a TOOL-OWNED DEPENDENCY ENVIRONMENT?
-
-    A governance-owned SHAPE RECOGNISER and prerequisite to the file-level
-    source classification. It is NOT an exemption: no product configures it,
-    names a path into it, or supplies a predicate, and there is no profile key
-    for it. It is not `--exclude-standard` either — that would delete a
-    gitignored connector and a dependency tree in the same stroke, reopening
-    bypass D. The shape is proved from the environment's own metadata and
-    structure, independently of `.gitignore`; it disposes of no file by itself.
-
-    The predicate is CLOSED. All four arms must hold; there is no wildcard, no
-    "looks like", and no name match — a directory called `.venv` earns nothing
-    by being called that:
-
-    A1 MARKER      `<E>/pyvenv.cfg` is a regular file (never a symlink, never
-                   over MARKER_BYTES) parsing as `key = value` lines, carrying
-                   `home` as a non-empty ABSOLUTE path,
-                   `include-system-site-packages` as exactly `true`/`false`, and
-                   at least one of `version`/`version_info` beginning
-                   `MAJOR.MINOR`. Both version keys present must AGREE.
-    A2 LAYOUT      a real directory (never a symlink) at exactly
-                   `<E>/lib/python<MAJOR>.<MINOR>/site-packages` or
-                   `<E>/Lib/site-packages`. The name is DERIVED from the
-                   marker's version rather than discovered by globbing, and
-                   that derivation IS the internal-consistency check: a marker
-                   claiming 3.13 over a 3.11 tree proves nothing.
-    A3 INTERPRETER a regular file at exactly `<E>/bin/python`,
-                   `<E>/bin/python<MAJOR>.<MINOR>`, or `<E>/Scripts/python.exe`.
-                   Real environments symlink this OUT to the base interpreter,
-                   which is expected and permitted: an interpreter is not
-                   measured material. Only sources are subject to A4.
-    A4 CONTAINMENT `<E>` is not itself a symlink and resolves inside the
-                   repository. Per-file containment is checked separately, in
-                   `_environment_home`.
-
-    These four arms prove only the environment. A source is dependency material
-    only when `_installed_distribution_files` separately proves that exact file
-    from tracked dependency authority, METADATA identity and RECORD digest.
-    """
-    base = root / relative
-    try:
-        if base.is_symlink() or not base.is_dir():
-            return None
-        if not _contains(root, base):
-            return None
-    except OSError:
-        return None
-    fields = _marker_fields(base / "pyvenv.cfg")
-    if fields is None or not MARKER_REQUIRED_KEYS.issubset(fields):
-        return None
-    if not _absolute(fields["home"]):
-        return None
-    if fields["include-system-site-packages"].lower() not in MARKER_BOOLEANS:
-        return None
-    version = _marker_version(fields)
-    if version is None:
-        return None
-    major, minor = version
-    site_packages = _first_directory(
-        base,
-        (
-            PurePosixPath("lib") / f"python{major}.{minor}" / "site-packages",
-            PurePosixPath("Lib") / "site-packages",
-        ),
-    )
-    if site_packages is None:
-        return None
-    interpreter = _first_file(
-        base,
-        (
-            PurePosixPath("bin") / "python",
-            PurePosixPath("bin") / f"python{major}.{minor}",
-            PurePosixPath("Scripts") / "python.exe",
-        ),
-    )
-    if interpreter is None:
-        return None
-    return EnvironmentShape(
-        python_version=f"{major}.{minor}",
-        site_packages=relative / site_packages,
-        interpreter=relative / interpreter,
-    )
-
-
-def _first_directory(
-    base: Path, candidates: tuple[PurePosixPath, ...]
-) -> PurePosixPath | None:
-    """The first candidate that is a REAL directory. A symlink is not one."""
-    for candidate in candidates:
-        path = base / candidate
-        try:
-            if not path.is_symlink() and path.is_dir():
-                return candidate
-        except OSError:
-            continue
-    return None
-
-
-def _first_file(
-    base: Path, candidates: tuple[PurePosixPath, ...]
-) -> PurePosixPath | None:
-    """The first candidate that resolves to a regular file.
-
-    Unlike `_first_directory` this FOLLOWS symlinks, because the interpreter of
-    a real environment is one, pointing at the base installation outside it.
-    """
-    for candidate in candidates:
-        path = base / candidate
-        try:
-            if path.is_file():
-                return candidate
-        except OSError:
-            continue
-    return None
-
-
-def _contains(outer: Path, inner: Path) -> bool:
-    """Does `inner` RESOLVE to `outer` itself or somewhere beneath it?
-
-    Both sides are resolved, so every symlink in either path is followed. A
-    path that cannot be resolved — a dangling link, a cycle — is not contained:
-    the disposition fails closed rather than laundering something it cannot see.
-    """
-    try:
-        resolved_outer = outer.resolve(strict=True)
-        resolved_inner = inner.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError):
-        return False
-    return resolved_inner == resolved_outer or resolved_outer in resolved_inner.parents
-
-
-def _environment_home(
-    root: Path,
-    relative: PurePosixPath,
-    cache: dict[PurePosixPath, EnvironmentShape | None],
-) -> PurePosixPath | None:
-    """The recognised environment containing this untracked source, if any.
-
-    Ancestors are walked DEEPEST FIRST, so a nested environment claims its own
-    files, and the repository root itself is never a candidate. An ancestor that
-    is a recognised environment but does not CONTAIN the resolved file is
-    skipped rather than accepted — that is the symlink-escape arm (A4): a link
-    inside a genuine environment pointing out of it launders nothing, and the
-    walk continues outward in case an enclosing environment genuinely holds it.
-    """
-    for ancestor in relative.parents:
-        if ancestor == PurePosixPath("."):
-            break
-        if ancestor not in cache:
-            cache[ancestor] = _dependency_environment(root, ancestor)
-        if cache[ancestor] is None:
-            continue
-        if _contains(root / ancestor, root / relative):
-            return ancestor
-    return None
-
-
 class UntrackedPopulations(NamedTuple):
     """Python on disk but outside the index, enumerated as distinct populations.
 
-    Three disjoint outcomes, never collapsed into one number:
-
     * `visible` — untracked and NOT ignored: what a plain checkout shows.
     * `ignored` — untracked AND hidden by this repository's own ignore rules.
-    * `dependency_environments` — files proven one-by-one as installed,
-      lock-pinned distribution material, grouped by their environment.
 
     Both `visible` and `ignored` are errors. The split exists so the two are
     REPORTED separately, not so one of them can be forgiven: an ignore file is
@@ -1288,7 +873,6 @@ class UntrackedPopulations(NamedTuple):
 
     visible: tuple[PurePosixPath, ...]
     ignored: tuple[PurePosixPath, ...]
-    dependency_environments: tuple[DependencyEnvironment, ...]
 
 
 def _untracked_python_populations(root: Path) -> UntrackedPopulations:
@@ -1298,15 +882,18 @@ def _untracked_python_populations(root: Path) -> UntrackedPopulations:
     unmonitored rather than exempt: the engine cannot claim a zero over code
     whose provenance the repository does not record.
 
-    `--exclude-standard` is deliberately NOT passed. With it, a gitignored
-    untracked connector and a gitignored dependency tree disappear together,
-    which is bypass D reopened. The ignore query is run SEPARATELY and used
-    only to split the population in the report. When it cannot be answered, no
-    source is classified as ignored — the split fails toward the louder half.
+    `--exclude-standard` is deliberately NOT passed to the inventory query.
+    Every untracked Python source remains an error, including installed package
+    contents and generated console shims inside an in-repository environment.
+    METADATA and RECORD are controlled by the same working tree and therefore
+    cannot authorize source out of this population. The ignore query is run
+    SEPARATELY and used only to split the report. When it cannot be answered,
+    no source is classified as ignored — the split fails toward the louder
+    half.
     """
     others = _git_paths(root, "--others")
     if others is None:
-        return UntrackedPopulations((), (), ())
+        return UntrackedPopulations((), ())
     sources = sorted(
         {relative for relative in others if _is_python_source(root, relative)},
         key=lambda path: path.as_posix(),
@@ -1314,37 +901,11 @@ def _untracked_python_populations(root: Path) -> UntrackedPopulations:
     unignored = _git_paths(root, "--others", "--exclude-standard")
     not_ignored = frozenset(unignored) if unignored is not None else frozenset(sources)
 
-    cache: dict[PurePosixPath, EnvironmentShape | None] = {}
-    evidence: dict[PurePosixPath, tuple[dict[PurePosixPath, str], tuple[str, ...]]] = {}
-    pins = _tracked_dependency_pins(root)
-    counts: dict[PurePosixPath, int] = {}
     visible: list[PurePosixPath] = []
     ignored: list[PurePosixPath] = []
     for relative in sources:
-        home = _environment_home(root, relative, cache)
-        if home is not None and home not in evidence:
-            shape = cache[home]
-            assert shape is not None
-            evidence[home] = _installed_distribution_files(root, shape, pins)
-        if home is not None and relative in evidence[home][0]:
-            counts[home] = counts.get(home, 0) + 1
-            continue
         (visible if relative in not_ignored else ignored).append(relative)
-    environments = []
-    for home in sorted(counts, key=lambda path: path.as_posix()):
-        shape = cache[home]
-        assert shape is not None  # only recognised roots reach `counts`
-        environments.append(
-            DependencyEnvironment(
-                root=home,
-                python_version=shape.python_version,
-                site_packages=shape.site_packages,
-                interpreter=shape.interpreter,
-                python_source_count=counts[home],
-                distributions=evidence[home][1],
-            )
-        )
-    return UntrackedPopulations(tuple(visible), tuple(ignored), tuple(environments))
+    return UntrackedPopulations(tuple(visible), tuple(ignored))
 
 
 def _inside(relative: PurePosixPath, roots: tuple[PurePosixPath, ...]) -> bool:
@@ -4326,7 +3887,6 @@ def _derive_scope(
             excluded=(),
             untracked_visible=untracked.visible,
             untracked_ignored=untracked.ignored,
-            dependency_environments=untracked.dependency_environments,
         )
     # Only trees are retained. The raw text is read to parse it and then
     # dropped, so no downstream rule can fall back to scanning it.
@@ -4429,7 +3989,6 @@ def _derive_scope(
         excluded=excluded,
         untracked_visible=untracked.visible,
         untracked_ignored=untracked.ignored,
-        dependency_environments=untracked.dependency_environments,
         conserved=tuple(conserved),
     )
 
@@ -4442,7 +4001,7 @@ def connector_scope(
     untracked = (
         _untracked_python_populations(root)
         if inventory is not None
-        else UntrackedPopulations((), (), ())
+        else UntrackedPopulations((), ())
     )
     pinned = _declared_runtime_paths(profile) if profile is not None else frozenset()
     return _derive_scope(root, inventory, untracked, pinned)
@@ -4668,7 +4227,7 @@ def verify_repository(
     untracked = (
         _untracked_python_populations(root)
         if inventory is not None
-        else UntrackedPopulations((), (), ())
+        else UntrackedPopulations((), ())
     )
     scope = _derive_scope(root, inventory, untracked, _declared_runtime_paths(profile))
     for relative in _grafted_trees(root):
@@ -4690,32 +4249,6 @@ def verify_repository(
                 "not a conformant one",
             )
         )
-    for environment in scope.dependency_environments:
-        findings.append(
-            _notice(
-                DiagnosticCode.REPOSITORY_DEPENDENCY_ENVIRONMENT,
-                f"{environment.python_source_count} untracked Python sources "
-                "under this directory are individually proven as INSTALLED "
-                "DISTRIBUTION MATERIAL rather than repository sources, and are "
-                "dispositioned out of the untracked population. The directory "
-                "was proved to be a Python "
-                f"{environment.python_version} dependency environment from its "
-                "own metadata and structure — marker "
-                f"{(environment.root / 'pyvenv.cfg').as_posix()}, layout "
-                f"{environment.site_packages.as_posix()}, interpreter "
-                f"{environment.interpreter.as_posix()} — and every removed file "
-                "has a matching sha256 and size in one METADATA-identified "
-                "distribution's RECORD, with that exact identity pinned in "
-                "tracked dependency authority. Proven distributions: "
-                f"{', '.join(environment.distributions)}. This is a "
-                "governance-owned SOURCE CLASSIFICATION, not an exemption: no "
-                "product may configure it, name a path into it, or supply a "
-                "predicate, and a directory merely NAMED like an environment "
-                "earns nothing. Any copied, unrecorded, unpinned, changed or "
-                "symlinked Python source remains an untracked-source error",
-                path=environment.root,
-            )
-        )
     for relative in scope.untracked_visible:
         findings.append(
             _finding(
@@ -4735,9 +4268,10 @@ def verify_repository(
                 "is unmonitored rather than exempt. An ignore rule is "
                 "product-authored and decides nothing about what is measured — "
                 "it is reported as its own population so that it can be seen, "
-                "never so that it can be forgiven. It is not dependency "
-                "material either: it lacks accepted installed-distribution "
-                "file proof. Track it, or remove it from the working tree",
+                "never so that it can be forgiven. No worktree-controlled "
+                "dependency metadata may authorize it away. Track it, remove "
+                "it from the working tree, or keep the environment outside "
+                "the repository",
                 path=relative,
             )
         )

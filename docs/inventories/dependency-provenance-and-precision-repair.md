@@ -1,15 +1,18 @@
-# Dependency provenance and connector precision repair
+# Untracked-source closure and connector precision repair
 
 - Date: 2026-08-16
 - Decision under review: ADR 0011 (`Proposed`, non-normative)
 - Adoption state: all product profiles remain `PENDING-APPROVAL`
-- Implementation state: draft PR #16; not merged or pinned
-- Acceptance state: the first pushed tip passed all 295 integrated tests and
-  static checks; the recall correction and exact final tip still require CI
+- Implementation state: withdrawal implemented locally on draft PR #16's
+  branch; not committed, pushed, merged or pinned
+- Acceptance state: `bb60968` passed 310 integrated tests and static checks,
+  but the stronger forged-RECORD fixture blocked acceptance; the withdrawal
+  implemented after that finding still requires exact-tip CI
 
-This inventory holds the attack detail behind ADR 0011's file-proven source
-disposition and two accepted precision boundaries. The ADR holds the normative rules;
-this file records why they exist and what must be rerun before approval.
+This inventory holds the attack detail behind ADR 0011's withdrawn source
+dispositions and two accepted precision boundaries. The ADR holds the
+normative rules; this file records why they exist and what must be rerun before
+approval.
 
 ## Blocker demonstrated by the sharded audit
 
@@ -24,38 +27,43 @@ The four environment arms correctly answered “is this a Python environment?”
 They did not answer “which exact files did an accepted dependency install?”
 Treating the first answer as the second was the defect.
 
-## Corrected proof chain
+## The file-proven repair was still self-authorization
 
-An untracked Python source now leaves the error population only when all of the
-following evidence joins on that exact file:
+The file-level repair closed all seven copy-only attacks, but the proof chain
+terminated in worktree-controlled material. A stronger fixture:
 
-1. The existing A1–A4 predicate proves a contained Python environment and its
-   derived `site-packages` directory.
-2. A regular `*.dist-info/METADATA` declares one distribution name and version.
-3. The normalized exact pair is present in tracked `poetry.lock`, `uv.lock`, or
-   exact `requirements*.txt` authority.
-4. That distribution's regular CSV `RECORD` names the relative Python file.
-5. The RECORD's sha256 and size match the current regular, non-symlink file.
-6. No second accepted distribution also claims the file.
+1. kept `provider==1.0` in tracked dependency authority;
+2. placed a live HTTP connector at
+   `provider/copied_connector.py` below `site-packages`;
+3. wrote `provider-1.0.dist-info/METADATA` and a matching `RECORD` sha256 and
+   size; and
+4. imported that connector from tracked application code.
 
-The notice publishes the exact accepted distribution identities and proved
-file count. It never reports an entire environment as trusted.
+Against `bb60968`, the result was `conforms=True`, `untracked=[]`, `errors=[]`,
+with the environment recognised. The lock authenticated only a name/version;
+the measured worktree supplied both the bytes and the digest used to excuse
+them. That is consistency, not provenance.
 
-## Permanent escape canaries
+## Final closed rule
 
-| Escape family | Required verdict |
+No untracked Python source is dispositioned. Visible and ignored sources remain
+separate report populations, but both produce `repository.source.untracked`.
+Virtualenv markers, `site-packages`, exact locks, METADATA, RECORD, hashes and
+sizes have no authority to remove a file. Tracked Python remains measured even
+inside an environment.
+
+Permanent canaries hold both directions:
+
+| Shape | Required verdict |
 | --- | --- |
-| Connector copied into a genuine environment root | `repository.source.untracked` |
-| Connector copied into `site-packages` but absent from RECORD | `repository.source.untracked` |
-| Marker/layout/interpreter shape without distribution evidence | `repository.source.untracked` |
-| Valid METADATA/RECORD identity absent from tracked dependency authority | `repository.source.untracked` |
-| Recorded file changed after installation | `repository.source.untracked` |
-| RECORD entry with no sha256 | `repository.source.untracked` |
-| Internal, escaping or dangling Python symlink | `repository.source.untracked` |
+| Visible copied connector | `repository.source.untracked` |
+| Gitignored copied connector | `repository.source.untracked` |
+| Genuine virtualenv source | `repository.source.untracked` |
+| Forged pinned METADATA/RECORD plus tracked importer | `repository.source.untracked` |
+| Tracked connector inside a virtualenv | measured connector finding |
 
-Counter-canaries prove that matching pinned distribution files are
-dispositioned on POSIX and Windows layouts, while a tracked connector inside a
-recognised environment remains in the measured universe.
+Canonical CI runs from a clean checkout. Local in-repository environments fail
+deliberately and belong outside the repository.
 
 ## Precision findings from the systemic false-positive audit
 
@@ -117,19 +125,26 @@ six category counts remain zero in both revisions.
   and negative canaries establish the boundary without manufacturing a
   reduction to claim usefulness.
 
-The file-proven disposition also turns directory trust into explicit outcomes.
-Starter proves 2,680 files from exact lock-pinned distributions and leaves 439
-unproved files as errors: 402 unpinned `pip` sources, 34 generated console
-scripts outside `site-packages`, two unpinned Ruff sources and one virtualenv
-bootstrap source. Vendor Control Plane has no matching tracked dependency
-authority, so its 402 `pip` sources, three console/bootstrap scripts and one
-virtualenv bootstrap source remain errors. This is the intended F1/F3 verdict,
-not a hidden exclusion; CI worktrees without local environments are unaffected.
+With no disposition, Starter's current developer worktree reports all 3,119
+ignored Python sources below its in-repository environment; Vendor Control
+Plane reports all 406. Those are local-worktree operability results, not product
+CI results: Starter is audit corpus rather than one of the four product
+adopters, and Vendor Control Plane's standards job uses a clean `ubuntu-latest`
+checkout where the local environment is absent.
+
+The final withdrawal rerun compared this engine with `bb60968` over the same six
+repositories. All five adopter measured-source digests were byte-identical and
+every connector-category finding was unchanged. Governance's digest changed
+because its engine and tests are the sources under review; its six category
+counts stayed zero. The untracked results were: Starter 2 visible / 3,119
+ignored, Vendor Control Plane 1 / 406, Academy 2 / 0, ERP 2 / 0, Sub 2 / 0,
+Governance 0 / 0. The visible files are the uncommitted adoption work in those
+dedicated worktrees, not baseline inputs.
 
 ## Evidence still required before acceptance
 
 1. Rerun the integrated unit suite in the approved Git-hosted environment from
-   the exact recall-corrected tip.
+   the exact disposition-withdrawal tip.
 2. Keep the six-repository comparison artefact with the review evidence and
    confirm its measured-source digests remain equal after any rebase.
 3. Keep ADR 0011 `Proposed` and every adopter `PENDING-APPROVAL` until Michael

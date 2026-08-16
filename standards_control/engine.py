@@ -1657,28 +1657,6 @@ SCHEDULE_TABLE_NAMES = ("beat_schedule", "celerybeat_schedule", "cron_schedule")
 #: The key under which such a table names the callable it runs.
 SCHEDULE_TABLE_TASK_KEY = "task"
 TASK_SUBJECT_HINTS = ("sync", "connector", "integration", "webhook", "poll", "fetch")
-#: `sync` alone names a relationship, not an external system. A local
-#: projection, cache or Postgres reconciliation uses the same verb. It becomes
-#: a connector subject only when its own name carries one of these generic
-#: external qualifiers, or the module independently holds another connector
-#: surface. Provider-specific product names do not belong in this vocabulary.
-SYNC_TASK_EXTERNAL_QUALIFIERS = (
-    "external",
-    "integration",
-    "connector",
-    "feed",
-    "ingest",
-    "import",
-    "poll",
-    "replicat",
-    "upstream",
-    "remote",
-    "mirror",
-    "provider",
-    "webhook",
-    "erp",
-    "crm",
-)
 #: `sync` is a substring of `async`, and `async` says nothing whatsoever about
 #: an external feed — it is the ordinary word for "not blocking". Plain
 #: substring matching therefore made EVERY `async` identifier connector-shaped:
@@ -3087,20 +3065,15 @@ def _mentions(name: str, hints: tuple[str, ...]) -> bool:
     )
 
 
-def _is_connector_shaped(name: str, *, connector_context: bool = False) -> bool:
+def _is_connector_shaped(name: str) -> bool:
     """Is this name the SUBJECT half — something a connector would run?
 
-    Five hints name external work on their own. `sync` does not: local database
-    projections and cache reconciliation use the same verb. A sync subject must
-    name a generic external qualifier or sit in a module independently proved
-    to hold another connector surface.
+    The ratchet reads `sync`, `connector`, `integration`, `webhook`, `poll` and
+    `fetch`.  It excludes `sync` inside `async`, but it deliberately does not
+    infer whether a bare sync is local: the real corpus uses the same scheduled
+    shape for both local reconciliation and live provider/device work.
     """
-    non_sync = tuple(hint for hint in TASK_SUBJECT_HINTS if hint != SYNC_PREFIX)
-    if _mentions(name, non_sync):
-        return True
-    return _mentions(name, (SYNC_PREFIX,)) and (
-        connector_context or _mentions(name, SYNC_TASK_EXTERNAL_QUALIFIERS)
-    )
+    return _mentions(name, TASK_SUBJECT_HINTS)
 
 
 def _imports_a_scheduler(tree: ast.Module) -> bool:
@@ -3271,9 +3244,7 @@ def _schedule_table_subjects(tree: ast.Module) -> list[str]:
     return subjects
 
 
-def _schedules_a_connector(
-    tree: ast.Module, *, connector_context: bool = False
-) -> bool:
+def _schedules_a_connector(tree: ast.Module) -> bool:
     """Does this module SCHEDULE a connector run, in executable code?
 
     This rule used to open with `any(hint in source.lower() ...)` — a scan of
@@ -3313,9 +3284,7 @@ def _schedules_a_connector(
     framework = _imports_a_scheduler(tree)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if _is_connector_shaped(
-                node.name, connector_context=connector_context
-            ) and any(
+            if _is_connector_shaped(node.name) and any(
                 _is_scheduling_decorator(decorator, framework=framework)
                 for decorator in node.decorator_list
             ):
@@ -3323,20 +3292,15 @@ def _schedules_a_connector(
         elif isinstance(node, ast.Call):
             subjects = _dispatch_subjects(node)
             subjects.extend(_registration_subjects(node, framework=framework))
-            if any(
-                _is_connector_shaped(subject, connector_context=connector_context)
-                for subject in subjects
-            ):
+            if any(_is_connector_shaped(subject) for subject in subjects):
                 return True
         elif isinstance(node, ast.Attribute):
             if any(
-                _is_connector_shaped(subject, connector_context=connector_context)
-                for subject in _dispatch_subjects(node)
+                _is_connector_shaped(subject) for subject in _dispatch_subjects(node)
             ):
                 return True
     return any(
-        _is_connector_shaped(subject, connector_context=connector_context)
-        for subject in _schedule_table_subjects(tree)
+        _is_connector_shaped(subject) for subject in _schedule_table_subjects(tree)
     )
 
 
@@ -3607,10 +3571,7 @@ def _classify_connector(
         found.add(ConnectorCategory.WEBHOOK_SURFACE)
     if credential:
         found.add(ConnectorCategory.PROVIDER_CREDENTIAL)
-    if _schedules_a_connector(
-        tree,
-        connector_context=http or smtp or webhook or credential or checkpoint,
-    ):
+    if _schedules_a_connector(tree):
         found.add(ConnectorCategory.CONNECTOR_TASK)
     if checkpoint:
         found.add(ConnectorCategory.SYNC_CHECKPOINT)

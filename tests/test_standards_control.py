@@ -2962,9 +2962,18 @@ class StandardsTests(unittest.TestCase):
             self.exceeded_categories(report), {"webhook_surface"}, report.to_dict()
         )
 
-    def test_a_scheduled_local_database_sync_is_not_a_connector_task(self) -> None:
+    def test_a_bare_scheduled_sync_remains_conservatively_measured(self) -> None:
+        """Names alone cannot prove that a scheduled sync is local.
+
+        The corpus contains both local reconciliation and live provider/device
+        work with this exact executable shape.  Until the detector owns a
+        provider-agnostic call-edge proof, recall wins: the transitional
+        ratchet keeps the finding and records the known false-positive cost.
+        """
         report = self.connector_report(runtime=LOOKALIKE_LOCAL_SYNC_TASK)
-        self.assertTrue(report.conforms, report.to_dict())
+        self.assertEqual(
+            self.exceeded_categories(report), {"connector_task"}, report.to_dict()
+        )
 
     def test_a_scheduled_sync_with_an_external_subject_stays_measured(self) -> None:
         report = self.connector_report(runtime=PLANTED_CONNECTOR_TASK)

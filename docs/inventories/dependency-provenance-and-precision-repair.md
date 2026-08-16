@@ -3,12 +3,12 @@
 - Date: 2026-08-16
 - Decision under review: ADR 0011 (`Proposed`, non-normative)
 - Adoption state: all product profiles remain `PENDING-APPROVAL`
-- Implementation state: local working tree; not committed, pushed, merged or pinned
-- Acceptance state: static checks pass; the integrated suite, eight audit shards
-  and Git-hosted CI remain required
+- Implementation state: draft PR #16; not merged or pinned
+- Acceptance state: the first pushed tip passed all 295 integrated tests and
+  static checks; the recall correction and exact final tip still require CI
 
 This inventory holds the attack detail behind ADR 0011's file-proven source
-disposition and three precision boundaries. The ADR holds the normative rules;
+disposition and two accepted precision boundaries. The ADR holds the normative rules;
 this file records why they exist and what must be rerun before approval.
 
 ## Blocker demonstrated by the sharded audit
@@ -57,7 +57,7 @@ Counter-canaries prove that matching pinned distribution files are
 dispositioned on POSIX and Windows layouts, while a tracked connector inside a
 recognised environment remains in the measured universe.
 
-## Three systemic false-positive families
+## Precision findings from the systemic false-positive audit
 
 ### In-process HTTP transports
 
@@ -83,23 +83,54 @@ For exact management path segments, the handler must consume callback material
 callback mounted beneath a management prefix remains measured. Non-management
 webhook routes keep the existing rule.
 
-### Local synchronisation is not connector scheduling
+### A bare scheduled sync cannot be narrowed by name
 
-`sync` names a relationship. It does not say one side is external. Local
-Postgres projections and cache reconciliation were counted when a scheduler
-decorator supplied the evidence half and the bare verb supplied the subject.
+`sync` names a relationship. Local Postgres projection and live provider or
+device work use the same scheduling shapes, so the attempted generic qualifier
+repair was rejected rather than shipped. The six-repository comparison proved
+that it removed fifteen real findings: Mono, Paystack, staff-account, GIS,
+RADIUS, router and UISP work were among them. Product/provider proper names do
+not belong in the Governance vocabulary, and the generic vocabulary did not
+recover those call edges.
 
-The repair requires a generic external qualifier in the scheduled subject or
-another independently proven connector surface in the module. The rule does
-not grow a product/provider proper-name list. Existing
-`sync_provider_invoices`-shaped canaries remain red.
+The detector therefore retains the bare scheduled `sync` finding. This leaves
+known local-reconciliation false positives in a transitional inventory, but it
+does not silently lose live connector work. A future precision change needs a
+provider-agnostic call-edge proof and the same full-corpus comparison.
+
+## Final corpus adjudication
+
+The comparison used the engine's own Git-tracked inventory, reachability
+exclusion, factory trace and classifier. Each adopter repository's ordered
+measured paths and bytes had the same SHA-256 before and after, so changes below
+are classifier changes over an identical adopter universe. Governance's digest
+changes because the classifier under review is itself a measured source; its
+six category counts remain zero in both revisions.
+
+- Academy, ERP, Governance, Starter and Vendor Control Plane retain identical
+  findings in all six categories.
+- Sub retains identical findings except
+  `tests/test_dotmac_erp_outbox.py`: its explicit `httpx.MockTransport` is an
+  in-process fake, so its one `outbound_transport` finding is removed. The file
+  remains measured; only that constructor arm changes.
+- The management-webhook repair changes no real-corpus finding. Its positive
+  and negative canaries establish the boundary without manufacturing a
+  reduction to claim usefulness.
+
+The file-proven disposition also turns directory trust into explicit outcomes.
+Starter proves 2,680 files from exact lock-pinned distributions and leaves 439
+unproved files as errors: 402 unpinned `pip` sources, 34 generated console
+scripts outside `site-packages`, two unpinned Ruff sources and one virtualenv
+bootstrap source. Vendor Control Plane has no matching tracked dependency
+authority, so its 402 `pip` sources, three console/bootstrap scripts and one
+virtualenv bootstrap source remain errors. This is the intended F1/F3 verdict,
+not a hidden exclusion; CI worktrees without local environments are unaffected.
 
 ## Evidence still required before acceptance
 
-1. Run the full integrated unit suite in the approved Git-hosted environment.
-2. Rerun the eight short audit shards against the final engine revision.
-3. Produce the per-repository before/after finding inventory and adjudicate
-   every change; no unexplained loss is acceptable.
-4. Run the final pull-request CI from the exact pushed tip.
-5. Keep ADR 0011 `Proposed` and every adopter `PENDING-APPROVAL` until Michael
+1. Rerun the integrated unit suite in the approved Git-hosted environment from
+   the exact recall-corrected tip.
+2. Keep the six-repository comparison artefact with the review evidence and
+   confirm its measured-source digests remain equal after any rebase.
+3. Keep ADR 0011 `Proposed` and every adopter `PENDING-APPROVAL` until Michael
    explicitly accepts the record after that evidence is reviewed.

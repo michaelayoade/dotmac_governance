@@ -1603,14 +1603,14 @@ inside `site-packages`, an unpinned distribution, a digest mismatch, a hashless
 record, internal and escaping symlinks, plus tracked code inside an environment
 which remains MEASURED. A genuine pinned distribution with matching records is
 still dispositioned, on both POSIX and Windows layouts. The detailed attack
-record and the three precision repairs are kept in
+record and the precision adjudication are kept in
 `docs/inventories/dependency-provenance-and-precision-repair.md`; they are
 evidence for this decision, not additional normative clauses.
 
-### Three precision boundaries from the adversarial corpus (2026-08-16)
+### Precision boundaries from the adversarial corpus (2026-08-16)
 
 With no adopter suppression mechanism, a false positive must be repaired once
-in the owning detector. Three systemic families are now part of the detector
+in the owning detector. Two systemic families are now part of the detector
 contract:
 
 - An HTTP client whose every constructor is explicitly wired to
@@ -1625,21 +1625,25 @@ contract:
   must consume callback material — headers, raw/request body, body, or a
   subscription challenge — before it satisfies `webhook_surface`. Routes
   outside a management segment retain the existing path rule.
-- `sync` alone does not make scheduled work a connector. A scheduled sync must
-  name a generic external qualifier (for example `provider`, `remote`, `feed`,
-  `integration`, `upstream`) or live in a module independently proved to hold
-  another connector surface. `connector`, `integration`, `webhook`, `poll` and
-  `fetch` remain self-qualifying task subjects. Product/provider proper names
-  are not added to this vocabulary.
-
 Each boundary carries both a false-friend canary and a retained true-positive
 canary. None changes the six-category profile schema, and no product may opt
 out of or widen it in configuration.
 
+A proposed third boundary—requiring a generic external qualifier beside a
+scheduled `sync`—is REFUSED by the final corpus comparison. It removed fifteen
+real findings, including scheduled Mono, Paystack, staff-account, GIS, RADIUS,
+router and UISP work. Those adapters use the same executable decorator and
+dispatch shapes as local Postgres reconciliation. A provider-name vocabulary
+would hardcode product knowledge into Governance; a generic-name vocabulary
+proved insufficient. Until a provider-agnostic call-edge proof exists, the
+transitional ratchet keeps a bare scheduled `sync` finding. That deliberately
+retains known false positives in the conservative direction instead of making
+live connector work invisible.
+
 ### The four adopter baselines under schema version 9 (2026-08-15)
 
 > Historical measurement, not an adoption floor. These numbers predate the
-> 2026-08-16 file-proven disposition and three precision boundaries above. The
+> 2026-08-16 file-proven disposition and precision boundaries above. The
 > final eight-shard audit must regenerate and adjudicate every changed finding
 > before acceptance; no adopter may transcribe this table into a profile.
 

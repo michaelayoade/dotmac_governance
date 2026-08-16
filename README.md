@@ -10,7 +10,36 @@ and ADR 0003 (repository visibility) remain `Proposed` and non-normative.
 ADR 0006 (engineering conformance) is accepted effective 2026-08-03; its
 profile runs in required mode. ADR 0007 (module-declared vocabularies) and ADR
 0008 (kernel testing-kit import locality) are accepted amendments to that
-engine.**
+engine. ADR 0011 (external-connector-surface ratchet, schema version 9) was
+accepted by Michael Ayoade effective 2026-08-16. A product may pin only the
+accepted revision after it merges to canonical `main`. It was drafted as
+ADR 0010 and renumbered chronologically when the askable-decision contract took
+that number; schema versions 7 and 8 are withdrawn and never accepted, and fail
+to load rather than upgrading — version 8 because it named a measured category
+`http_client`, after one transport rather than the concept, leaving a genuine
+SMTP delivery surface with no category at all.**
+
+ADR 0011 was amended on 2026-08-16 to state its own ceiling. It INVENTORIES AND
+FREEZES the direct connector surfaces a product still holds while it migrates
+them behind the Integrator: a green run means the measured spellings did not
+grow, never that the product holds no external connectivity. It is defence in
+depth rather than runtime isolation, it recognises two protocols (HTTP and
+SMTP) and no others, every baseline reduction must carry deletion or cutover
+evidence, and the whole rule family goes report-only and is then deleted once
+every baseline is zero and deployment-enforced connectivity authority —
+connector manifests, package isolation, Integrator-only provider secrets,
+default-deny product egress, provider-agnostic ingress, and versioned
+inbox/outbox exchange — is proven. It is not a security control and is not
+cited as one.
+
+The amendment also refuses every untracked Python source. Virtualenv metadata
+cannot create a disposition: `METADATA` and `RECORD` are mutable worktree files,
+so a pinned name/version plus a matching self-authored digest is consistency,
+not provenance. Canonical CI evaluates a clean checkout; local environments
+belong outside the repository. In-process HTTP transports and webhook
+administration pages are explicit false-friend boundaries, while the attempted
+bare scheduled-sync narrowing was rejected after it hid real connector work.
+These boundaries are part of accepted ADR 0011.
 
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting

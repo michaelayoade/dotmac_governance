@@ -8,12 +8,17 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
 from .contracts import (
+    CONSERVED_MODULE_SYMBOL,
     AuthorityContract,
     AuthorityId,
     BranchName,
     CanonicalRepository,
+    CategoryBaseline,
     ConformanceProbe,
+    ConnectorCategory,
+    ConservedFinding,
     EnforcementMode,
+    ExternalConnectorSurface,
     GitRevision,
     GovernanceModelRef,
     GovernanceSourceKind,
@@ -41,6 +46,9 @@ HTTPS_REPOSITORY = re.compile(r"^https://[^/\s]+/[^/\s]+/[^/\s]+$")
 PYTHON_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+#: A conserved fingerprint is a full lower-case SHA-256 digest and nothing else.
+#: Truncating it would be a shorter hash, not a friendlier one.
+FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ProfileError(ValueError):
@@ -77,6 +85,12 @@ def _bool(value: object, location: str) -> bool:
 def _positive_int(value: object, location: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ProfileError(f"{location} must be a positive integer")
+    return value
+
+
+def _count(value: object, location: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ProfileError(f"{location} must be a non-negative integer")
     return value
 
 
@@ -394,6 +408,96 @@ def _testing_kit_boundary(value: object) -> TestingKitBoundary:
     )
 
 
+def _conserved_finding(value: object, location: str) -> ConservedFinding:
+    """Parse one exact, governance-authored conservation record.
+
+    Every coordinate is a literal the ENGINE published: the path it removed,
+    the symbol that held the surface, the category it was classified as, and
+    the fingerprint of the normalized unit. There is no reason field and no
+    predicate — a premise a product can satisfy by editing its own file is the
+    mechanism this record family exists without. There is no wildcard either:
+    an entry matches one finding or none.
+    """
+    data = _object(value, location)
+    _keys(data, frozenset({"path", "symbol", "category", "fingerprint"}), location)
+    raw_category = _string(data["category"], f"{location}.category")
+    try:
+        category = ConnectorCategory(raw_category)
+    except ValueError as error:
+        raise ProfileError(
+            f"{location}.category must be one of "
+            f"{', '.join(item.value for item in ConnectorCategory)}"
+        ) from error
+    symbol = _string(data["symbol"], f"{location}.symbol")
+    if symbol != CONSERVED_MODULE_SYMBOL and not IDENTIFIER.fullmatch(symbol):
+        raise ProfileError(
+            f"{location}.symbol must be a Python identifier or "
+            f"{CONSERVED_MODULE_SYMBOL!r}"
+        )
+    fingerprint = _string(data["fingerprint"], f"{location}.fingerprint")
+    if not FINGERPRINT.fullmatch(fingerprint):
+        raise ProfileError(
+            f"{location}.fingerprint must be a lower-case 64-character SHA-256 digest"
+        )
+    path = _path(data["path"], f"{location}.path")
+    if any(character in path.as_posix() for character in "*?[]"):
+        raise ProfileError(
+            f"{location}.path must be a literal file, never a pattern: an entry "
+            "matches one conserved finding or none"
+        )
+    if path.suffix not in {".py", ".pyw"} and "." in path.name:
+        raise ProfileError(f"{location}.path must name a Python source")
+    return ConservedFinding(
+        path=path, symbol=symbol, category=category, fingerprint=fingerprint
+    )
+
+
+def _external_connector_surface(value: object) -> ExternalConnectorSurface:
+    """Parse what a repository may declare here: six counts and its ledger.
+
+    `runtime_roots` and `exclusions` were product-authored scope, and both are
+    refused as unknown keys now. A repository that could name what is measured,
+    or name a file out of the measurement, was declaring its own result.
+    `conserved_exclusions` is the opposite shape: it names nothing INTO or OUT
+    of the measurement, it acknowledges a subtraction the engine already made.
+    """
+    location = "external_connector_surface"
+    data = _object(value, location)
+    _keys(data, frozenset({"baselines", "conserved_exclusions"}), location)
+    baselines_data = _object(data["baselines"], f"{location}.baselines")
+    _keys(
+        baselines_data,
+        frozenset(item.value for item in ConnectorCategory),
+        f"{location}.baselines",
+    )
+    baselines = tuple(
+        CategoryBaseline(
+            category=category,
+            count=_count(
+                baselines_data[category.value],
+                f"{location}.baselines.{category.value}",
+            ),
+        )
+        for category in ConnectorCategory
+    )
+    conserved = tuple(
+        _conserved_finding(item, f"{location}.conserved_exclusions[{index}]")
+        for index, item in enumerate(
+            _sequence(data["conserved_exclusions"], f"{location}.conserved_exclusions")
+        )
+    )
+    # Keyed on path, symbol and category, NOT on the whole record. Two entries
+    # differing only in fingerprint would let one match while the other went
+    # stale, which is a second answer to a question that has one.
+    keys = [(item.path, item.symbol, item.category) for item in conserved]
+    if len(set(keys)) != len(keys):
+        raise ProfileError(
+            f"{location}.conserved_exclusions must not name the same path, "
+            "symbol and category twice"
+        )
+    return ExternalConnectorSurface(baselines=baselines, conserved_exclusions=conserved)
+
+
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
@@ -410,13 +514,52 @@ def parse_profile(value: object) -> StandardsProfile:
                 "typed_contract_surfaces",
                 "module_declared_vocabularies",
                 "testing_kit_boundary",
+                "external_connector_surface",
             }
         ),
         "profile",
     )
     version = data["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version != 5:
-        raise ProfileError("schema_version must be integer 5")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise ProfileError("schema_version must be integer 9")
+    if version == 7:
+        # Version 7 shipped an exclusion that was a SILENT subtraction: nothing
+        # recorded what left the measured universe. It is withdrawn rather than
+        # upgraded, and it refuses to load rather than gaining conservation it
+        # was never reviewed against. Every adopter was pending approval when
+        # version 8 landed, so there is no migration path to preserve.
+        raise ProfileError(
+            "schema_version 7 was withdrawn and never accepted: it recorded no "
+            "conserved exclusions, so a subtraction from the measured universe "
+            "left no trace. There is no upgrade path from it — move the profile "
+            "to schema_version 9 and declare external_connector_surface."
+            "conserved_exclusions from a run of the engine"
+        )
+    if version == 8:
+        # Version 8 named a category `http_client`, after ONE transport rather
+        # than the concept, and an SMTP delivery task consequently held no
+        # category at all. Carrying the vocabulary forward would have meant
+        # accepting a documented blind spot or filing mail under HTTP; both
+        # were refused, so the abstraction was fixed instead. A version-8
+        # profile declares a baseline for a category that no longer exists and
+        # none for the one that replaced it, which is not a rename a loader may
+        # perform on a product's behalf: the number behind `http_client` was
+        # measured under a rule that could not see SMTP, so inheriting it would
+        # silently ratchet a surface nobody counted. It is withdrawn, exactly
+        # as version 7 is, and every adopter was pending approval when version
+        # 9 landed, so there is no accepted consumer to migrate.
+        raise ProfileError(
+            "schema_version 8 was withdrawn and never accepted: its "
+            "external_connector_surface.baselines declared http_client, a "
+            "category named after one transport, so a genuine SMTP delivery "
+            "surface could hold no category at all. There is no upgrade path "
+            "from it — the recorded http_client count was measured by a rule "
+            "that could not see SMTP and must not be inherited. Move the "
+            "profile to schema_version 9, rename the baseline key to "
+            "outbound_transport, and RE-MEASURE it with the engine"
+        )
+    if version != 9:
+        raise ProfileError("schema_version must be integer 9")
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -454,8 +597,9 @@ def parse_profile(value: object) -> StandardsProfile:
         raise ProfileError("surface_id values must be unique")
     if len({item.vocabulary_id for item in vocabularies}) != len(vocabularies):
         raise ProfileError("vocabulary_id values must be unique")
+    connector_surface = _external_connector_surface(data["external_connector_surface"])
     return StandardsProfile(
-        schema_version=5,
+        schema_version=9,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,
@@ -464,6 +608,7 @@ def parse_profile(value: object) -> StandardsProfile:
         typed_contract_surfaces=surfaces,
         module_declared_vocabularies=vocabularies,
         testing_kit_boundary=_testing_kit_boundary(data["testing_kit_boundary"]),
+        external_connector_surface=connector_surface,
     )
 
 

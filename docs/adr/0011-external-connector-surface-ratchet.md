@@ -1,6 +1,6 @@
 # 0011. Direct external-connector surfaces are measured and ratcheted centrally
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-14 (scope layer replaced 2026-08-15 after an adversarial audit;
   derivation hardened later the same day after a second audit against the
   replacement — see "The index is the authority, not the working tree";
@@ -25,8 +25,9 @@
   deployment-enforced connectivity authority is named as its successor and its
   sunset condition, see "What this record is, and what it is never going to
   be")
+- Effective: 2026-08-16
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (intended while Proposed)
+- Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards and explicitly enrolled Dotmac repositories
 - Classification: Internal
 - Amends: 0006 — adds the external-connector-surface rule family to the conformance profile and engine
@@ -1725,11 +1726,19 @@ that policy read as a retry loop around a local queue.
 
 ## Acceptance record
 
-None. This record is `Proposed` and non-normative. It was drafted by an agent;
-no named human has approved it, and an agent-run local validation is not
-governance evidence. The rule family reaches a product only when Michael Ayoade
-accepts this record, the carrying revision merges to canonical `main`, and that
-product repins and migrates its profile to schema version 9 in one change.
+Michael Ayoade explicitly accepted this record on 2026-08-16 after reviewing
+the no-disposition repair, the checked-in six-repository adjudication and the
+exact-tip GitHub evidence. Governance checks run
+[`31950198428`](https://github.com/michaelayoade/dotmac_governance/actions/runs/31950198428)
+evaluated commit `bf79826df25bde79b0d488aa4ce74ec052b295c6` and passed lint,
+formatting, strict typing, the integrated known-good/known-bad control suite,
+ADR validation and both Governance profiles. This acceptance is the human
+decision; the run is execution evidence and does not substitute for it.
+
+The rule family reaches a product only when the accepted carrying revision
+merges to canonical `main`, and that product repins and migrates its profile to
+schema version 9 in one change. All four adopters remain `PENDING-APPROVAL`
+until those independent changes occur.
 
 ## Consequences
 

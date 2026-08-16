@@ -1,13 +1,13 @@
 # Untracked-source closure and connector precision repair
 
 - Date: 2026-08-16
-- Decision under review: ADR 0011 (`Proposed`, non-normative)
+- Decision: ADR 0011 (`Accepted` by Michael Ayoade on 2026-08-16)
 - Adoption state: all product profiles remain `PENDING-APPROVAL`
-- Implementation state: withdrawal implemented locally on draft PR #16's
-  branch; not committed, pushed, merged or pinned
-- Acceptance state: `bb60968` passed 310 integrated tests and static checks,
-  but the stronger forged-RECORD fixture blocked acceptance; the withdrawal
-  implemented after that finding still requires exact-tip CI
+- Implementation state: withdrawal committed and pushed on draft PR #16 at
+  `bf79826`; accepted carrying revision not yet merged or pinned
+- Acceptance state: exact-tip Governance run `31950198428` passed on
+  `bf79826`; Michael accepted the corrected record after review; product
+  adoption remains independently gated on merge, exact pinning and product CI
 
 This inventory holds the attack detail behind ADR 0011's withdrawn source
 dispositions and two accepted precision boundaries. The ADR holds the
@@ -141,11 +141,13 @@ ignored, Vendor Control Plane 1 / 406, Academy 2 / 0, ERP 2 / 0, Sub 2 / 0,
 Governance 0 / 0. The visible files are the uncommitted adoption work in those
 dedicated worktrees, not baseline inputs.
 
-## Evidence still required before acceptance
+## Acceptance closure
 
-1. Rerun the integrated unit suite in the approved Git-hosted environment from
-   the exact disposition-withdrawal tip.
-2. Keep the six-repository comparison artefact with the review evidence and
-   confirm its measured-source digests remain equal after any rebase.
-3. Keep ADR 0011 `Proposed` and every adopter `PENDING-APPROVAL` until Michael
-   explicitly accepts the record after that evidence is reviewed.
+1. GitHub run `31950198428` evaluated exact disposition-withdrawal commit
+   `bf79826df25bde79b0d488aa4ce74ec052b295c6` and passed the integrated suite
+   and static gates.
+2. The six-repository comparison is preserved above; the accepted tip was not
+   rebased after that comparison.
+3. Michael Ayoade explicitly accepted ADR 0011 on 2026-08-16. The four adopter
+   profiles remain `PENDING-APPROVAL` until the accepted revision merges and
+   each product pins it with canonical CI evidence.

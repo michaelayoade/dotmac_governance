@@ -13,12 +13,12 @@ fields, and mutable boundary records. Schema version 9 has no waiver mechanism
 and no exemption mechanism. Schema versions 7 and 8 are withdrawn and never
 accepted: both fail to load rather than upgrading.
 
-## External connector surface (ADR 0011, PROPOSED)
+## External connector surface (ADR 0011, ACCEPTED)
 
-**This rule family is not normative.** ADR 0011 is `Proposed`. No product may
-pin the revision carrying it until Michael Ayoade accepts that record and it
-merges to canonical `main`. What follows is the adoption instruction that
-becomes usable at that point, not a licence to adopt now.
+ADR 0011 is `Accepted`. Its carrying revision must merge to canonical `main`
+before a product may pin its exact commit. What follows is the adoption
+instruction; each product still migrates its profile and proves the pinned
+revision independently.
 
 **What a green run means, and the three things it does not.** This family
 INVENTORIES AND FREEZES the direct connector surfaces a product still holds

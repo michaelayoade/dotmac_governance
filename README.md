@@ -19,6 +19,28 @@ to load rather than upgrading — version 8 because it named a measured category
 `http_client`, after one transport rather than the concept, leaving a genuine
 SMTP delivery surface with no category at all.**
 
+ADR 0011 was amended on 2026-08-16 to state its own ceiling. It INVENTORIES AND
+FREEZES the direct connector surfaces a product still holds while it migrates
+them behind the Integrator: a green run means the measured spellings did not
+grow, never that the product holds no external connectivity. It is defence in
+depth rather than runtime isolation, it recognises two protocols (HTTP and
+SMTP) and no others, every baseline reduction must carry deletion or cutover
+evidence, and the whole rule family goes report-only and is then deleted once
+every baseline is zero and deployment-enforced connectivity authority —
+connector manifests, package isolation, Integrator-only provider secrets,
+default-deny product egress, provider-agnostic ingress, and versioned
+inbox/outbox exchange — is proven. It is not a security control and is not
+cited as one.
+
+The amendment also replaces directory trust for virtual environments with
+file-level installed-distribution provenance: environment shape is only a
+prerequisite, and every dispositioned Python file must join to tracked exact
+dependency authority plus matching METADATA/RECORD identity, sha256 and size.
+Copied, unrecorded, unpinned, changed or symlinked neighbours remain untracked
+errors. In-process HTTP transports, webhook administration pages and local
+scheduled synchronisation are explicit false-friend boundaries. None of these
+changes alters ADR 0011's `Proposed` status.
+
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
 governance material anywhere else first would create a temporary authority and

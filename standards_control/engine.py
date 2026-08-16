@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+import base64
 import copy
+import csv
 import functools
 import hashlib
 import json
@@ -13,6 +15,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import NamedTuple
 from urllib.parse import urlsplit
+
+import tomllib
 
 from .contracts import (
     CONSERVED_MODULE_SYMBOL,
@@ -866,6 +870,18 @@ def _tracked_python_sources(root: Path) -> tuple[PurePosixPath, ...] | None:
 #: and refusing to read it keeps the disposition from being a file-read primitive.
 MARKER_BYTES = 65536
 
+#: Dependency provenance inputs are deliberately closed. Every accepted file is
+#: tracked in this repository and carries an exact name/version pair; a mutable
+#: requirement or an environment marker cannot confer provenance on source.
+REQUIREMENTS_FILE = re.compile(r"^requirements(?:[-_.].*)?\.txt$")
+PINNED_REQUIREMENT = re.compile(
+    r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)(?:\s|;|\\|$)"
+)
+NORMALIZED_DISTRIBUTION_SEPARATOR = re.compile(r"[-_.]+")
+LOCK_FILES = frozenset({PurePosixPath("poetry.lock"), PurePosixPath("uv.lock")})
+METADATA_BYTES = 1024 * 1024
+RECORD_BYTES = 16 * 1024 * 1024
+
 #: Marker keys a real dependency environment always carries. CLOSED: the
 #: stdlib `venv` and `virtualenv` both write these two, and a forgery that omits
 #: either is not an environment.
@@ -945,19 +961,168 @@ class EnvironmentShape(NamedTuple):
     interpreter: PurePosixPath
 
 
+def _normalized_distribution_name(name: str) -> str:
+    """PEP 503 comparison form for a distribution name."""
+    return NORMALIZED_DISTRIBUTION_SEPARATOR.sub("-", name).lower()
+
+
+def _tracked_dependency_pins(root: Path) -> frozenset[tuple[str, str]]:
+    """Exact dependency identities declared by tracked lock authority.
+
+    This is intentionally a small, closed parser: Poetry/uv lock packages and
+    exact ``name==version`` requirement files. A repository may not nominate a
+    path or invent another format at profile time. Unsupported authority leaves
+    installed files unproven, which fails toward the visible untracked error.
+    """
+    tracked = _git_paths(root, "--cached")
+    if tracked is None:
+        return frozenset()
+    pins: set[tuple[str, str]] = set()
+    for relative in tracked:
+        source = root / relative
+        if relative in LOCK_FILES:
+            try:
+                parsed = tomllib.loads(source.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+                continue
+            packages = parsed.get("package")
+            if not isinstance(packages, list):
+                continue
+            for package in packages:
+                if not isinstance(package, dict):
+                    continue
+                name = package.get("name")
+                version = package.get("version")
+                if isinstance(name, str) and isinstance(version, str):
+                    pins.add((_normalized_distribution_name(name), version))
+            continue
+        if not REQUIREMENTS_FILE.fullmatch(relative.name):
+            continue
+        try:
+            lines = source.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            continue
+        for line in lines:
+            match = PINNED_REQUIREMENT.match(line.strip())
+            if match is not None:
+                pins.add(
+                    (_normalized_distribution_name(match.group(1)), match.group(2))
+                )
+    return frozenset(pins)
+
+
+def _small_regular_text(source: Path, limit: int) -> str | None:
+    try:
+        if source.is_symlink() or not source.is_file() or source.stat().st_size > limit:
+            return None
+        return source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+
+
+def _distribution_identity(metadata: str) -> tuple[str, str] | None:
+    values: dict[str, list[str]] = {"name": [], "version": []}
+    for line in metadata.splitlines():
+        key, separator, value = line.partition(":")
+        lowered = key.lower()
+        if separator and lowered in values:
+            values[lowered].append(value.strip())
+    if len(values["name"]) != 1 or len(values["version"]) != 1:
+        return None
+    name = values["name"][0]
+    version = values["version"][0]
+    if not name or not version:
+        return None
+    return _normalized_distribution_name(name), version
+
+
+def _record_digest_matches(source: Path, digest: str, size: str) -> bool:
+    """Verify one RECORD sha256 and size without exposing file contents."""
+    algorithm, separator, encoded = digest.partition("=")
+    if algorithm != "sha256" or not separator or not encoded or not size.isdigit():
+        return False
+    try:
+        if source.is_symlink() or not source.is_file():
+            return False
+        payload = source.read_bytes()
+        expected = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+    except (OSError, ValueError):
+        return False
+    return len(payload) == int(size) and hashlib.sha256(payload).digest() == expected
+
+
+def _installed_distribution_files(
+    root: Path,
+    shape: EnvironmentShape,
+    pins: frozenset[tuple[str, str]],
+) -> tuple[dict[PurePosixPath, str], tuple[str, ...]]:
+    """Files proven to belong to pinned installed distributions.
+
+    The proof attaches to EACH file: it is a regular, non-symlink Python file
+    under the environment's site-packages, named in one distribution's RECORD,
+    with a matching sha256 and size. The distribution's METADATA identity must
+    also appear in tracked dependency authority. Merely living in a genuine
+    environment is never enough.
+    """
+    site_packages = root / shape.site_packages
+    owners: dict[PurePosixPath, set[str]] = {}
+    try:
+        metadata_directories = tuple(site_packages.glob("*.dist-info"))
+    except OSError:
+        return {}, ()
+    for directory in metadata_directories:
+        try:
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+        except OSError:
+            continue
+        metadata = _small_regular_text(directory / "METADATA", METADATA_BYTES)
+        record = _small_regular_text(directory / "RECORD", RECORD_BYTES)
+        if metadata is None or record is None:
+            continue
+        identity = _distribution_identity(metadata)
+        if identity is None or identity not in pins:
+            continue
+        label = f"{identity[0]}=={identity[1]}"
+        try:
+            rows = tuple(csv.reader(record.splitlines()))
+        except csv.Error:
+            continue
+        for row in rows:
+            if len(row) != 3:
+                continue
+            recorded = PurePosixPath(row[0])
+            if (
+                recorded.is_absolute()
+                or ".." in recorded.parts
+                or recorded.suffix not in PYTHON_SUFFIXES
+            ):
+                continue
+            source = site_packages / recorded
+            if not _contains(site_packages, source):
+                continue
+            if not _record_digest_matches(source, row[1], row[2]):
+                continue
+            relative = shape.site_packages / recorded
+            owners.setdefault(relative, set()).add(label)
+    proven = {
+        path: next(iter(labels)) for path, labels in owners.items() if len(labels) == 1
+    }
+    return proven, tuple(sorted(set(proven.values())))
+
+
 def _dependency_environment(
     root: Path, relative: PurePosixPath
 ) -> EnvironmentShape | None:
     """Is this repository-relative directory a TOOL-OWNED DEPENDENCY ENVIRONMENT?
 
-    A governance-owned SOURCE CLASSIFICATION, and the answer to the untracked
-    count that made the ratchet unusable in two adopters. It is NOT an
-    exemption: no product configures it, names a path into it, or supplies a
-    predicate, and there is no profile key for it. It is not `--exclude-standard`
-    either — that would delete a gitignored connector and a dependency tree in
-    the same stroke, reopening bypass D. The classification is SEMANTIC, proved
-    from the environment's own metadata and structure, and it is independent of
-    `.gitignore` in both directions.
+    A governance-owned SHAPE RECOGNISER and prerequisite to the file-level
+    source classification. It is NOT an exemption: no product configures it,
+    names a path into it, or supplies a predicate, and there is no profile key
+    for it. It is not `--exclude-standard` either — that would delete a
+    gitignored connector and a dependency tree in the same stroke, reopening
+    bypass D. The shape is proved from the environment's own metadata and
+    structure, independently of `.gitignore`; it disposes of no file by itself.
 
     The predicate is CLOSED. All four arms must hold; there is no wildcard, no
     "looks like", and no name match — a directory called `.venv` earns nothing
@@ -984,9 +1149,9 @@ def _dependency_environment(
                    repository. Per-file containment is checked separately, in
                    `_environment_home`.
 
-    Code inside a recognised environment is DEPENDENCY MATERIAL. Whether that
-    dependency is declared, pinned and provenanced is a SEPARATE control, and
-    this function deliberately does not attempt it.
+    These four arms prove only the environment. A source is dependency material
+    only when `_installed_distribution_files` separately proves that exact file
+    from tracked dependency authority, METADATA identity and RECORD digest.
     """
     base = root / relative
     try:
@@ -1085,7 +1250,7 @@ def _environment_home(
     relative: PurePosixPath,
     cache: dict[PurePosixPath, EnvironmentShape | None],
 ) -> PurePosixPath | None:
-    """The recognised environment this untracked source is dependency material of.
+    """The recognised environment containing this untracked source, if any.
 
     Ancestors are walked DEEPEST FIRST, so a nested environment claims its own
     files, and the repository root itself is never a candidate. An ancestor that
@@ -1113,8 +1278,8 @@ class UntrackedPopulations(NamedTuple):
 
     * `visible` — untracked and NOT ignored: what a plain checkout shows.
     * `ignored` — untracked AND hidden by this repository's own ignore rules.
-    * `dependency_environments` — proven tool-owned dependency material, with
-      the file count each classification removed.
+    * `dependency_environments` — files proven one-by-one as installed,
+      lock-pinned distribution material, grouped by their environment.
 
     Both `visible` and `ignored` are errors. The split exists so the two are
     REPORTED separately, not so one of them can be forgiven: an ignore file is
@@ -1150,12 +1315,18 @@ def _untracked_python_populations(root: Path) -> UntrackedPopulations:
     not_ignored = frozenset(unignored) if unignored is not None else frozenset(sources)
 
     cache: dict[PurePosixPath, EnvironmentShape | None] = {}
+    evidence: dict[PurePosixPath, tuple[dict[PurePosixPath, str], tuple[str, ...]]] = {}
+    pins = _tracked_dependency_pins(root)
     counts: dict[PurePosixPath, int] = {}
     visible: list[PurePosixPath] = []
     ignored: list[PurePosixPath] = []
     for relative in sources:
         home = _environment_home(root, relative, cache)
-        if home is not None:
+        if home is not None and home not in evidence:
+            shape = cache[home]
+            assert shape is not None
+            evidence[home] = _installed_distribution_files(root, shape, pins)
+        if home is not None and relative in evidence[home][0]:
             counts[home] = counts.get(home, 0) + 1
             continue
         (visible if relative in not_ignored else ignored).append(relative)
@@ -1170,6 +1341,7 @@ def _untracked_python_populations(root: Path) -> UntrackedPopulations:
                 site_packages=shape.site_packages,
                 interpreter=shape.interpreter,
                 python_source_count=counts[home],
+                distributions=evidence[home][1],
             )
         )
     return UntrackedPopulations(tuple(visible), tuple(ignored), tuple(environments))
@@ -1269,6 +1441,16 @@ def _testing_kit(
 # on purpose: a ratchet that fires on hundreds of lines gets switched off, and
 # an honest undercount that shrinks beats an overcount nobody trusts. What each
 # rule does NOT see is part of the contract, stated in ADR 0011.
+#
+# This family INVENTORIES AND FREEZES legacy debt during the Integrator
+# migration. It is DEFENCE IN DEPTH, NOT RUNTIME ISOLATION: a green run says
+# the measured spellings did not grow, never that the product cannot reach a
+# provider. Two protocols are recognised — HTTP and SMTP — and everything else
+# (brokers, gRPC, sockets, SSH/SFTP, SNMP, database links, SDKs whose transport
+# is not a named client library) is UNMONITORED rather than exempt. Adding a
+# protocol is an ARM with its own three ADR 0018 legs and a schema version. The
+# rule family has a stated end; see ADR 0011's amendment of 2026-08-16, "What
+# this record is, and what it is never going to be".
 
 # There is deliberately no list of directory names that are "never runtime".
 # Nothing checks that a directory called `migrations` contains migrations, so
@@ -1289,6 +1471,12 @@ HTTP_TRANSPORTS = frozenset({"httpx", "requests", "aiohttp", "urllib3", "http.cl
 #: annotation is not a connector, and this is what separates the two.
 REQUEST_METHODS = frozenset(
     {"get", "post", "put", "patch", "delete", "head", "request", "stream", "send"}
+)
+#: httpx transports that execute requests in this process. They exercise a
+#: client API but create no provider egress, so treating them as outbound makes
+#: an in-memory fake indistinguishable from the connector it tests.
+IN_PROCESS_HTTP_TRANSPORTS = frozenset(
+    {"MockTransport", "ASGITransport", "WSGITransport"}
 )
 #: ARM 2, SMTP. Mail transport libraries. Unlike an HTTP client — whose
 #: `Session` and `get` collide with an ORM and a mapping — these two libraries
@@ -1323,6 +1511,14 @@ WEBHOOK_PATH_HINTS = ("webhook", "/hooks", "notify-url", "ipn")
 #: `/auth/oidc/callback` and its Paystack payment-return page, and
 #: `crm-guardrails`'s Meta OAuth return. Qualified by the route's METHOD.
 AMBIGUOUS_WEBHOOK_PATH_HINTS = ("callback",)
+#: A route beneath one of these management segments ordinarily configures the
+#: product's callback registrations; it is not itself the provider callback.
+#: Such a route must read callback material before the path can stand as
+#: webhook evidence. Exact path segments prevent `configuration` prose or an
+#: arbitrary function name from qualifying the exception.
+MANAGEMENT_ROUTE_SEGMENTS = frozenset(
+    {"admin", "config", "configuration", "settings", "management"}
+)
 #: Decorator attributes that MOUNT A ROUTE. Everything else that takes a string
 #: constant — a celery task's `name=`, a cache key, a feature flag — is not a
 #: path, and reading one as a path is what made a queue identifier a webhook.
@@ -1461,6 +1657,28 @@ SCHEDULE_TABLE_NAMES = ("beat_schedule", "celerybeat_schedule", "cron_schedule")
 #: The key under which such a table names the callable it runs.
 SCHEDULE_TABLE_TASK_KEY = "task"
 TASK_SUBJECT_HINTS = ("sync", "connector", "integration", "webhook", "poll", "fetch")
+#: `sync` alone names a relationship, not an external system. A local
+#: projection, cache or Postgres reconciliation uses the same verb. It becomes
+#: a connector subject only when its own name carries one of these generic
+#: external qualifiers, or the module independently holds another connector
+#: surface. Provider-specific product names do not belong in this vocabulary.
+SYNC_TASK_EXTERNAL_QUALIFIERS = (
+    "external",
+    "integration",
+    "connector",
+    "feed",
+    "ingest",
+    "import",
+    "poll",
+    "replicat",
+    "upstream",
+    "remote",
+    "mirror",
+    "provider",
+    "webhook",
+    "erp",
+    "crm",
+)
 #: `sync` is a substring of `async`, and `async` says nothing whatsoever about
 #: an external feed — it is the ordinary word for "not blocking". Plain
 #: substring matching therefore made EVERY `async` identifier connector-shaped:
@@ -1671,6 +1889,120 @@ def _constructs_a_client(
     )
 
 
+def _in_process_transport_names(
+    tree: ast.Module, modules: frozenset[str]
+) -> frozenset[str]:
+    """Names bound to an explicitly in-process httpx transport."""
+    constructors: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "httpx"
+            and not node.level
+        ):
+            constructors.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name in IN_PROCESS_HTTP_TRANSPORTS
+            )
+
+    def constructs(expression: ast.expr, known: set[str]) -> bool:
+        inner = expression.value if isinstance(expression, ast.Await) else expression
+        if isinstance(inner, ast.Name):
+            return inner.id in known
+        if not isinstance(inner, ast.Call):
+            return False
+        if isinstance(inner.func, ast.Name):
+            return inner.func.id in constructors
+        dotted = _dotted(inner.func)
+        if dotted is None:
+            return False
+        head, _, attribute = dotted.rpartition(".")
+        return (
+            bool(head)
+            and head.split(".")[0] in modules
+            and attribute in IN_PROCESS_HTTP_TRANSPORTS
+        )
+
+    known: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+                continue
+            if constructs(node.value, known):
+                before = len(known)
+                known.update(_assigned_names(node))
+                changed = changed or len(known) != before
+    return frozenset(known | constructors)
+
+
+def _client_uses_in_process_transport(
+    node: ast.Call,
+    modules: frozenset[str],
+    transports: frozenset[str],
+) -> bool:
+    for keyword in node.keywords:
+        if keyword.arg != "transport":
+            continue
+        value = (
+            keyword.value.value
+            if isinstance(keyword.value, ast.Await)
+            else keyword.value
+        )
+        if isinstance(value, ast.Name):
+            return value.id in transports
+        if not isinstance(value, ast.Call):
+            return False
+        if isinstance(value.func, ast.Name):
+            return value.func.id in transports
+        dotted = _dotted(value.func)
+        if dotted is None:
+            return False
+        head, _, attribute = dotted.rpartition(".")
+        return (
+            bool(head)
+            and head.split(".")[0] in modules
+            and attribute in IN_PROCESS_HTTP_TRANSPORTS
+        )
+    return False
+
+
+def _only_constructs_in_process_http_clients(tree: ast.Module) -> bool:
+    """Every constructed client is explicitly wired to an in-process transport.
+
+    A direct module request such as ``httpx.post(...)`` always defeats the
+    result: a module that holds both a fake client and real egress is still an
+    outbound surface.
+    """
+    modules, constructors = _http_transport_bindings(tree)
+    transports = _in_process_transport_names(tree, modules)
+    clients = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _constructs_a_client(node, modules, constructors)
+    ]
+    if not clients or not all(
+        _client_uses_in_process_transport(node, modules, transports) for node in clients
+    ):
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        dotted = _dotted(node.func)
+        if dotted is None:
+            continue
+        if (
+            node.func.attr in REQUEST_METHODS
+            and dotted.split(".")[0] in modules
+            and len(dotted.split(".")) == 2
+        ):
+            return False
+    return True
+
+
 def _returned_expressions(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> list[ast.expr]:
@@ -1719,6 +2051,7 @@ def _function_local_clients(
     modules: frozenset[str],
     constructors: frozenset[str],
     visible: frozenset[str],
+    in_process_transports: frozenset[str],
 ) -> frozenset[str]:
     """Locals of THIS function bound from something proved to be a client.
 
@@ -1743,6 +2076,9 @@ def _function_local_clients(
             if (
                 isinstance(inner, ast.Call)
                 and _constructs_a_client(inner, modules, constructors)
+                and not _client_uses_in_process_transport(
+                    inner, modules, in_process_transports
+                )
             ) or (called is not None and called in visible):
                 found.update(_assigned_names(current))
         remaining.extend(
@@ -1772,15 +2108,22 @@ def _client_factories(tree: ast.Module, visible: frozenset[str]) -> frozenset[st
     is still one function and still `MAX_TRACE_ROUNDS` hops, not a third link.
     """
     modules, constructors = _http_transport_bindings(tree)
+    in_process_transports = _in_process_transport_names(tree, modules)
     found: set[str] = set()
     for name, node in _module_level_functions(tree).items():
-        local_clients = _function_local_clients(node, modules, constructors, visible)
+        local_clients = _function_local_clients(
+            node, modules, constructors, visible, in_process_transports
+        )
         for expression in _returned_expressions(node):
             inner = (
                 expression.value if isinstance(expression, ast.Await) else expression
             )
-            if isinstance(inner, ast.Call) and _constructs_a_client(
-                inner, modules, constructors
+            if (
+                isinstance(inner, ast.Call)
+                and _constructs_a_client(inner, modules, constructors)
+                and not _client_uses_in_process_transport(
+                    inner, modules, in_process_transports
+                )
             ):
                 found.add(name)
                 break
@@ -2572,6 +2915,34 @@ def _reads_an_inbound_request(node: ast.AST) -> bool:
     return False
 
 
+def _reads_callback_material(node: ast.AST) -> bool:
+    """Evidence a management route consumes provider callback material.
+
+    A generic ``request`` parameter is deliberately insufficient: admin form
+    handlers receive one too. Headers/raw bytes/body and the subscription
+    challenge are callback-specific enough to distinguish the two real
+    surfaces without teaching the engine a provider's signature scheme.
+    """
+    material = frozenset({"headers", "header", "raw_body", "request_body", "body"})
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id.lower() in material:
+            return True
+        if isinstance(child, ast.Attribute) and child.attr.lower() in material:
+            return True
+        if (
+            isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and child.value.lower() in {"hub.challenge", "hub_challenge"}
+        ):
+            return True
+    return False
+
+
+def _is_management_route(path: str) -> bool:
+    segments = frozenset(filter(None, re.split(r"[/_.:-]+", path.lower())))
+    return bool(segments & MANAGEMENT_ROUTE_SEGMENTS)
+
+
 def _is_webhook_surface(tree: ast.Module) -> bool:
     """Whether this module RECEIVES a provider callback.
 
@@ -2627,14 +2998,15 @@ def _is_webhook_surface(tree: ast.Module) -> bool:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if any(
-            any(hint in literal for hint in WEBHOOK_PATH_HINTS)
-            or (
-                mutating
-                and any(hint in literal for hint in AMBIGUOUS_WEBHOOK_PATH_HINTS)
+        for literal, mutating in _decorator_path_literals(node):
+            names_webhook = any(hint in literal for hint in WEBHOOK_PATH_HINTS)
+            names_ambiguous_callback = mutating and any(
+                hint in literal for hint in AMBIGUOUS_WEBHOOK_PATH_HINTS
             )
-            for literal, mutating in _decorator_path_literals(node)
-        ):
+            if not (names_webhook or names_ambiguous_callback):
+                continue
+            if _is_management_route(literal) and not _reads_callback_material(node):
+                continue
             return True
         name = node.name.lower()
         if not any(hint in name for hint in WEBHOOK_VERIFY_HINTS):
@@ -2715,14 +3087,20 @@ def _mentions(name: str, hints: tuple[str, ...]) -> bool:
     )
 
 
-def _is_connector_shaped(name: str) -> bool:
+def _is_connector_shaped(name: str, *, connector_context: bool = False) -> bool:
     """Is this name the SUBJECT half — something a connector would run?
 
-    Unchanged from the rule this replaces: `sync`, `connector`, `integration`,
-    `webhook`, `poll`, `fetch`. Only the evidence half moved to the tree — and
-    `sync` stopped matching inside `async`, which it always wrongly did.
+    Five hints name external work on their own. `sync` does not: local database
+    projections and cache reconciliation use the same verb. A sync subject must
+    name a generic external qualifier or sit in a module independently proved
+    to hold another connector surface.
     """
-    return _mentions(name, TASK_SUBJECT_HINTS)
+    non_sync = tuple(hint for hint in TASK_SUBJECT_HINTS if hint != SYNC_PREFIX)
+    if _mentions(name, non_sync):
+        return True
+    return _mentions(name, (SYNC_PREFIX,)) and (
+        connector_context or _mentions(name, SYNC_TASK_EXTERNAL_QUALIFIERS)
+    )
 
 
 def _imports_a_scheduler(tree: ast.Module) -> bool:
@@ -2893,7 +3271,9 @@ def _schedule_table_subjects(tree: ast.Module) -> list[str]:
     return subjects
 
 
-def _schedules_a_connector(tree: ast.Module) -> bool:
+def _schedules_a_connector(
+    tree: ast.Module, *, connector_context: bool = False
+) -> bool:
     """Does this module SCHEDULE a connector run, in executable code?
 
     This rule used to open with `any(hint in source.lower() ...)` — a scan of
@@ -2933,7 +3313,9 @@ def _schedules_a_connector(tree: ast.Module) -> bool:
     framework = _imports_a_scheduler(tree)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if _is_connector_shaped(node.name) and any(
+            if _is_connector_shaped(
+                node.name, connector_context=connector_context
+            ) and any(
                 _is_scheduling_decorator(decorator, framework=framework)
                 for decorator in node.decorator_list
             ):
@@ -2941,15 +3323,20 @@ def _schedules_a_connector(tree: ast.Module) -> bool:
         elif isinstance(node, ast.Call):
             subjects = _dispatch_subjects(node)
             subjects.extend(_registration_subjects(node, framework=framework))
-            if any(_is_connector_shaped(subject) for subject in subjects):
+            if any(
+                _is_connector_shaped(subject, connector_context=connector_context)
+                for subject in subjects
+            ):
                 return True
         elif isinstance(node, ast.Attribute):
             if any(
-                _is_connector_shaped(subject) for subject in _dispatch_subjects(node)
+                _is_connector_shaped(subject, connector_context=connector_context)
+                for subject in _dispatch_subjects(node)
             ):
                 return True
     return any(
-        _is_connector_shaped(subject) for subject in _schedule_table_subjects(tree)
+        _is_connector_shaped(subject, connector_context=connector_context)
+        for subject in _schedule_table_subjects(tree)
     )
 
 
@@ -3205,16 +3592,27 @@ def _classify_connector(
     # arm is new, and each carries its own sensitivity, specificity and
     # liveness legs, because a live arm at 94 real sources would otherwise
     # conceal an inert one — see ADR 0018 and `_speaks_smtp`.
-    http = outbound or (_uses_an_http_transport(tree) and _issues_a_request(tree))
-    if http or _speaks_smtp(tree):
+    http = outbound or (
+        _uses_an_http_transport(tree)
+        and _issues_a_request(tree)
+        and not _only_constructs_in_process_http_clients(tree)
+    )
+    smtp = _speaks_smtp(tree)
+    webhook = _is_webhook_surface(tree)
+    credential = _holds_provider_credential(tree)
+    checkpoint = _holds_a_checkpoint(tree)
+    if http or smtp:
         found.add(ConnectorCategory.OUTBOUND_TRANSPORT)
-    if _is_webhook_surface(tree):
+    if webhook:
         found.add(ConnectorCategory.WEBHOOK_SURFACE)
-    if _holds_provider_credential(tree):
+    if credential:
         found.add(ConnectorCategory.PROVIDER_CREDENTIAL)
-    if _schedules_a_connector(tree):
+    if _schedules_a_connector(
+        tree,
+        connector_context=http or smtp or webhook or credential or checkpoint,
+    ):
         found.add(ConnectorCategory.CONNECTOR_TASK)
-    if _holds_a_checkpoint(tree):
+    if checkpoint:
         found.add(ConnectorCategory.SYNC_CHECKPOINT)
     if _owns_delivery_retry(tree, outbound=outbound):
         found.add(ConnectorCategory.DELIVERY_RETRY)
@@ -4336,19 +4734,24 @@ def verify_repository(
             _notice(
                 DiagnosticCode.REPOSITORY_DEPENDENCY_ENVIRONMENT,
                 f"{environment.python_source_count} untracked Python sources "
-                "under this directory are TOOL-OWNED DEPENDENCY MATERIAL rather "
-                "than repository sources, and are dispositioned out of the "
-                "untracked population. The directory was proved to be a Python "
+                "under this directory are individually proven as INSTALLED "
+                "DISTRIBUTION MATERIAL rather than repository sources, and are "
+                "dispositioned out of the untracked population. The directory "
+                "was proved to be a Python "
                 f"{environment.python_version} dependency environment from its "
                 "own metadata and structure — marker "
                 f"{(environment.root / 'pyvenv.cfg').as_posix()}, layout "
                 f"{environment.site_packages.as_posix()}, interpreter "
-                f"{environment.interpreter.as_posix()}. This is a "
+                f"{environment.interpreter.as_posix()} — and every removed file "
+                "has a matching sha256 and size in one METADATA-identified "
+                "distribution's RECORD, with that exact identity pinned in "
+                "tracked dependency authority. Proven distributions: "
+                f"{', '.join(environment.distributions)}. This is a "
                 "governance-owned SOURCE CLASSIFICATION, not an exemption: no "
                 "product may configure it, name a path into it, or supply a "
                 "predicate, and a directory merely NAMED like an environment "
-                "earns nothing. Whether these dependencies are declared and "
-                "pinned is a SEPARATE control this engine does not yet run",
+                "earns nothing. Any copied, unrecorded, unpinned, changed or "
+                "symlinked Python source remains an untracked-source error",
                 path=environment.root,
             )
         )
@@ -4372,8 +4775,8 @@ def verify_repository(
                 "product-authored and decides nothing about what is measured — "
                 "it is reported as its own population so that it can be seen, "
                 "never so that it can be forgiven. It is not dependency "
-                "material either: no tool-owned dependency environment encloses "
-                "it. Track it, or remove it from the working tree",
+                "material either: it lacks accepted installed-distribution "
+                "file proof. Track it, or remove it from the working tree",
                 path=relative,
             )
         )

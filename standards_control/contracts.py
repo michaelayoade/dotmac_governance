@@ -64,6 +64,13 @@ class ConnectorCategory(str, Enum):
     spot or to file mail under HTTP, and both were refused. The member names
     the concept and carries one ARM per protocol — see ADR 0011, "The category
     is the concept, not one transport".
+
+    Naming the concept is not covering it. Exactly TWO arms exist today, HTTP
+    and SMTP, and every other protocol — brokers, gRPC, sockets, SSH/SFTP,
+    SNMP/RADIUS, database links, SDKs whose transport is not a named client
+    library — is UNMONITORED rather than exempt. A baseline of zero means zero
+    in the protocols this engine measures. See ADR 0011's amendment of
+    2026-08-16, statement 3.
     """
 
     OUTBOUND_TRANSPORT = "outbound_transport"
@@ -280,7 +287,7 @@ class ExcludedSource:
 
 @dataclass(frozen=True)
 class DependencyEnvironment:
-    """One TOOL-OWNED DEPENDENCY ENVIRONMENT the source disposition recognised.
+    """One dependency environment holding proven installed distribution files.
 
     This is a SOURCE CLASSIFICATION, not an exemption, and it is owned by
     governance alone: there is no profile key for it, no path a product can
@@ -289,13 +296,10 @@ class DependencyEnvironment:
     `engine._dependency_environment` for the normative, closed predicate.
 
     Every field exists so the disposition is AUDITABLE FROM THE OUTPUT rather
-    than applied silently: the root, the marker evidence that proved it, and
-    `python_source_count`, the number of untracked Python sources this
-    classification removed from the untracked population.
-
-    Code inside a recognised environment is DEPENDENCY MATERIAL. Whether that
-    dependency's provenance is declared and pinned is a SEPARATE control, and
-    it is deliberately NOT implemented here.
+    than applied silently: the environment-shape evidence, the exact pinned
+    distribution identities, and `python_source_count`, the number of Python
+    files individually proved by those distributions' RECORD digests. Code in
+    the same directory without that file-level proof remains untracked source.
     """
 
     root: PurePosixPath
@@ -303,6 +307,7 @@ class DependencyEnvironment:
     site_packages: PurePosixPath
     interpreter: PurePosixPath
     python_source_count: int
+    distributions: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -324,8 +329,9 @@ class ConnectorScope:
     decides nothing about what is measured — and `untracked` remains their
     union so a caller cannot read one half and believe it read the whole.
 
-    `dependency_environments` is the third, disjoint outcome: sources proven to
-    be tool-owned dependency material, published with their file counts.
+    `dependency_environments` is the third, disjoint outcome: sources proven
+    file-by-file as lock-pinned installed-distribution material, published with
+    their distribution identities and file counts.
     """
 
     inventory_available: bool

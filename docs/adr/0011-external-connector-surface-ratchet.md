@@ -18,7 +18,13 @@
   "Three more names taken for evidence, and two repairs that were refused";
   the category `http_client` RENAMED to `outbound_transport` and given a second,
   SMTP arm 2026-08-15, schema version 9 with version 8 withdrawn — see "The
-  category is the concept, not one transport")
+  category is the concept, not one transport"; the record's STANDING amended
+  2026-08-16 — it inventories and freezes legacy debt, it is defence in depth
+  and not runtime isolation, it promises no universal protocol recognition,
+  every baseline reduction now carries deletion or cutover evidence, and
+  deployment-enforced connectivity authority is named as its successor and its
+  sunset condition, see "What this record is, and what it is never going to
+  be")
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade (intended while Proposed)
 - Scope: Organization-wide engineering standards and explicitly enrolled Dotmac repositories
@@ -52,6 +58,15 @@ The exemption discipline is inherited from starter ADR 0018: an exemption must
 state an ENFORCEABLE premise, the ratchet moves in both directions, and every
 detector carries a sensitivity proof rather than an assertion.
 
+**Read the standing amendment of 2026-08-16 before anything below it.** This
+record measures and freezes legacy debt during the Integrator migration; it is
+one layer of defence in depth, not the connectivity boundary, and it has a
+stated end. The successor — deployment-enforced connectivity authority, where a
+hidden connector fails for want of credentials and network reachability
+whatever its coding style — is named in the Decision under "What this record
+is, and what it is never going to be", along with the conditions under which
+this rule family goes report-only and is deleted.
+
 ## Decision
 
 Schema version 9 adds one mandatory `external_connector_surface` object to every
@@ -67,6 +82,196 @@ withdrawn, rather than silently gaining a rule family — or a vocabulary — it
 never reviewed against. Every adopter was pending approval when version 9
 landed, so there is no migration path to preserve, which is exactly why both
 invalidations were taken now rather than after a product had pinned one.
+
+### What this record is, and what it is never going to be (2026-08-16)
+
+Everything below this heading was written while the open question was how much
+more of the surface a static rule could be made to see. That question is now
+CLOSED, and closing it changes what this record claims rather than how it
+measures. Five statements, all of them normative, and each one narrows a claim
+this record either made or was read as making.
+
+**1. This record INVENTORIES AND FREEZES LEGACY DEBT. That is its whole job.**
+The six counts are a debt register whose floor is measured out of the engine
+rather than asserted, and the ratchet's only enforcement claim is that the
+register does not grow and does not shrink unwatched. It is a MIGRATION
+INSTRUMENT for the period in which products still hold their own provider
+clients, credentials, callbacks, schedules, checkpoints and retry machinery. It
+is not, and will not become, the thing that stops a product connecting to a
+provider.
+
+**2. It is DEFENCE IN DEPTH, NOT RUNTIME ISOLATION.** A `connector.*`
+diagnostic is a governance finding about source code at review time. Nothing in
+this record prevents a running product from opening a socket, reading a
+provider secret, or terminating a provider callback — a green run means the
+measured spellings did not rise, never that the workload cannot reach a
+provider. The residual routes this record already concedes are the proof rather
+than the caveat: connector behaviour shipped by a pinned third-party
+distribution, a factory three links from its constructor, a client held on
+`self`, a credential read off a receiver that is not configuration-shaped, and
+every protocol in statement 3. Each is an honest gap that a static analysis
+closes only by becoming a whole-program analyser, and a control that must hold
+perfectly to be worth anything is not a control. Read this record as one layer
+over deployment-enforced connectivity, never as the boundary itself.
+
+**3. It DOES NOT PROMISE UNIVERSAL PROTOCOL RECOGNITION.**
+`outbound_transport` names the concept and carries one ARM PER PROTOCOL, and
+today there are exactly two: HTTP over five named client libraries, and SMTP
+over two. A baseline of zero therefore means "zero in the protocols this engine
+measures", and that sentence is the contract. Not measured, and named rather
+than left to be discovered:
+
+| Not measured | Why it is absent |
+| --- | --- |
+| Message brokers — AMQP, Kafka, Redis streams, NATS | No arm. A broker client is an external connector when the broker is a provider's, and the engine cannot tell that from a local queue. |
+| gRPC, raw sockets, WebSocket clients | No arm. `webhook_surface` reads mounted routes, not outbound stream clients. |
+| SSH, SFTP, FTP, rsync-shaped transfers | No arm. Feed exchange by file transfer is an ordinary ISP integration and is invisible here. |
+| SNMP, RADIUS, TFTP, NETCONF | No arm, and this is the one that matters most for an ISP data plane. |
+| Database links, foreign data wrappers, a second engine URL | No arm, and the shared-database shape the successor's DATA control forbids outright. |
+| Cloud/provider SDKs whose transport is not one of the five named libraries | `import boto3` names no library in `HTTP_TRANSPORTS`, so the module holds no HTTP arm even though a socket opens underneath it. |
+| An HTTP client library outside `HTTP_TRANSPORTS` | The set is closed on purpose; a new library is a widening with its own three legs. |
+| Mail handed to a queue for something else to relay | Stated already under the SMTP arm, and repeated here because it is the same class. |
+
+Adding a protocol is an ARM with all three ADR 0018 legs and a schema version,
+never a word appended to an existing set. Until an arm exists, that protocol's
+surfaces are UNMONITORED — the same word this record uses for a directory
+nobody checks — and they are unmonitored rather than exempt.
+
+**4. EVERY BASELINE REDUCTION ACCOMPANIES DELETION OR CUTOVER EVIDENCE.** The
+two-directional ratchet below already requires the profile to be lowered in the
+same change that retires the code. That is necessary and NOT sufficient, and
+the insufficiency is this record's own recorded defect: a refactor from a
+spelling the engine reads to one it does not makes a count FALL, the engine
+emits `connector.baseline.stale`, and a product that faithfully lowers the
+baseline has helped the ratchet disarm itself. So the change that lowers a
+baseline must carry, in its own diff and its own review, one of exactly two
+kinds of evidence:
+
+- **DELETION.** The measured surface is gone from the tracked inventory — the
+  file removed, or the client, credential, route, schedule, checkpoint or retry
+  policy deleted from it. A reviewer can see the removed lines.
+- **CUTOVER.** The surface moved to a connector plugin behind the Integrator
+  SPI, and the product now reaches it through versioned observations, commands
+  and receipts. The diff names the connector distribution, the manifest entry,
+  and the inbox/outbox contract that replaced the direct call.
+
+A reduction backed by neither is REFUSED at review, whatever the engine
+reports. `connector.baseline.stale` is an instruction to explain a fall, never
+an instruction to accept one; the engine cannot tell the three apart, so the
+human must, and this record says so rather than leaving it to habit.
+
+**5. It SUNSETS, OR BECOMES REPORT-ONLY, once every baseline reaches zero AND
+runtime isolation is proven.** Stated as a conjunction that can actually be
+adjudicated:
+
+| # | Condition | Evidence that settles it |
+| --- | --- | --- |
+| S1 | Every enrolled repository's profile at the head of canonical `main` declares all six baselines at `0`, and each reduction that got it there carried deletion or cutover evidence under statement 4. | The profile history, read reduction by reduction. |
+| S2 | No product distribution resolves a `dotmac-connector-*` distribution in any dependency set, and only the Integrator assembly discovers them. | The dependency gate's report over each enrolled repository's lock file. |
+| S3 | Provider material is granted to the Integrator workload identity alone; no product identity can dereference those paths. | For each provider path, a recorded OpenBao policy DENIAL for a product workload identity and a matching grant for the Integrator's — a path pointer, never a value. |
+| S4 | Product runtimes default-deny external network access, and the destinations the Integrator may reach are exactly the union of its installed connector manifests' declared destinations. | The deployment's egress policy, plus a negative probe from a product workload to a provider destination that FAILS. |
+| S5 | No product route terminates a provider callback; every callback lands on a provider-agnostic Integrator endpoint. | The ingress map, plus a probe against a product host for a provider callback path that does not terminate. |
+| S6 | Products exchange versioned observations, commands and receipts through inbox/outbox contracts only — no shared database, no product reading another's persistence, none shared with the Integrator. | The contract inventory and the schema/grant evidence that no cross-product read path exists. |
+
+When S1 through S6 hold SIMULTANEOUSLY and a named human adjudicates them, the
+rule family goes REPORT-ONLY in the next schema version: every `connector.*`
+diagnostic drops to notice severity and none may fail a run. It stays
+report-only for one full conformance cycle, so a regression in S2 to S6 shows
+up as a rising count while the numbers are still being produced. After that
+cycle with no such rise, this record is superseded by the Integrator
+connectivity-authority record and the rule family is deleted from the engine —
+the profile object with it.
+
+**A partial condition sunsets nothing, and S1 alone is worth the least of the
+six.** All-zero baselines are precisely the state an engine reports when it
+cannot see a spelling: this record has already produced `PASS mode=required`,
+exit 0, on a repository holding six live connectors, and again on a clean
+repository holding an ordinary ERPNext + Stripe integration with all six
+baselines at zero. Zero is a claim about the detectors, not about the product.
+S1 without S2 to S6 does not start the clock.
+
+#### Why the ceiling is real rather than hypothetical
+
+The judgement above is not a preference about analysis techniques. Each of the
+defects below was found AFTER the layer holding it had been audited and
+declared sound, and each was invisible to every proof that existed at the time:
+
+- **Bounded factory tracing resolved ZERO spellings across 5,626 real
+  sources.** It passed sensitivity. It passed specificity. It matched the
+  textbook `return httpx.Client(...)` shape and every real factory in the
+  fleet memoises instead, so the arm was correct on its fixture and inert on
+  its subject — which is worse than an honest undercount, because it also reads
+  as coverage. Nothing but a corpus sweep could have told the difference, and
+  nothing guarantees the next arm gets swept before it is trusted.
+- **The SMTP gap.** `erp-adopt/app/tasks/email.py` is a `@shared_task` that
+  owns outbound mail: tables of permanent and transient SMTP response codes, a
+  failure classifier, and `max_retries`/`retry_backoff`/`retry_jitter` over the
+  send. It held NO CATEGORY AT ALL. It had been scoring `connector_task` only
+  because `send_email_async` contains the letters `sync`, and when that
+  false friend was correctly repaired the module went dark — a real recall loss
+  arriving inside a precision fix. The category list had no place to put it
+  because it was named after one transport. Both the false friend and the
+  missing arm were spelling and vocabulary accidents, and both hid a
+  consequential delivery surface for as long as they lasted.
+- **Packaging style decided the verdict.** The same ERPNext connector produced
+  `connector.baseline.exceeded` under `from erpnext.transport import
+  make_client` and a fully conformant report under `from erpnext import
+  transport`, and again under an ordinary `__init__.py` re-export. Raising the
+  trace bound to 3, 5, 10 and 50 rounds reached none of them.
+- **Two of six categories scored PROSE.** `celery` in a comment made an
+  in-process `@functools.cache` refresh a scheduled connector; `max_retries` in
+  a comment DISCLAIMING a retry policy made its module own delivery machinery.
+- **The derivation removed live application code by accident.** The grow pass
+  took `academy-adopt`'s `app/main.py` and 60 of the 152 files beneath it,
+  including an HTTP and WebSocket lab proxy, because an ASGI entry point named
+  only in a container image has no tracked importer but its tests. That is
+  bypass route I — the one this record claims to have closed — arriving without
+  anyone attacking anything.
+- **An adversarial scoring of 40 idiomatic spellings missed 37, with zero
+  control failures.**
+
+Every one of those was repaired. The pattern is what matters: the repairs are
+inference about SYNTAX standing in for a fact about CONNECTIVITY, and each
+round of them buys a smaller increment for a larger cost. Continuing to chase
+it turns a governance ratchet into an expensive home-grown whole-program
+analyser that a product's ordinary refactor can still walk past, and whose
+green run invites exactly the confidence it has not earned.
+
+#### The successor: deployment-enforced connectivity authority
+
+The durable architecture puts the boundary where a hidden connector fails for
+want of credentials and network reachability, whatever its coding style:
+
+```
+Provider  <--ingress / egress-->  Connector plugin  <--SPI-->  Integrator
+                                                                    |
+            typed observations, commands, receipts                  |
+                                                                    v
+                                  ERP / Sub / Academy / Vendor control plane
+```
+
+Business products stay AUTHORITATIVE FOR THEIR DOMAINS. The Integrator
+(`dotmac_integrator`) owns transport verification, credentials, rate limits,
+retries, idempotency and checkpoints, and owns NO BUSINESS DECISION — it is a
+transport authority, never a second owner of anything a product decides.
+
+The permanent controls, which this record names as its successor and against
+which its own sunset is judged:
+
+| Control | What it enforces |
+| --- | --- |
+| DECLARATION | Connector manifests declare modes, capabilities, secret-reference NAMES and network destinations. A destination not declared is not reachable. |
+| PACKAGE | Business products cannot depend on or load `dotmac-connector-*` distributions. Only the Integrator assembly discovers them. |
+| SECRETS | Provider material is granted to the Integrator workload identity alone. A product cannot dereference those OpenBao paths — a pointer is not a grant. |
+| EGRESS | Product runtimes default-deny external network access. The Integrator receives connector-declared destinations and nothing else. |
+| INGRESS | Provider callbacks terminate only at provider-agnostic Integrator endpoints. No product route is a provider's URL. |
+| DATA | Products exchange versioned observations, commands and receipts through inbox/outbox contracts. Never a shared database. |
+| MIGRATION | This record freezes each legacy surface until it is cut over and DELETED. The register is the migration's worklist. |
+
+Those controls are specified and enforced in their own records; naming them
+here is what makes this one's scope, and its ending, checkable. None of them is
+built by this change, and this record does not become normative for any of
+them.
 
 ### Measured scope is DERIVED, never declared
 
@@ -1281,6 +1486,15 @@ legitimate only when the profile baseline is lowered in the same change that
 deletes the code, so the reviewer sees it. A count that quietly falls is
 indistinguishable from a detector that stopped seeing something.
 
+Same-change lowering is necessary and not sufficient, and the 2026-08-16
+amendment says so normatively: the lowering change must also carry DELETION or
+CUTOVER evidence in its own diff — see statement 4 of "What this record is, and
+what it is never going to be". The engine cannot separate a deletion from a
+cutover from a refactor into a spelling it does not read; all three look like a
+fall. A reduction the reviewer cannot tie to removed lines or to a named
+connector distribution, manifest entry and inbox/outbox contract is refused,
+whatever the diagnostic says.
+
 At an all-zero baseline the downward arm is unreachable, so this repository's
 own profile proved only half the claim. The down direction is therefore tested
 against the REAL repository with each baseline raised to one in turn, and that
@@ -1292,8 +1506,10 @@ Version 6 carried an `exclusions` list whose premises the engine verified. That
 was still checkable in FORM and not in CLAIM: both premise kinds were satisfiable
 by a one-line edit to the excluded file — add a `@generated` marker to the top
 of a hand-written client, or add an import of the owning authority to a surface
-that does not delegate to it. The mechanism is REMOVED, not tightened. Version 8
-has no waiver and no exemption.
+that does not delegate to it. The mechanism is REMOVED, not tightened. Version 9
+has no waiver and no exemption. (This clause read "version 8" until 2026-08-16,
+written before that version was withdrawn; the accepted target is 9 and version
+8 grants nothing because it does not load.)
 
 A future exemption requires two properties. Conservation builds ONE of them and
 deliberately does not build the other, and the distinction is the whole reason
@@ -1332,54 +1548,100 @@ Collapsing them into one number is what hid the problem, and the ignore query
 is run separately, used only to label. When it cannot be answered, nothing is
 labelled ignored — the split fails toward the louder half.
 
-### A governance-owned source disposition (2026-08-15)
+### A governance-owned, file-proven source disposition (2026-08-16)
 
-The count is answered by CLASSIFYING the source, not by exempting it. Code
-inside a TOOL-OWNED DEPENDENCY ENVIRONMENT is dependency material rather than
-repository source. It is dispositioned out of the untracked population and
-published as a `repository.dependency-environment` NOTICE naming the
-environment root, the evidence that proved it, and its FILE COUNT — visible and
-auditable from the output, never silent.
+The count is answered by CLASSIFYING EACH FILE, not by exempting its directory.
+The earlier four-arm environment predicate was insufficient: seven of eight
+adversarial fixtures made a live connector disappear from measurement and both
+untracked error populations. The cheapest copied the file into a genuine
+`.venv`; no metadata forgery was required. Environment shape therefore proves
+only WHERE a source lives. It never proves WHAT installed that source.
 
-This is the governance-owned semantic predicate the section above says a future
-exemption needs, built for exactly one narrow classification and nothing else.
-It satisfies that bar because the product cannot make its claim true by editing
-the file: the claim is about a WHOLE DIRECTORY's tool-written metadata and
-structure, and forging it means constructing a real environment. Accordingly:
+An untracked Python file is dispositioned only when two closed predicates both
+hold: the directory is a recognised dependency environment, and the file is
+proved as material from an exact, tracked dependency. The resulting
+`repository.dependency-environment` NOTICE names the environment evidence, the
+exact distribution identities and the number of individually proved files.
+Every other Python file remains in its visible or ignored untracked error
+population.
+
+This is a governance-owned source classification, built for exactly one narrow
+case and nothing else. Accordingly:
 
 - Products cannot configure it. There is no profile key, no path a product can
   name, no predicate a product can supply, and no schema change accompanies it.
   Adopter-configured exclusions stay deleted.
-- It is independent of `.gitignore` in BOTH directions. A genuine environment is
-  dependency material whether or not it is ignored, and being ignored disposes
-  of nothing by itself.
+- It is independent of `.gitignore` in BOTH directions. A file with complete
+  installed-distribution proof is dependency material whether or not it is
+  ignored, and being ignored disposes of nothing by itself.
 
-The predicate is CLOSED. No wildcard, no name match, no "looks like": a
-directory called `.venv` earns nothing by being called that. All four arms must
-hold for a repository-relative directory `E`.
+The environment-shape predicate is CLOSED. No wildcard, no name match, no
+"looks like": a directory called `.venv` earns nothing by being called that.
+All four arms must hold for a repository-relative directory `E`.
 
 | Arm | Requirement | Why it is not guessable |
 | --- | --- | --- |
 | A1 MARKER | `E/pyvenv.cfg` is a regular file (never a symlink, never over 64 KiB) parsing as `key = value` lines, carrying `home` as a non-empty ABSOLUTE path, `include-system-site-packages` as exactly `true`/`false`, and at least one of `version`/`version_info` beginning `MAJOR.MINOR`. Both version keys present must AGREE. | The two keys are the two real dialects — `virtualenv` writes `version_info`, the stdlib `venv` writes `version`. A third spelling is a new governance decision, not something the predicate already grants. |
 | A2 LAYOUT | a real directory (never a symlink) at exactly `E/lib/python<MAJOR>.<MINOR>/site-packages` or `E/Lib/site-packages`. | The directory name is DERIVED from the marker's version rather than discovered by globbing. That derivation IS the internal-consistency check: a marker claiming 3.13 over a 3.11 tree proves nothing. |
 | A3 INTERPRETER | a regular file at exactly `E/bin/python`, `E/bin/python<MAJOR>.<MINOR>`, or `E/Scripts/python.exe`. | A real environment symlinks this OUT to the base installation, which is expected and permitted — an interpreter is not measured material, so only sources are subject to A4. |
-| A4 CONTAINMENT | `E` is not itself a symlink and resolves inside the repository, and every dispositioned file must RESOLVE inside `E`. | A symlink inside a genuine environment pointing out of it must not launder a file into dependency material. An unresolvable link — dangling, or a cycle — fails closed and stays untracked. |
+| A4 CONTAINMENT | `E` is not itself a symlink and resolves inside the repository. | A symlinked environment cannot redirect the classification outside the repository. Per-file links are refused separately below. |
 
-Three negatives are proved, because a disposition that fires is not a
-disposition that discriminates: a directory MERELY NAMED `.venv` with the layout
-and the interpreter but no marker, an INCOMPLETE MARKER (eleven mutilations, one
-per required field), and an ORDINARY IGNORED PACKAGE all keep reporting
-`repository.source.untracked`. Bypass D is proved to stay closed in the same run
-in which a genuine environment beside it is dispositioned away.
+Environment recognition confers no disposition by itself. For each source `P`,
+all five file-provenance arms must also hold:
 
-OUT OF SCOPE, deliberately: code inside a recognised environment is dependency
-material, and whether that dependency's provenance is DECLARED and PINNED is a
-SEPARATE control. Constructing a real environment around a connector is
-therefore a conceded residual route — it costs building a genuine environment,
-and it is the undeclared-dependency control's business, not this one's. That
-control is not built here.
+| Arm | Requirement |
+| --- | --- |
+| F1 LOCATION | `P` is a regular, non-symlink `.py`/`.pyw` file below `E`'s derived `site-packages`. Code copied into the environment root, scripts directory or a symlink is still untracked. |
+| F2 IDENTITY | Exactly one real `*.dist-info` directory has regular bounded `METADATA` and `RECORD` files, and `METADATA` declares one non-empty `Name` and `Version`. |
+| F3 AUTHORITY | The PEP-503-normalised `(name, version)` pair appears exactly pinned in a TRACKED `poetry.lock`, `uv.lock`, or `requirements*.txt` entry using `name==version`. Environment files and untracked lock material grant nothing. |
+| F4 OWNERSHIP | That distribution's CSV `RECORD` names `P` by a relative path with no absolute or `..` component. Ambiguous ownership by more than one accepted distribution is refused. |
+| F5 INTEGRITY | `RECORD` supplies `sha256` and decimal size, and both match `P`'s current bytes. A blank digest, unsupported algorithm, changed file or malformed row is refused. |
+
+The permanent canaries cover the seven escape shapes produced by the audit and
+their counter-direction: copied code in a genuine environment, copied code
+inside `site-packages`, an unpinned distribution, a digest mismatch, a hashless
+record, internal and escaping symlinks, plus tracked code inside an environment
+which remains MEASURED. A genuine pinned distribution with matching records is
+still dispositioned, on both POSIX and Windows layouts. The detailed attack
+record and the three precision repairs are kept in
+`docs/inventories/dependency-provenance-and-precision-repair.md`; they are
+evidence for this decision, not additional normative clauses.
+
+### Three precision boundaries from the adversarial corpus (2026-08-16)
+
+With no adopter suppression mechanism, a false positive must be repaired once
+in the owning detector. Three systemic families are now part of the detector
+contract:
+
+- An HTTP client whose every constructor is explicitly wired to
+  `httpx.MockTransport`, `ASGITransport` or `WSGITransport` is IN-PROCESS and
+  does not satisfy `outbound_transport`. The rule follows direct construction
+  and the bounded project-local factory trace. A direct `httpx.get/post/...`
+  or any other real client in the same module defeats the exception, so the
+  unit is not suppressed wholesale.
+- A route beneath an exact management segment (`admin`, `config`,
+  `configuration`, `settings`, `management`) that merely configures webhook
+  registrations is not a provider callback. A webhook-named management route
+  must consume callback material — headers, raw/request body, body, or a
+  subscription challenge — before it satisfies `webhook_surface`. Routes
+  outside a management segment retain the existing path rule.
+- `sync` alone does not make scheduled work a connector. A scheduled sync must
+  name a generic external qualifier (for example `provider`, `remote`, `feed`,
+  `integration`, `upstream`) or live in a module independently proved to hold
+  another connector surface. `connector`, `integration`, `webhook`, `poll` and
+  `fetch` remain self-qualifying task subjects. Product/provider proper names
+  are not added to this vocabulary.
+
+Each boundary carries both a false-friend canary and a retained true-positive
+canary. None changes the six-category profile schema, and no product may opt
+out of or widen it in configuration.
 
 ### The four adopter baselines under schema version 9 (2026-08-15)
+
+> Historical measurement, not an adoption floor. These numbers predate the
+> 2026-08-16 file-proven disposition and three precision boundaries above. The
+> final eight-shard audit must regenerate and adjudicate every changed finding
+> before acceptance; no adopter may transcribe this table into a profile.
 
 Recomputed by library probe, read-only, in the adopter worktrees; NOT written
 there, since all four remain PENDING-APPROVAL and none may be edited by this
@@ -1418,7 +1680,7 @@ that policy read as a retry loop around a local queue.
 | `repository.inventory.unavailable` | error | The tracked Python inventory cannot be read, so no universe can be derived. |
 | `repository.source.untracked` | error | A Python source is on disk but outside the index, in either untracked population — visible, or hidden by the repository's own ignore rules. The message says which. |
 | `repository.tree.unmeasured` | error | An index entry grafts a tree the index does not contain: a submodule, or a symlink to a directory outside the repository. |
-| `repository.dependency-environment` | notice | A directory was proved to be a tool-owned dependency environment, published with the evidence that proved it and the FILE COUNT the disposition removed from the untracked population. |
+| `repository.dependency-environment` | notice | One or more files were proved as lock-pinned installed-distribution material. The notice publishes the environment-shape evidence, exact distribution identities and proved FILE COUNT; unproved neighbours remain errors. |
 | `connector.scope.excluded` | notice | A tracked source was proven test-only and unreachable, and removed from the universe. |
 | `connector.conserved.recorded` | notice | A connector-shaped surface inside an excluded source, published with the exact entry to declare. |
 | `connector.conserved.undeclared` | error | A conserved finding no `conserved_exclusions` entry declares. |
@@ -1456,9 +1718,10 @@ product repins and migrates its profile to schema version 9 in one change.
 - A repository that keeps a vendored dependency tree or generated Python inside
   its working tree without tracking it will report `repository.source.untracked`
   for every such file. This is the deliberate cost of refusing name-based skips:
-  those regions genuinely are unmonitored. A TOOL-OWNED DEPENDENCY ENVIRONMENT
-  is the one case that is now resolved, by the governance-owned source
-  disposition below — and only because it can be PROVED rather than named.
+  those regions genuinely are unmonitored. Lock-pinned installed-distribution
+  files are the one case now resolved by the governance-owned disposition —
+  and only when environment shape, metadata identity, RECORD ownership, digest
+  and size prove each file rather than merely naming its directory.
 - A test module that offers a public module-level helper stays IN the measured
   universe. That is the safe direction — it can raise a count and fail loudly,
   never hide one — but adopters should expect their first run to measure more
@@ -1583,6 +1846,32 @@ product repins and migrates its profile to schema version 9 in one change.
   this release, a false positive is unfixable by the adopter and must be
   corrected centrally, so recall may only be bought with evidence that precision
   holds.
+
+  **AMENDED 2026-08-16.** "Not adoptable until that is settled" is retracted as
+  written, because it made adoption wait on a widening that cannot arrive. The
+  undercount is not settled by more detection; it is settled by moving the
+  boundary into the deployment. This record is adoptable as a DEBT REGISTER at
+  its stated ceiling — the counts are honest about the spellings they read and
+  say so — and the self-disarming path the paragraph above describes is closed
+  by statement 4's evidence requirement rather than by a detector. What remains
+  blocking adoption is human acceptance, which is the acceptance record's
+  business, not this consequence's.
+- **AMENDED 2026-08-16.** A green `connector.*` run is EVIDENCE OF NON-GROWTH
+  IN THE MEASURED SPELLINGS and nothing else. It is not a statement that the
+  repository holds no external connectivity, is not a security control, and may
+  not be cited as one in an evidence mapping, a control interpretation, or a
+  release note. The protocols outside the two measured arms are unmonitored,
+  and a repository can be green while speaking every one of them.
+- **AMENDED 2026-08-16.** A baseline may only be lowered in a change that also
+  carries deletion or cutover evidence. A fall the reviewer cannot attribute is
+  refused even though the engine's own instruction, read literally, would
+  accept the lowering.
+- **AMENDED 2026-08-16.** This record has a stated END. It becomes report-only
+  when S1 to S6 hold together, and is superseded and deleted one conformance
+  cycle later. Adopters should plan the rule family as temporary migration
+  scaffolding with a defined removal, not as a permanent gate to build tooling
+  and habits around. A product that has cut every surface over to the
+  Integrator carries an all-zero object it will eventually delete.
 - A repository pinned to an earlier Governance revision is unaffected until it
   repins.
 
@@ -1686,3 +1975,27 @@ product repins and migrates its profile to schema version 9 in one change.
   reintroduced without also reintroducing the parameter. That is the structural
   half of the guarantee; the per-category inertness proofs are the behavioural
   half, and neither is sufficient alone.
+- **The ceiling is stated in the record, so a later reader cannot mistake the
+  ratchet for the boundary (2026-08-16).** Statements 1 to 3 are the drift
+  control for the failure this amendment exists to prevent: a green run being
+  read as connectivity assurance, and effort being spent widening a syntax
+  analysis instead of building the deployment controls. The protocol table is
+  the checkable form — a protocol absent from it is unmonitored, and adding one
+  is an ARM with all three ADR 0018 legs and a schema version, never a word
+  appended to a set. `HTTP_TRANSPORTS` and `SMTP_TRANSPORTS` are closed sets in
+  the engine for the same reason.
+- **A baseline reduction is adjudicated by a human against deletion or cutover
+  evidence (2026-08-16).** The engine reports the fall; it cannot report the
+  reason, and a rule that cannot distinguish a deletion from a refactor into an
+  unread spelling must not be the only thing standing between the two. This is
+  deliberately a review obligation rather than an engine check: the evidence is
+  a diff and a contract reference, neither of which the profile can hold
+  without becoming the product-authored claim this record refuses to build.
+- **The sunset is a conjunction with named evidence, so "we are basically
+  there" cannot retire it (2026-08-16).** S1 to S6 are individually checkable
+  and must hold simultaneously; S1 alone explicitly does not start the clock,
+  because an all-zero profile is also what an engine reports when it cannot see
+  a spelling — which this record has demonstrated twice, on a repository with
+  six live connectors and on a clean ERPNext + Stripe integration. Report-only
+  runs for one full conformance cycle before supersession, so a regression in
+  S2 to S6 surfaces as a rising count while the counts are still produced.

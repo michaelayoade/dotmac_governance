@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+import base64
 import copy
+import hashlib
 import json
 import shutil
 import subprocess
@@ -190,6 +192,48 @@ from celery import shared_task
 @shared_task
 def rebuild_search_index() -> None:
     return None
+"""
+LOOKALIKE_LOCAL_SYNC_TASK = """\
+from celery import shared_task
+
+@shared_task
+def sync_local_postgres_projection() -> None:
+    return None
+"""
+LOOKALIKE_IN_PROCESS_HTTP_CLIENT = """\
+import httpx
+
+class FakeERPClient:
+    def __init__(self) -> None:
+        self.client = httpx.Client(
+            transport=httpx.MockTransport(self._respond),
+        )
+
+    def _respond(self, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    def fetch(self) -> object:
+        return self.client.get("https://provider.invalid/resource").json()
+"""
+LOOKALIKE_ADMIN_WEBHOOK_CONFIGURATION = """\
+from fastapi import APIRouter, Form
+
+router = APIRouter()
+
+@router.post("/admin/integrations/webhooks")
+def configure_webhook(max_retries: int = Form(3)) -> None:
+    return None
+"""
+PLANTED_MANAGED_WEBHOOK_CALLBACK = """\
+from fastapi import APIRouter, Request
+
+router = APIRouter()
+
+@router.post("/admin/integrations/webhooks/provider")
+async def receive_webhook(request: Request) -> None:
+    raw_body = await request.body()
+    signature = request.headers.get("x-signature")
+    assert raw_body and signature
 """
 FEED_CURSOR = """\
 class ErpImportCursor:
@@ -2869,6 +2913,65 @@ class StandardsTests(unittest.TestCase):
                     report = self.connector_report(runtime=source)
                     self.assertTrue(report.conforms, report.to_dict())
 
+    def test_an_in_process_http_transport_is_not_provider_egress(self) -> None:
+        """A public fake client can exercise httpx without leaving the process."""
+        report = self.connector_report(runtime=LOOKALIKE_IN_PROCESS_HTTP_CLIENT)
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_an_in_process_http_factory_is_not_traced_as_provider_egress(self) -> None:
+        report = self.connector_report(
+            runtime=(
+                "from example.fake_transport import build\n\n"
+                "def fetch() -> object:\n"
+                "    return build().get('https://provider.invalid/resource')\n"
+            ),
+            extra={
+                "example/fake_transport.py": (
+                    "import httpx\n\n"
+                    "def respond(request: httpx.Request) -> httpx.Response:\n"
+                    "    return httpx.Response(200)\n\n"
+                    "def build() -> httpx.Client:\n"
+                    "    return httpx.Client(transport=httpx.MockTransport(respond))\n"
+                )
+            },
+        )
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_a_real_http_client_beside_the_fake_shape_stays_measured(self) -> None:
+        """The repair follows constructors; it does not suppress a whole file."""
+        report = self.connector_report(
+            runtime=(
+                LOOKALIKE_IN_PROCESS_HTTP_CLIENT
+                + "\ndef deliver() -> object:\n"
+                + "    return httpx.post('https://provider.example/events')\n"
+            )
+        )
+        self.assertEqual(
+            self.exceeded_categories(report), {"outbound_transport"}, report.to_dict()
+        )
+
+    def test_an_admin_webhook_configuration_screen_is_not_a_callback(self) -> None:
+        """A management CRUD path and max-retries field manufacture no surface."""
+        report = self.connector_report(runtime=LOOKALIKE_ADMIN_WEBHOOK_CONFIGURATION)
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_a_management_path_that_reads_callback_material_is_measured(self) -> None:
+        """A provider callback remains one even beneath a management prefix."""
+        report = self.connector_report(runtime=PLANTED_MANAGED_WEBHOOK_CALLBACK)
+        self.assertEqual(
+            self.exceeded_categories(report), {"webhook_surface"}, report.to_dict()
+        )
+
+    def test_a_scheduled_local_database_sync_is_not_a_connector_task(self) -> None:
+        report = self.connector_report(runtime=LOOKALIKE_LOCAL_SYNC_TASK)
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_a_scheduled_sync_with_an_external_subject_stays_measured(self) -> None:
+        report = self.connector_report(runtime=PLANTED_CONNECTOR_TASK)
+        self.assertEqual(
+            self.exceeded_categories(report), {"connector_task"}, report.to_dict()
+        )
+
     def test_a_rotation_pointer_is_not_a_sync_checkpoint(self) -> None:
         """The corrected cursor classification, stated as its own control.
 
@@ -5185,7 +5288,7 @@ class StandardsTests(unittest.TestCase):
                 )
 
 
-# -- Governance-owned source disposition: tool-owned dependency environments --
+# -- Governance-owned source disposition: file-proven installed distributions --
 #
 # `git ls-files --others` with no `--exclude-standard` made every gitignored
 # Python file a `repository.source.untracked` error: 3119 in one adopter, 407 in
@@ -5195,10 +5298,10 @@ class StandardsTests(unittest.TestCase):
 #
 # The disposition below is a SOURCE CLASSIFICATION instead, and it is
 # governance-owned: no product may name a path, supply a predicate, or
-# configure it, and there is no profile surface for it. It recognises a
-# TOOL-OWNED DEPENDENCY ENVIRONMENT through a closed semantic predicate over
-# the environment's own metadata and structure, and it is independent of
-# `.gitignore` in both directions.
+# configure it, and there is no profile surface for it. Environment shape is a
+# prerequisite only; each removed file must also join to tracked exact
+# dependency authority and a matching METADATA/RECORD identity, digest and size.
+# The result is independent of `.gitignore` in both directions.
 #
 # Normatively, a repository-relative directory E is a dependency environment if
 # and only if ALL FOUR arms hold:
@@ -5226,9 +5329,10 @@ class StandardsTests(unittest.TestCase):
 # The list is closed. There is no wildcard, no "looks like", no name match: a
 # directory called `.venv` earns nothing by its name.
 #
-# Code inside a genuine environment is DEPENDENCY MATERIAL. Whether those
-# dependencies are declared, pinned and provenanced is a SEPARATE control that
-# is deliberately NOT built here.
+# Environment shape proves only where a file lives. A Python source leaves the
+# untracked population only when tracked dependency authority pins its exact
+# distribution identity and that distribution's RECORD names the file with a
+# matching sha256 and size. Shape alone confers no trust.
 
 DEPENDENCY_ENVIRONMENT = "repository.dependency-environment"
 SOURCE_UNTRACKED = "repository.source.untracked"
@@ -5252,11 +5356,41 @@ executable = /usr/local/bin/python3.13
 command = /usr/local/bin/python3.13 -m venv /srv/example/.venv
 """
 
-ENVIRONMENT_SOURCES = {
-    "lib/python3.13/site-packages/provider/__init__.py": "",
-    "lib/python3.13/site-packages/provider/client.py": PLANTED_HTTP_TRANSPORT,
-    "bin/activate_this.py": "installed = True\n",
-}
+
+def installed_distribution_sources(
+    *,
+    layout: str = "lib/python3.13/site-packages",
+    name: str = "provider",
+    version: str = "1.0",
+    files: Mapping[str, str] | None = None,
+    record_hashes: bool = True,
+) -> dict[str, str]:
+    """Build installed files plus the wheel provenance that owns each one."""
+    installed = dict(
+        files
+        or {
+            f"{name}/__init__.py": "",
+            f"{name}/client.py": PLANTED_HTTP_TRANSPORT,
+        }
+    )
+    record_rows: list[str] = []
+    for relative, body in installed.items():
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(body.encode("utf-8")).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
+        hash_field = f"sha256={digest}" if record_hashes else ""
+        record_rows.append(f"{relative},{hash_field},{len(body.encode('utf-8'))}\n")
+    dist_info = f"{name.replace('-', '_')}-{version}.dist-info"
+    installed[f"{dist_info}/METADATA"] = (
+        f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n"
+    )
+    installed[f"{dist_info}/RECORD"] = "".join(record_rows)
+    return {f"{layout}/{relative}": body for relative, body in installed.items()}
+
+
+ENVIRONMENT_SOURCES = installed_distribution_sources()
 
 
 def plant_environment(
@@ -5300,6 +5434,9 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
     def build(self, root: Path, **kwargs: object) -> Path:
         value = profile()
         value["external_connector_surface"] = connector_surface()
+        extra = dict(cast(Mapping[str, str] | None, kwargs.pop("extra", None)) or {})
+        extra.setdefault("requirements-dev.txt", "provider==1.0\n")
+        kwargs["extra"] = extra
         return Fixture(root).write(copy.deepcopy(value), **kwargs)  # type: ignore[arg-type]
 
     def report_for(self, root: Path, profile_path: Path) -> ConformanceReport:
@@ -5342,14 +5479,126 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
     # -- A1 MARKER ----------------------------------------------------------
 
     def test_a1_sensitivity_a_genuine_environment_is_dispositioned(self) -> None:
-        """The whole predicate holding: every file under the environment leaves
-        the untracked population, and the environment is NAMED with its count.
-        """
+        """Only RECORD-owned, lock-pinned files leave the untracked population."""
         report = self.scan(plant={})
         self.assertEqual(self.untracked(report), set())
         named = self.environments(report)
         self.assertEqual(set(named), {".venv"})
-        self.assertIn("3", named[".venv"])
+        self.assertIn("2", named[".venv"])
+        self.assertIn("provider==1.0", named[".venv"])
+
+    def test_each_closed_dependency_authority_format_is_accepted(self) -> None:
+        authorities = {
+            "requirements": {"requirements-dev.txt": "provider==1.0\n"},
+            "poetry": {
+                "requirements-dev.txt": "",
+                "poetry.lock": '[[package]]\nname = "provider"\nversion = "1.0"\n',
+            },
+            "uv": {
+                "requirements-dev.txt": "",
+                "uv.lock": '[[package]]\nname = "provider"\nversion = "1.0"\n',
+            },
+        }
+        for name, extra in authorities.items():
+            with self.subTest(authority=name):
+                report = self.scan(plant={}, extra=extra)
+                self.assertEqual(self.untracked(report), set(), report.to_dict())
+                self.assertEqual(set(self.environments(report)), {".venv"})
+
+    def test_a_mutable_requirement_is_not_dependency_authority(self) -> None:
+        report = self.scan(plant={}, extra={"requirements-dev.txt": "provider>=1.0\n"})
+        self.assertEqual(self.environments(report), {})
+        self.assertEqual(
+            self.untracked(report),
+            {
+                ".venv/lib/python3.13/site-packages/provider/__init__.py",
+                ".venv/lib/python3.13/site-packages/provider/client.py",
+            },
+        )
+
+    def test_copied_code_inside_a_genuine_environment_still_errors(self) -> None:
+        report = self.scan(
+            plant={
+                "sources": {
+                    **ENVIRONMENT_SOURCES,
+                    "copied_connector.py": PLANTED_HTTP_TRANSPORT,
+                }
+            }
+        )
+        self.assertEqual(
+            self.untracked(report), {".venv/copied_connector.py"}, report.to_dict()
+        )
+
+    def test_an_unrecorded_site_packages_file_still_errors(self) -> None:
+        report = self.scan(
+            plant={
+                "sources": {
+                    **ENVIRONMENT_SOURCES,
+                    "lib/python3.13/site-packages/hidden.py": PLANTED_HTTP_TRANSPORT,
+                }
+            }
+        )
+        self.assertEqual(
+            self.untracked(report),
+            {".venv/lib/python3.13/site-packages/hidden.py"},
+            report.to_dict(),
+        )
+
+    def test_a_recorded_distribution_absent_from_the_lock_still_errors(self) -> None:
+        report = self.scan(
+            plant={
+                "sources": installed_distribution_sources(
+                    name="undeclared-provider", version="9.9"
+                )
+            }
+        )
+        self.assertEqual(self.environments(report), {})
+        self.assertIn(
+            ".venv/lib/python3.13/site-packages/undeclared-provider/client.py",
+            self.untracked(report),
+        )
+
+    def test_a_record_hash_mismatch_still_errors(self) -> None:
+        sources = installed_distribution_sources()
+        sources["lib/python3.13/site-packages/provider/client.py"] += "# changed\n"
+        report = self.scan(plant={"sources": sources})
+        self.assertEqual(
+            self.untracked(report),
+            {".venv/lib/python3.13/site-packages/provider/client.py"},
+            report.to_dict(),
+        )
+
+    def test_a_record_entry_without_a_hash_still_errors(self) -> None:
+        report = self.scan(
+            plant={"sources": installed_distribution_sources(record_hashes=False)}
+        )
+        self.assertEqual(self.environments(report), {})
+        self.assertEqual(
+            self.untracked(report),
+            {
+                ".venv/lib/python3.13/site-packages/provider/__init__.py",
+                ".venv/lib/python3.13/site-packages/provider/client.py",
+            },
+        )
+
+    def test_tracked_code_inside_an_environment_is_measured(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile_path = self.build(root)
+            plant_environment(root / ".venv")
+            copied = root / ".venv/copied_connector.py"
+            copied.write_text(PLANTED_HTTP_TRANSPORT, encoding="utf-8")
+            Fixture(root).git("add", "-f", ".venv/copied_connector.py")
+            report = self.report_for(root, profile_path)
+        self.assertEqual(self.untracked(report), set())
+        self.assertTrue(
+            any(
+                item.code is DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED
+                and "outbound_transport" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_dict(),
+        )
 
     def test_a1_sensitivity_both_real_marker_dialects_are_recognised(self) -> None:
         """`virtualenv` writes `version_info`; the stdlib `venv` writes
@@ -5371,7 +5620,6 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
         self.assertEqual(
             self.untracked(report),
             {
-                ".venv/bin/activate_this.py",
                 ".venv/lib/python3.13/site-packages/provider/__init__.py",
                 ".venv/lib/python3.13/site-packages/provider/client.py",
             },
@@ -5464,9 +5712,7 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
             plant={
                 "layout": "Lib/site-packages",
                 "interpreter": "Scripts/python.exe",
-                "sources": {
-                    "Lib/site-packages/provider/client.py": PLANTED_HTTP_TRANSPORT
-                },
+                "sources": installed_distribution_sources(layout="Lib/site-packages"),
             }
         )
         self.assertEqual(self.untracked(report), set())
@@ -5602,10 +5848,7 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
     # -- A4 CONTAINMENT / NO SYMLINK ESCAPE ---------------------------------
 
     def escaping_root(self, root: Path, target: Path) -> None:
-        plant_environment(
-            root / ".venv",
-            sources={"lib/python3.13/site-packages/honest.py": "installed = True\n"},
-        )
+        plant_environment(root / ".venv")
         (root / ".venv/lib/python3.13/site-packages/laundered.py").symlink_to(target)
 
     def test_a4_specificity_a_symlink_escaping_the_environment_is_not_laundered(
@@ -5639,11 +5882,10 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
             {".venv/lib/python3.13/site-packages/laundered.py"},
         )
 
-    def test_a4_sensitivity_a_symlink_inside_the_environment_stays_material(
+    def test_a4_sensitivity_a_symlink_inside_the_environment_still_errors(
         self,
     ) -> None:
-        """The counter-direction: an environment's own internal symlink — which
-        real packaging tools do write — is still dependency material."""
+        """RECORD provenance attaches to bytes, never a mutable link target."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             profile_path = self.build(root)
@@ -5652,7 +5894,10 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
                 root / ".venv/lib/python3.13/site-packages/provider/client.py"
             )
             report = self.report_for(root, profile_path)
-        self.assertEqual(self.untracked(report), set())
+        self.assertEqual(
+            self.untracked(report),
+            {".venv/lib/python3.13/site-packages/alias.py"},
+        )
         self.assertEqual(set(self.environments(report)), {".venv"})
 
     def test_a4_liveness_the_containment_arm_classifies_real_repository_code(
@@ -5660,7 +5905,9 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
     ) -> None:
         clean, honest = self.in_situ()
         self.assertEqual(clean, {".dmgov-probe-env"})
-        self.assertEqual(honest, set(), "an internal source is dependency material")
+        self.assertEqual(
+            honest, set(), "a proven installed source is dependency material"
+        )
         recognised, untracked = self.in_situ(escape=True)
         self.assertEqual(recognised, {".dmgov-probe-env"})
         self.assertEqual(
@@ -5757,10 +6004,12 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
         )
 
     def test_the_repository_root_can_never_be_a_dependency_environment(self) -> None:
-        """The largest possible hole, closed by construction: make the whole
-        repository look like an environment and every untracked source in it
-        becomes dependency material at once. The ancestor walk stops before the
-        root, so a root marker buys nothing at all."""
+        """The repository root is never an environment candidate.
+
+        This was the largest hole in the directory-level design. File proof is
+        now independently required too, but the ancestor walk still stops
+        before root so a root marker buys nothing at all.
+        """
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             profile_path = self.build(
@@ -5836,13 +6085,19 @@ class DependencyEnvironmentDispositionTests(unittest.TestCase):
             # mutilated layout is not silently repaired by writing a file into
             # the consistent one. Getting this wrong made the arm look dead
             # when it was the fixture that was defeating it.
-            inside = f"{layout or 'lib'}/honest.py"
+            installed_layout = layout or "lib/python3.13/site-packages"
+            sources = installed_distribution_sources(
+                layout=installed_layout,
+                name="mypy",
+                version="1.17.1",
+                files={"mypy/dmgov_probe.py": "installed = True\n"},
+            )
             plant_environment(
                 base,
                 marker=marker,
                 layout=layout,
                 interpreter=interpreter,
-                sources={inside: "installed = True\n"},
+                sources=sources,
             )
             if escape:
                 escaped = ROOT / ".dmgov-probe-target.py"

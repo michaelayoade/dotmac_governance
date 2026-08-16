@@ -4,14 +4,14 @@
 checked-in Governance profile is `required`; a green run is conformance
 evidence for the evaluated revision, not a certification or compliance claim.
 
-Each strict schema-version-8 profile names repository URL/default branch, its
+Each strict schema-version-9 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
 tests, exact Python contract surfaces, its module-declared vocabularies, the
 kernel testing-kit import boundary, and its external-connector surface. The
 typed gate rejects `Any`, missing or bare public annotations, unannotated record
 fields, and mutable boundary records. Schema version 9 has no waiver mechanism
-and no exemption mechanism. Schema version 7 is withdrawn and never accepted:
-it fails to load rather than upgrading.
+and no exemption mechanism. Schema versions 7 and 8 are withdrawn and never
+accepted: both fail to load rather than upgrading.
 
 ## External connector surface (ADR 0011, PROPOSED)
 
@@ -19,6 +19,42 @@ it fails to load rather than upgrading.
 pin the revision carrying it until Michael Ayoade accepts that record and it
 merges to canonical `main`. What follows is the adoption instruction that
 becomes usable at that point, not a licence to adopt now.
+
+**What a green run means, and the three things it does not.** This family
+INVENTORIES AND FREEZES the direct connector surfaces a product still holds
+while it migrates them behind the Integrator. A green run is evidence that the
+MEASURED SPELLINGS did not grow, and nothing more.
+
+- It is DEFENCE IN DEPTH, NOT RUNTIME ISOLATION. Nothing here stops a running
+  product opening a socket, reading a provider secret, or terminating a
+  provider callback. The controls that do are deployment-enforced — connector
+  manifests declaring destinations, products unable to load
+  `dotmac-connector-*`, provider secrets granted only to the Integrator
+  workload identity, default-deny product egress, provider-agnostic Integrator
+  ingress, and versioned inbox/outbox exchange instead of shared databases.
+  ADR 0011's amendment of 2026-08-16 names them and makes this family's ending
+  conditional on them.
+- It PROMISES NO UNIVERSAL PROTOCOL RECOGNITION. `outbound_transport` carries
+  one arm per protocol and today has two: HTTP over five named client
+  libraries, and SMTP over two. Message brokers, gRPC, WebSocket, raw sockets,
+  SSH/SFTP/FTP, SNMP/RADIUS/TFTP/NETCONF, database links and foreign data
+  wrappers, and cloud SDKs whose transport is not one of the five are all
+  UNMONITORED. `import boto3` holds no HTTP arm. A baseline of zero means zero
+  in the protocols the engine measures.
+- It is NOT a security control and may not be cited as one in an evidence
+  mapping, a control interpretation, or a release note.
+
+Three precision boundaries are fleet-wide and not configurable by adopters:
+explicit `httpx` in-process transports do not count as egress; webhook-named
+management routes must read callback material rather than merely configure a
+registration; and a scheduled name containing bare `sync` needs a generic
+external qualifier or another connector surface in the same module. Each has a
+retained true-positive canary; the exact predicates are in ADR 0011.
+
+The family has a stated END: once every enrolled baseline is zero AND the six
+deployment conditions in ADR 0011 hold together, it becomes report-only and is
+deleted a conformance cycle later. Treat it as migration scaffolding, not as a
+permanent gate.
 
 A repository declares two things here — a baseline for each of the six measured
 categories, and the exclusions it has already reviewed — and nothing at all
@@ -50,6 +86,17 @@ empty. All six categories must be present; a category cannot be dropped from a
 profile to make a count disappear. Baselines are two-direction ratchets: a rise
 is a new direct connector surface, and a fall without the profile being lowered
 in the SAME change is a retirement nobody reviewed.
+
+Lowering in the same change is necessary and NOT sufficient. The change must
+also carry DELETION evidence (the surface gone from the tracked inventory,
+visible as removed lines) or CUTOVER evidence (the surface moved behind the
+Integrator SPI, with the connector distribution, manifest entry and
+inbox/outbox contract named in the diff). A refactor from a spelling the engine
+reads to one it does not ALSO makes a count fall and ALSO emits
+`connector.baseline.stale`; followed literally, that instruction walks a
+baseline to zero and disarms the ratchet. The engine cannot tell the three
+apart, so a reduction the reviewer cannot attribute is refused whatever the
+diagnostic says.
 
 ### Exclusions are conserved, not subtracted
 
@@ -169,32 +216,42 @@ bypass the untracked error closes. The ignore query is run separately and used
 only to label the report; when it cannot be answered, nothing is labelled
 ignored.
 
-A third, disjoint outcome is the GOVERNANCE-OWNED SOURCE DISPOSITION. Code
-inside a TOOL-OWNED DEPENDENCY ENVIRONMENT is dependency material rather than
-repository source, so it is dispositioned out of the untracked population and
-published as a `repository.dependency-environment` notice naming the
-environment root, the evidence that proved it, and its FILE COUNT. It is a
+A third, disjoint outcome is the GOVERNANCE-OWNED SOURCE DISPOSITION. It is
+FILE-LEVEL, not directory-level: a recognised dependency environment proves
+only location. Each removed Python file must also be owned by an exact
+lock-pinned installed distribution and match that distribution's RECORD digest
+and size. The `repository.dependency-environment` notice names the environment
+evidence, exact distribution identities and proved FILE COUNT. It is a
 CLASSIFICATION, not an exemption: there is no profile key for it, no path a
-product can name, and no predicate a product can supply. The predicate is
-closed — no wildcard, no name match, no "looks like" — and all four arms must
-hold for a directory `E`:
+product can name, and no predicate a product can supply.
+
+The environment-shape predicate is closed — no wildcard, no name match, no
+"looks like" — and all four arms must hold for a directory `E`:
 
 | Arm | Requirement |
 | --- | --- |
 | A1 MARKER | `E/pyvenv.cfg` is a regular file (never a symlink, never over 64 KiB) parsing as `key = value` lines, carrying `home` as a non-empty ABSOLUTE path, `include-system-site-packages` as exactly `true`/`false`, and at least one of `version`/`version_info` beginning `MAJOR.MINOR`. Both version keys present must AGREE. |
 | A2 LAYOUT | a real directory (never a symlink) at exactly `E/lib/python<MAJOR>.<MINOR>/site-packages` or `E/Lib/site-packages`. The name is DERIVED from the marker's version, never globbed — that derivation is the internal-consistency check. |
 | A3 INTERPRETER | a regular file at exactly `E/bin/python`, `E/bin/python<MAJOR>.<MINOR>`, or `E/Scripts/python.exe`. Real environments symlink this out to the base interpreter, which is expected: an interpreter is not measured material. |
-| A4 CONTAINMENT | `E` is not itself a symlink and resolves inside the repository, and every dispositioned file must RESOLVE inside `E`. A symlink inside a genuine environment pointing out of it launders nothing, and an unresolvable link fails closed. |
+| A4 CONTAINMENT | `E` is not itself a symlink and resolves inside the repository. A symlinked environment proves nothing. |
+
+Then all five file arms must hold:
+
+| Arm | Requirement |
+| --- | --- |
+| F1 LOCATION | A regular, non-symlink `.py`/`.pyw` source below the derived `site-packages`. |
+| F2 IDENTITY | Exactly one real `*.dist-info` directory has bounded regular `METADATA` and `RECORD` files declaring one `Name` and `Version`. |
+| F3 AUTHORITY | The normalised exact pair is pinned by a tracked `poetry.lock`, `uv.lock`, or `requirements*.txt` `name==version` entry. |
+| F4 OWNERSHIP | The distribution's CSV `RECORD` names the relative file without an absolute or `..` component, and no second accepted distribution also owns it. |
+| F5 INTEGRITY | The RECORD entry supplies `sha256` and decimal size, and both match the file's current bytes. |
 
 A directory MERELY NAMED `.venv`, an INCOMPLETE MARKER, and an ORDINARY IGNORED
 PACKAGE therefore all keep reporting `repository.source.untracked`. The
-disposition is independent of `.gitignore` in both directions: a genuine
-environment is dependency material whether or not it is ignored, and being
-ignored disposes of nothing by itself.
-
-OUT OF SCOPE, deliberately: whether the dependencies inside a recognised
-environment are DECLARED and PINNED. Undeclared dependency provenance is a
-separate control, and it is not built here.
+disposition is independent of `.gitignore` in both directions. A copied,
+unrecorded, unpinned, modified, hashless or symlinked Python file remains an
+untracked error even inside a genuine environment; a genuine pinned
+distribution with matching RECORD evidence is dispositioned whether or not it
+is ignored.
 
 Exactly one thing leaves that universe, and an analysis has to earn it. A
 source is removed only when it is PROVEN test-only and UNREACHABLE from
@@ -547,7 +604,11 @@ an unmerged or `Proposed` revision.
    names its category and its measured count. Transcribe those counts, re-run,
    and the profile is at its true floor. Never raise a baseline afterwards to
    make a later change pass — that is the failure this rule family exists to
-   catch. Lower one only in the change that deletes the code it counted.
+   catch. Lower one only in the change that DELETES the code it counted or CUTS
+   IT OVER behind the Integrator SPI, with that evidence in the same diff. A
+   count that fell because the code was respelled into something the engine
+   does not read is not a retirement, and lowering the baseline for it spends
+   the ratchet.
 
 6. **Transcribe the conserved exclusions the same way.** The same run reports a
    `connector.conserved.undeclared` error and a `connector.conserved.recorded`

@@ -56,9 +56,12 @@ true positive, both are recorded here rather than buried):
 1. `erp-adopt app/tasks/email.py` leaves the measured set entirely — it now holds
    no category at all. It is a real scheduled outbound delivery task (`smtplib`
    under `@shared_task`), but it was only ever caught because `send_email_async`
-   contains the letters `sync`. **No arm of ADR 0011 covers SMTP delivery**,
-   before or after. That is a pre-existing coverage bound the correction makes
-   visible, not coverage the correction removed. See § 6.1.
+   contains the letters `sync`. **No arm of ADR 0011 covered SMTP delivery**,
+   before or after — true as at this document's measurement date, and RESOLVED
+   later the same day, when `outbound_transport` gained an SMTP arm at schema
+   version 9 and this exact file became that arm's liveness witness. That was a
+   pre-existing coverage bound the correction made visible, not coverage the
+   correction removed. See § 6.1.
 2. Three further findings moved in categories the two-arm correction does not
    touch. All three belong to a **different, later** change (the HTTP-client and
    webhook path/method work), which sits outside this comparison boundary and is
@@ -602,9 +605,16 @@ depend on the framework-import qualifier.
 
 ## 10. Residual items (recorded, NOT applied)
 
-1. **State the SMTP/queue-only delivery bound in ADR 0011.** `erp-adopt
+1. ~~**State the SMTP/queue-only delivery bound in ADR 0011.**~~ **CLOSED
+   2026-08-15, by an arm rather than a stated bound.** `erp-adopt
    app/tasks/email.py` is a real scheduled outbound delivery task that no arm
-   covers. Declared bound, not a defect — but it should be declared.
+   covered. Rather than declare the gap, `http_client` was renamed
+   `outbound_transport` and given an SMTP arm at schema version 9; this file is
+   its liveness witness, and SMTP joined `delivery_retry`'s outbound conjunct
+   in the same change. The QUEUE-ONLY half of the bound stands and is stated
+   in ADR 0011: a module that hands a message to a queue for something else to
+   relay is not measured. So is the wider protocol bound added by the
+   2026-08-16 amendment — everything but HTTP and SMTP is unmonitored.
 2. **`_declares_retry_policy` does not read `FunctionDef` names.** Correct for
    tests; worth one line in ADR 0011's stated bounds, because a production helper
    named `deliver_with_max_retries` that binds nothing would also be missed.

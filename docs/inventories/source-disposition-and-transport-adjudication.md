@@ -1,5 +1,13 @@
 # Source disposition and outbound transport — independent adjudication
 
+> Historical evidence note (2026-08-16): this adjudication evaluated the
+> directory-level environment disposition. A later sharded attack reopened
+> bypass D and superseded that conclusion. The replacement design and pending
+> acceptance evidence are recorded in
+> `dependency-provenance-and-precision-repair.md`. Counts and observations below
+> remain evidence of what the earlier revision did; they are not evidence that
+> the current file-proven revision is accepted.
+
 - Date: 2026-08-15
 - Adjudicator: independent audit pass, separate from the sessions that
   implemented Decision 1 and Decision 2

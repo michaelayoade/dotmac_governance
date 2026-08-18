@@ -6,6 +6,7 @@ import ast
 import copy
 import functools
 import hashlib
+import importlib
 import json
 import re
 import subprocess
@@ -50,6 +51,21 @@ CLOSED_MEMBER_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"
 # Callables that pin a database column to a fixed member list.
 CLOSED_STORAGE_CALLS = frozenset({"Enum", "ENUM"})
 TESTING_KIT_MODULE = "dotmac_kernel.testing"
+CONNECTOR_RUNTIME_AUTHORITY_PATH = PurePosixPath(
+    "policies/external-connector-runtime-authority.json"
+)
+CONNECTOR_DISTRIBUTION_PREFIX = "dotmac-connector-"
+
+
+class _ConnectorRuntimeAuthority(NamedTuple):
+    runtime_host: CanonicalRepository
+    source_repositories: frozenset[CanonicalRepository]
+
+
+class _ConnectorLockEntry(NamedTuple):
+    name: str
+    version: str
+    groups: tuple[str, ...]
 
 
 def _finding(
@@ -87,6 +103,172 @@ def _normalize_url(raw: str) -> CanonicalRepository | None:
     if repository_path.count("/") != 1:
         return None
     return CanonicalRepository(f"https://{host.lower()}/{repository_path}")
+
+
+def _connector_runtime_authority(
+    governance_root: Path | None,
+) -> tuple[_ConnectorRuntimeAuthority | None, str | None]:
+    """Load the one Governance-owned answer to who may install connectors."""
+    if governance_root is None:
+        return None, "the pinned Governance root was not supplied"
+    path = governance_root / CONNECTOR_RUNTIME_AUTHORITY_PATH
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: {type(error).__name__}"
+    if not isinstance(raw, dict):
+        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: expected an object"
+    if set(raw) != {"schema_version", "runtime_host", "source_repositories"}:
+        return None, (
+            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: expected exactly schema_version, "
+            "runtime_host and source_repositories"
+        )
+    schema_version = raw["schema_version"]
+    if isinstance(schema_version, bool) or schema_version != 1:
+        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: schema_version must be 1"
+    runtime_host_raw = raw["runtime_host"]
+    if not isinstance(runtime_host_raw, str):
+        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: runtime_host must be a URL"
+    runtime_host = _normalize_url(runtime_host_raw)
+    if runtime_host is None:
+        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: runtime_host is invalid"
+    sources_raw = raw["source_repositories"]
+    if not isinstance(sources_raw, list):
+        return None, (
+            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: source_repositories must be a list"
+        )
+    sources: set[CanonicalRepository] = set()
+    for index, source_raw in enumerate(sources_raw):
+        if not isinstance(source_raw, str):
+            return None, (
+                f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: "
+                f"source_repositories[{index}] must be a URL"
+            )
+        source = _normalize_url(source_raw)
+        if source is None:
+            return None, (
+                f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: "
+                f"source_repositories[{index}] is invalid"
+            )
+        if source == runtime_host:
+            return None, (
+                f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: the runtime host cannot also "
+                "be a source-only repository"
+            )
+        if source in sources:
+            return None, (
+                f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: source repository {source!r} "
+                "is duplicated"
+            )
+        sources.add(source)
+    return _ConnectorRuntimeAuthority(runtime_host, frozenset(sources)), None
+
+
+def _normalized_distribution_name(value: str) -> str:
+    """PEP-503 spelling, so underscores cannot evade a prefix decision."""
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _connector_lock_entries(
+    root: Path,
+) -> tuple[tuple[_ConnectorLockEntry, ...] | None, str | None]:
+    """Read connector resolutions from Poetry's committed dependency authority."""
+    path = root / "poetry.lock"
+    tomllib = importlib.import_module("tomllib")
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        return None, f"poetry.lock: {type(error).__name__}"
+    packages = raw.get("package")
+    if not isinstance(packages, list):
+        return None, "poetry.lock: [[package]] entries are missing"
+    entries: list[_ConnectorLockEntry] = []
+    for index, package in enumerate(packages):
+        if not isinstance(package, dict):
+            return None, f"poetry.lock: package[{index}] is not an object"
+        name = package.get("name")
+        if not isinstance(name, str):
+            return None, f"poetry.lock: package[{index}].name is not a string"
+        if not _normalized_distribution_name(name).startswith(
+            CONNECTOR_DISTRIBUTION_PREFIX
+        ):
+            continue
+        version = package.get("version")
+        groups = package.get("groups")
+        if not isinstance(version, str):
+            return None, (
+                f"poetry.lock: connector package {name!r} has no string version"
+            )
+        if (
+            not isinstance(groups, list)
+            or not groups
+            or any(not isinstance(group, str) for group in groups)
+        ):
+            return None, (
+                f"poetry.lock: connector package {name!r} has no typed dependency "
+                "groups, so runtime resolution cannot be decided"
+            )
+        entries.append(
+            _ConnectorLockEntry(
+                _normalized_distribution_name(name),
+                version,
+                tuple(sorted(set(groups))),
+            )
+        )
+    return tuple(entries), None
+
+
+def _connector_runtime_dependencies(
+    root: Path,
+    profile: StandardsProfile,
+    *,
+    governance_root: Path | None,
+) -> list[Diagnostic]:
+    """Enforce ADR-0011 S2 from a Governance-owned authority and the lock."""
+    if not isinstance(profile.governance_model, PinnedGovernanceModelRef):
+        # Governance itself is policy source, not an enrolled product
+        # distribution. Products and the Integrator consume a pinned source.
+        return []
+    authority, authority_error = _connector_runtime_authority(governance_root)
+    if authority is None:
+        return [
+            _finding(
+                DiagnosticCode.CONNECTOR_RUNTIME_AUTHORITY_UNAVAILABLE,
+                "cannot decide which repository may resolve connector "
+                f"distributions: {authority_error}",
+                path=CONNECTOR_RUNTIME_AUTHORITY_PATH,
+            )
+        ]
+    entries, lock_error = _connector_lock_entries(root)
+    if entries is None:
+        return [
+            _finding(
+                DiagnosticCode.CONNECTOR_DEPENDENCY_LOCK_UNAVAILABLE,
+                f"cannot prove the connector runtime dependency boundary: {lock_error}",
+                path=PurePosixPath("poetry.lock"),
+            )
+        ]
+
+    repository = profile.repository.canonical_url
+    findings: list[Diagnostic] = []
+    for entry in entries:
+        allowed = repository == authority.runtime_host or (
+            repository in authority.source_repositories and "main" not in entry.groups
+        )
+        if allowed:
+            continue
+        findings.append(
+            _finding(
+                DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
+                f"{entry.name} {entry.version} resolves in dependency groups "
+                f"{', '.join(entry.groups)}. Only the Governance-declared "
+                "Integrator runtime host may resolve a connector at runtime; "
+                "source repositories may resolve one only outside the main "
+                "runtime group, and products may resolve none",
+                path=PurePosixPath("poetry.lock"),
+            )
+        )
+    return findings
 
 
 def _git(root: Path, *arguments: str) -> str | None:
@@ -4216,6 +4398,13 @@ def verify_repository(
             governance_root=governance_root,
             observed_governance_repository=observed_governance_repository,
             observed_governance_revision=observed_governance_revision,
+        )
+    )
+    findings.extend(
+        _connector_runtime_dependencies(
+            root,
+            profile,
+            governance_root=governance_root,
         )
     )
     findings.extend(_authorities(root, profile))

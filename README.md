@@ -41,6 +41,15 @@ administration pages are explicit false-friend boundaries, while the attempted
 bare scheduled-sync narrowing was rejected after it hid real connector work.
 These boundaries are part of accepted ADR 0011.
 
+S2 is now executable rather than aspirational. The pinned Governance action
+reads each enrolled repository's committed Poetry lock and the
+Governance-owned
+`policies/external-connector-runtime-authority.json`. Products may resolve no
+`dotmac-connector-*` distribution in any dependency group; Starter may hold
+connector source only outside the `main` runtime group; the one declared
+Integrator host may resolve runtime connector distributions. Products cannot
+declare or waive that authority in their own profiles.
+
 This repository exists so that governance has a single versioned owner before
 any policy, control interpretation, or evidence claim is written down. Drafting
 governance material anywhere else first would create a temporary authority and

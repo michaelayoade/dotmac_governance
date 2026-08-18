@@ -129,6 +129,9 @@ class DiagnosticCode(str, Enum):
     CONNECTOR_CONSERVED_UNDECLARED = "connector.conserved.undeclared"
     CONNECTOR_CONSERVED_STALE = "connector.conserved.stale"
     CONNECTOR_CONSERVED_CHANGED = "connector.conserved.changed"
+    CONNECTOR_RUNTIME_AUTHORITY_UNAVAILABLE = "connector.runtime-authority.unavailable"
+    CONNECTOR_DEPENDENCY_LOCK_UNAVAILABLE = "connector.dependency-lock.unavailable"
+    CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN = "connector.runtime-dependency.forbidden"
 
 
 @dataclass(frozen=True)

@@ -18,12 +18,16 @@
       "protected_resources": [
         "engineering-conformance-policy",
         "engineering-conformance-diagnostics",
-        "repository-standards-profile"
+        "repository-standards-profile",
+        "external-connector-runtime-authority"
       ],
       "owner_component": "standards-control",
       "owner_implementation": "standards_control/engine.py",
       "decision_interface": "standards_control.engine.verify_repository",
-      "canonical_writer_paths": ["standards_control/engine.py"],
+      "canonical_writer_paths": [
+        "standards_control/engine.py",
+        "policies/external-connector-runtime-authority.json"
+      ],
       "adapter_paths": [
         ".github/actions/standards-check/action.yml",
         "standards_control/cli.py",

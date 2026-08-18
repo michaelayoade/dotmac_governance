@@ -20,6 +20,30 @@ before a product may pin its exact commit. What follows is the adoption
 instruction; each product still migrates its profile and proves the pinned
 revision independently.
 
+### Connector runtime dependency authority (S2)
+
+The syntax ratchet and the package boundary are different controls. The
+ratchet inventories product source; the S2 dependency gate reads the committed
+`poetry.lock` and fails before a product can load a
+`dotmac-connector-*` distribution.
+
+The answer to "which repository may resolve one?" is not a profile field.
+It is the Governance-owned
+`policies/external-connector-runtime-authority.json`:
+
+- the declared Integrator host may resolve connectors in `main`;
+- declared source repositories may resolve them only outside `main`, so
+  conformance and release tests can execute connector source without composing
+  it into a product runtime;
+- every other pinned repository may resolve none, including in development
+  groups.
+
+The engine normalizes distribution names using the PEP-503 spelling, so an
+underscore cannot evade the `dotmac-connector-` prefix. It reads every lock
+entry, not only direct `pyproject.toml` dependencies, so a transitive
+connector fails too. A missing/malformed authority or lock fails closed.
+Product-authored copies of the authority file are ignored.
+
 **What a green run means, and the three things it does not.** This family
 INVENTORIES AND FREEZES the direct connector surfaces a product still holds
 while it migrates them behind the Integrator. A green run is evidence that the

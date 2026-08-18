@@ -1723,6 +1723,28 @@ that policy read as a retry loop around a local queue.
 | `connector.syntax.invalid` | error | A measured Python source cannot be parsed and therefore cannot be measured. |
 | `connector.baseline.exceeded` | error | A category's observed count rose above its declared baseline. |
 | `connector.baseline.stale` | error | A category's observed count fell below its declared baseline without the profile being lowered. |
+| `connector.runtime-authority.unavailable` | error | The pinned Governance root does not carry a valid connector-runtime authority, so S2 cannot be decided. |
+| `connector.dependency-lock.unavailable` | error | The enrolled repository has no readable typed Poetry lock, so connector resolution cannot be proved. |
+| `connector.runtime-dependency.forbidden` | error | A connector distribution resolves in a dependency group the Governance-owned authority does not permit for this repository. |
+
+### Implementation amendment — 2026-08-18
+
+S2 is now enforced by the same pinned action. The engine reads connector
+resolutions from the enrolled repository's committed `poetry.lock` and reads
+authority only from
+`policies/external-connector-runtime-authority.json` inside the pinned
+Governance root. No profile key can name an exception.
+
+The authority declares one runtime host and any source-only repositories.
+The host may resolve `dotmac-connector-*` distributions in `main`; a source
+repository may resolve them only in non-runtime groups; every product may
+resolve none in any group. Distribution names are PEP-503-normalized and every
+lock entry is inspected, so underscore spellings and transitive dependencies
+do not evade the boundary. Missing authority, missing lock and untyped connector
+groups fail closed.
+
+This implements an already accepted sunset condition; it does not promote the
+source ratchet into a security control and does not claim S3 through S6.
 
 ## Acceptance record
 

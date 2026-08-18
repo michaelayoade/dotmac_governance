@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "runtime_host": "https://github.com/michaelayoade/dotmac_integrator",
+  "source_repositories": [
+    "https://github.com/michaelayoade/dotmac_starter_mt"
+  ]
+}

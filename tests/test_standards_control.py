@@ -1829,6 +1829,13 @@ class Fixture:
             self.root / "example/manifest.py": manifest,
             self.root / "example/models.py": storage,
             self.root / "example/runtime.py": runtime,
+            self.root / "poetry.lock": (
+                "package = []\n\n"
+                "[metadata]\n"
+                'lock-version = "2.1"\n'
+                'python-versions = "*"\n'
+                'content-hash = "fixture"\n'
+            ),
         }
         if probe_source is not None:
             files[self.root / "scripts/floor/probe.py"] = probe_source
@@ -1940,6 +1947,24 @@ class StandardsTests(unittest.TestCase):
                 source = governance / "docs/adr/0006.md"
                 source.parent.mkdir(parents=True)
                 source.write_text(f"- Status: {source_status}\n", encoding="utf-8")
+                authority = (
+                    governance / "policies/external-connector-runtime-authority.json"
+                )
+                authority.parent.mkdir(parents=True)
+                authority.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "runtime_host": (
+                                "https://github.com/michaelayoade/dotmac_integrator"
+                            ),
+                            "source_repositories": [
+                                "https://github.com/michaelayoade/dotmac_starter_mt"
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
                 return verify_repository(
                     product,
                     path,
@@ -5294,6 +5319,215 @@ class StandardsTests(unittest.TestCase):
                     self.connector_report(surface=surface),
                     DiagnosticCode.PROFILE_INVALID,
                 )
+
+
+class ConnectorRuntimeAuthorityTests(unittest.TestCase):
+    """ADR-0011 S2 is a Governance-owned lock decision, not a product claim."""
+
+    RUNTIME_HOST = CanonicalRepository(
+        "https://github.com/michaelayoade/dotmac_integrator"
+    )
+    SOURCE_REPOSITORY = CanonicalRepository(
+        "https://github.com/michaelayoade/dotmac_starter_mt"
+    )
+    AUTHORITY_PATH = "policies/external-connector-runtime-authority.json"
+
+    @staticmethod
+    def authority() -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "runtime_host": ConnectorRuntimeAuthorityTests.RUNTIME_HOST,
+            "source_repositories": [ConnectorRuntimeAuthorityTests.SOURCE_REPOSITORY],
+        }
+
+    @staticmethod
+    def lock(*, name: str | None = None, groups: tuple[str, ...] = ()) -> str:
+        package = ""
+        if name is not None:
+            rendered_groups = ", ".join(json.dumps(group) for group in groups)
+            package = (
+                "[[package]]\n"
+                f"name = {json.dumps(name)}\n"
+                'version = "9.9.9"\n'
+                f"groups = [{rendered_groups}]\n"
+                "optional = false\n"
+                'python-versions = "*"\n\n'
+            )
+        return (
+            package
+            + "[metadata]\n"
+            + 'lock-version = "2.1"\n'
+            + 'python-versions = "*"\n'
+            + 'content-hash = "fixture"\n'
+        )
+
+    def report(
+        self,
+        *,
+        repository: CanonicalRepository = PRODUCT_REPOSITORY,
+        lock: str | None = None,
+        authority: dict[str, object] | None = None,
+        product_authority: dict[str, object] | None = None,
+    ) -> ConformanceReport:
+        value = profile()
+        contract = value["repository"]
+        assert isinstance(contract, dict)
+        contract["canonical_url"] = repository
+        value["governance_model"] = {
+            "kind": "pinned",
+            "canonical_url": GOVERNANCE_REPOSITORY,
+            "revision": GOVERNANCE_REVISION,
+            "source": "docs/adr/0006.md",
+            "status": "accepted",
+        }
+        value["enforcement_mode"] = "required"
+
+        with tempfile.TemporaryDirectory() as product_directory:
+            with tempfile.TemporaryDirectory() as governance_directory:
+                product = Path(product_directory)
+                governance = Path(governance_directory)
+                extra: dict[str, str] = {}
+                if lock is not None:
+                    extra["poetry.lock"] = lock
+                if product_authority is not None:
+                    extra[self.AUTHORITY_PATH] = json.dumps(product_authority)
+                path = Fixture(product).write(value, extra=extra)
+                if lock is None:
+                    (product / "poetry.lock").unlink()
+
+                source = governance / "docs/adr/0006.md"
+                source.parent.mkdir(parents=True)
+                source.write_text("- Status: Accepted\n", encoding="utf-8")
+                if authority is not None:
+                    authority_path = governance / self.AUTHORITY_PATH
+                    authority_path.parent.mkdir(parents=True)
+                    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+
+                return verify_repository(
+                    product,
+                    path,
+                    observed_repository=repository,
+                    observed_default_branch=BranchName("main"),
+                    governance_root=governance,
+                    observed_governance_repository=GOVERNANCE_REPOSITORY,
+                    observed_governance_revision=GOVERNANCE_REVISION,
+                )
+
+    @staticmethod
+    def codes(report: ConformanceReport) -> set[DiagnosticCode]:
+        return {item.code for item in report.diagnostics}
+
+    def test_a_product_cannot_resolve_a_connector_in_any_dependency_group(self) -> None:
+        for groups in (("main",), ("dev",), ("main", "dev")):
+            with self.subTest(groups=groups):
+                report = self.report(
+                    lock=self.lock(name="dotmac-connector-fictional", groups=groups),
+                    authority=self.authority(),
+                )
+                self.assertIn(
+                    DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
+                    self.codes(report),
+                    report.to_dict(),
+                )
+
+    def test_the_connector_host_may_resolve_runtime_connectors(self) -> None:
+        report = self.report(
+            repository=self.RUNTIME_HOST,
+            lock=self.lock(name="dotmac_connector_fictional", groups=("main",)),
+            authority=self.authority(),
+        )
+        self.assertNotIn(
+            DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_the_source_repository_may_resolve_only_non_runtime_connectors(
+        self,
+    ) -> None:
+        development = self.report(
+            repository=self.SOURCE_REPOSITORY,
+            lock=self.lock(name="dotmac-connector-fictional", groups=("dev",)),
+            authority=self.authority(),
+        )
+        runtime = self.report(
+            repository=self.SOURCE_REPOSITORY,
+            lock=self.lock(name="dotmac-connector-fictional", groups=("main",)),
+            authority=self.authority(),
+        )
+        self.assertNotIn(
+            DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
+            self.codes(development),
+            development.to_dict(),
+        )
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
+            self.codes(runtime),
+            runtime.to_dict(),
+        )
+
+    def test_the_product_cannot_self_authorize_a_connector(self) -> None:
+        forged = {
+            "schema_version": 1,
+            "runtime_host": PRODUCT_REPOSITORY,
+            "source_repositories": [],
+        }
+        report = self.report(
+            lock=self.lock(name="dotmac-connector-fictional", groups=("main",)),
+            authority=self.authority(),
+            product_authority=forged,
+        )
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_missing_governance_authority_and_lock_fail_closed(self) -> None:
+        missing_authority = self.report(lock=self.lock(), authority=None)
+        missing_lock = self.report(lock=None, authority=self.authority())
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_RUNTIME_AUTHORITY_UNAVAILABLE,
+            self.codes(missing_authority),
+            missing_authority.to_dict(),
+        )
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_DEPENDENCY_LOCK_UNAVAILABLE,
+            self.codes(missing_lock),
+            missing_lock.to_dict(),
+        )
+
+    def test_malformed_governance_authority_fails_closed(self) -> None:
+        cases = (
+            {},
+            {
+                "schema_version": 2,
+                "runtime_host": self.RUNTIME_HOST,
+                "source_repositories": [self.SOURCE_REPOSITORY],
+            },
+            {
+                "schema_version": 1,
+                "runtime_host": "not-a-url",
+                "source_repositories": [self.SOURCE_REPOSITORY],
+            },
+            {
+                "schema_version": 1,
+                "runtime_host": self.RUNTIME_HOST,
+                "source_repositories": [self.RUNTIME_HOST],
+            },
+        )
+        for authority in cases:
+            with self.subTest(authority=authority):
+                report = self.report(lock=self.lock(), authority=authority)
+                self.assertIn(
+                    DiagnosticCode.CONNECTOR_RUNTIME_AUTHORITY_UNAVAILABLE,
+                    self.codes(report),
+                    report.to_dict(),
+                )
+
+    def test_the_checked_in_authority_names_one_host_and_one_source(self) -> None:
+        actual = json.loads((ROOT / self.AUTHORITY_PATH).read_text(encoding="utf-8"))
+        self.assertEqual(actual, self.authority())
 
 
 # -- Closed untracked-source rule ------------------------------------------

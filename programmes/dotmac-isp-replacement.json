@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "programme_id": "pgm-dotmac-isp-replacement",
-  "title": "Replace legacy Dotmac Sub with a thin Dotmac ISP assembly",
+  "title": "Build a thin Dotmac ISP assembly and cut over legacy Dotmac Sub",
   "status": "proposed",
   "owner": "Michael Ayoade",
   "approver": "Michael Ayoade",
@@ -19,6 +19,20 @@
       "authority_state": "candidate"
     }
   },
+  "tracks": [
+    {
+      "track_id": "track-isp-sub-cutover",
+      "role": "source-cutover",
+      "assembly_id": "asm-dotmac-sub-legacy",
+      "responsibility": "Complete source dispositions, replay, shadow comparison, sealed cohort switches and displaced-writer retirement"
+    },
+    {
+      "track_id": "track-isp-target-build",
+      "role": "target-construction",
+      "assembly_id": "asm-dotmac-isp",
+      "responsibility": "Build, release, compose and verify the independent target runtime and database"
+    }
+  ],
   "records": [
     {
       "record_id": "rec-isp-governance-decision",
@@ -77,7 +91,7 @@
   "controls": [
     {
       "control_id": "ctl-isp-001",
-      "name": "Replacement programme and governing ADR receive attributable human approval",
+      "name": "Coordinated target-build and Sub-cutover programme receives attributable human approval",
       "owner": "Michael Ayoade",
       "state": "pending-approval",
       "depends_on": [],
@@ -95,7 +109,7 @@
     },
     {
       "control_id": "ctl-isp-003",
-      "name": "Legacy Sub permanent-domain change freeze has an enforced exception path",
+      "name": "Legacy Sub transition rule permits only bounded cutover work and justified local-writer retirement",
       "owner": "Michael Ayoade",
       "state": "blocked",
       "depends_on": [
@@ -544,7 +558,7 @@
   "open_decisions": [
     {
       "decision_id": "dec-isp-001",
-      "question": "Approve replacement of the legacy Sub assembly rather than in-place adoption as the programme destination?",
+      "question": "Approve the coordinated programme: build the independent Dotmac ISP target while Sub completes source-readiness, bounded shadow, sealed cohort cutover and retirement, with one production authority at a time?",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [
@@ -563,7 +577,7 @@
     },
     {
       "decision_id": "dec-isp-003",
-      "question": "Approve the enforceable legacy Sub permanent-domain change freeze and its narrow exception workflow?",
+      "question": "Approve the enforceable legacy Sub transition rule, including its narrow exception workflow for bounded in-place module adoption that retires one local writer?",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [

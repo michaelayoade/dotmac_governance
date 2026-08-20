@@ -24,6 +24,7 @@ TOP_LEVEL_FIELDS = frozenset(
         "owner",
         "approver",
         "authority",
+        "tracks",
         "records",
         "cutover_control_ids",
         "controls",
@@ -42,6 +43,7 @@ TARGET_FIELDS = frozenset(
         "authority_state",
     }
 )
+TRACK_FIELDS = frozenset({"track_id", "role", "assembly_id", "responsibility"})
 RECORD_FIELDS = frozenset({"record_id", "repository", "revision", "path", "role"})
 CONTROL_FIELDS = frozenset(
     {"control_id", "name", "owner", "state", "depends_on", "evidence_refs"}
@@ -71,6 +73,7 @@ DISPOSITIONS = frozenset({"adjudicate", "adopt", "build", "release", "reuse", "r
 RECORD_ROLES = frozenset(
     {"governing-decision", "measured-evidence", "technical-source"}
 )
+TRACK_ROLES = frozenset({"source-cutover", "target-construction"})
 
 
 def _object(value: object, location: str, errors: list[str]) -> JsonObject | None:
@@ -244,6 +247,50 @@ def _validate_authority(
     if source_id is not None and source_id == target_id:
         errors.append("authority: source and target assembly_id must differ")
     return source_id, target_id
+
+
+def _validate_tracks(
+    root: JsonObject,
+    source_id: str | None,
+    target_id: str | None,
+    errors: list[str],
+) -> None:
+    tracks = _array(root.get("tracks"), "tracks", errors)
+    if tracks is None:
+        return
+
+    seen_ids: set[str] = set()
+    seen_roles: set[str] = set()
+    expected_assemblies = {
+        "source-cutover": source_id,
+        "target-construction": target_id,
+    }
+    for index, value in enumerate(tracks):
+        location = f"tracks[{index}]"
+        track = _object(value, location, errors)
+        if track is None:
+            continue
+        _strict_fields(track, TRACK_FIELDS, location, errors)
+        track_id = _identifier(track, "track_id", location, errors)
+        _unique_id(track_id, "track_id", seen_ids, errors)
+        role = _enum(track, "role", TRACK_ROLES, location, errors)
+        assembly_id = _identifier(track, "assembly_id", location, errors)
+        _string(track, "responsibility", location, errors)
+        if role is None:
+            continue
+        if role in seen_roles:
+            errors.append(f"duplicate track role {role!r}")
+        seen_roles.add(role)
+        expected_assembly = expected_assemblies[role]
+        if expected_assembly is not None and assembly_id != expected_assembly:
+            errors.append(
+                f"{location}.assembly_id: track role {role!r} must use "
+                f"{expected_assembly!r}"
+            )
+
+    missing_roles = sorted(TRACK_ROLES - seen_roles)
+    if missing_roles:
+        errors.append(f"tracks: missing required roles: {', '.join(missing_roles)}")
 
 
 def _validate_records(root: JsonObject, errors: list[str]) -> None:
@@ -568,6 +615,7 @@ def validate_matrix(path: Path) -> list[str]:
     _string(root, "approver", path.name, errors)
 
     source_id, target_id = _validate_authority(root, errors)
+    _validate_tracks(root, source_id, target_id, errors)
     _validate_records(root, errors)
     control_ids, control_states = _validate_controls(root, errors)
     cutover_control_ids = _string_array(root, "cutover_control_ids", path.name, errors)

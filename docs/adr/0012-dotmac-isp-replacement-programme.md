@@ -26,10 +26,12 @@ cohort before its dependencies, or claim a cutover without naming the exact
 evidence that sealed it.
 
 The target repository, runtime and deployment owner are not yet assigned. An
-agent must not infer them from the desired product name. The replacement
-direction itself also requires attributable human approval; this proposed
-record and its proposed matrix make those open decisions explicit rather than
-claiming that work has started.
+agent must not infer them from the desired product name. The programme must not
+force a false choice between constructing that target and preparing Sub for a
+safe cutover: both are required, and each has different evidence. Accepting
+that coordinated direction still requires attributable human approval; this
+proposed record and its proposed matrix make the open decisions explicit rather
+than claiming that work has started.
 
 ## Decision
 
@@ -47,6 +49,29 @@ inventories and technical ADRs. Legacy Sub remains authoritative until a
 cohort-specific sealed switch. The future Dotmac ISP assembly will own its own
 runtime, database, migrations, sessions and authorization. It shares no Sub
 tables, ORM models, sessions or transactions.
+
+The programme has two declared tracks that may advance concurrently:
+
+1. `track-isp-target-build` constructs, releases, composes and verifies the
+   independent `asm-dotmac-isp` target runtime and database.
+2. `track-isp-sub-cutover` makes `asm-dotmac-sub-legacy` cutover-ready by
+   completing source dispositions, idempotent replay, bounded shadow
+   comparison, sealed cohort switches and displaced-writer retirement.
+
+Concurrent work does not create concurrent production authority. For each
+cohort, Sub remains the sole production decision and write owner until the
+sealed switch. Shadow paths record and compare observations only; they do not
+decide lifecycle state or feed production consequences. After the switch, the
+Dotmac ISP assembly is the sole authority for that cohort and the displaced Sub
+writers and fallbacks must ratchet to zero.
+
+Selective in-place module adoption inside Sub is allowed only as bounded
+source-track work: containment, evidence repair, migration or shadow adapters,
+or an explicitly justified change that retires one local parallel writer. It
+does not count as target adoption or a cohort cutover. If the same installable
+module is composed by Sub and Dotmac ISP, each application runs its own pinned
+copy and lineage and owns separate rows in its own database; neither application
+shares the other's module tables.
 
 The programme uses eight ordered cohorts:
 
@@ -66,11 +91,11 @@ programme action, not a claim about its current implementation state. Starter's
 exact source audits remain authoritative for that state.
 
 Every cohort is blocked by the same cutover controls: human approval; a named
-target assembly; an enforced legacy change freeze; immutable releases and exact
-pins; real target catalog/runtime proof; complete source-row dispositions and
-idempotent replay; complete-cohort shadow comparison at an immutable watermark;
-a sealed one-writer switch with rollback conditions; and a bidirectional
-old-writer/fallback ratchet reaching zero before rollback closure.
+target assembly; an enforced legacy transition rule; immutable releases and
+exact pins; real target catalog/runtime proof; complete source-row dispositions
+and idempotent replay; complete-cohort shadow comparison at an immutable
+watermark; a sealed one-writer switch with rollback conditions; and a
+bidirectional old-writer/fallback ratchet reaching zero before rollback closure.
 
 Shadowing is bounded verification, not a second authority. Unknown source facts
 remain typed quarantine with consequences disabled. A copy, green suite,
@@ -85,11 +110,16 @@ agent-authored assertion is not evidence.
 - Governance gains one programme state instead of a competing implementation
   plan. Product technical facts stay in product repositories and are cited by
   exact revision.
-- The target assembly cannot start until its canonical repository, runtime,
-  independent database and deployment owner are named through review.
-- Permanent new Sub domain logic requires a separately approved and enforceable
-  freeze/exception rule; containment, evidence repair and migration adapters are
-  the intended exception classes but are not authorized by this draft.
+- The target-build track can start as soon as its canonical repository, runtime,
+  independent database and deployment owner are named through review. It need
+  not wait for Sub source-readiness, but no cohort can become authoritative
+  without the complete cutover-control set.
+- The Sub cutover track is first-class programme work rather than legacy
+  maintenance. Permanent new Sub domain logic remains barred; a separately
+  approved transition rule may admit containment, evidence repair, migration or
+  shadow adapters, and bounded in-place adoption that retires one local writer.
+- Running both tracks in parallel shortens elapsed migration time without
+  weakening the single-authority boundary.
 - Referrals and Reseller Management remain constructed but unadopted. The seven
   other retained parity owners remain build work; Fleet Control reuses
   Deployment Control.
@@ -99,16 +129,18 @@ agent-authored assertion is not evidence.
 ## Drift prevention
 
 - `programme_control` rejects unknown fields, malformed or duplicate stable
-  identifiers, dependency cycles, out-of-order cohorts, duplicate components,
+  identifiers, missing or misbound source-cutover and target-construction
+  tracks, dependency cycles, out-of-order cohorts, duplicate components,
   mutable external revisions, invalid authority identities and references to
   missing controls or cohorts.
 - A `verified` control requires an immutable evidence reference. A proposed
   programme cannot claim any verified control, and an active cohort cannot
   precede the complete verified cutover-control set.
-- Unit sensitivity tests introduce duplicate IDs, a dependency cycle, missing
-  evidence, a mutable revision, duplicate component ownership, forward cohort
-  dependency, an unknown block target and an unassigned target masquerading as
-  assigned; each must fail.
+- Unit sensitivity tests introduce a missing track, a track bound to the wrong
+  assembly, duplicate IDs, a dependency cycle, missing evidence, a mutable
+  revision, duplicate component ownership, forward cohort dependency, an
+  unknown block target and an unassigned target masquerading as assigned; each
+  must fail.
 - Governance CI validates every matrix. CI proves structural consistency for
   the evaluated revision; it does not approve the decision or declare a
   production cutover.

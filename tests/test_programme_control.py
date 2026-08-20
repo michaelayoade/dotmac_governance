@@ -34,6 +34,20 @@ def valid_matrix() -> dict[str, object]:
                 "authority_state": "candidate",
             },
         },
+        "tracks": [
+            {
+                "track_id": "track-isp-sub-cutover",
+                "role": "source-cutover",
+                "assembly_id": "asm-dotmac-sub-legacy",
+                "responsibility": "Prepare source evidence and retire displaced writers",
+            },
+            {
+                "track_id": "track-isp-target-build",
+                "role": "target-construction",
+                "assembly_id": "asm-dotmac-isp",
+                "responsibility": "Build and verify the independent target assembly",
+            },
+        ],
         "records": [
             {
                 "record_id": "rec-isp-governance-decision",
@@ -150,6 +164,28 @@ class ProgrammeControlTests(unittest.TestCase):
         controls.append(copy.deepcopy(controls[0]))
         payload["controls"] = controls
         self.assertFails(self.validate(payload), "duplicate control_id 'ctl-isp-001'")
+
+    def test_both_programme_track_roles_are_required_sensitivity(self) -> None:
+        payload = valid_matrix()
+        tracks = payload["tracks"]
+        assert isinstance(tracks, list)
+        tracks.pop()
+        self.assertFails(
+            self.validate(payload),
+            "tracks: missing required roles: target-construction",
+        )
+
+    def test_track_role_must_use_its_authority_assembly_sensitivity(self) -> None:
+        payload = valid_matrix()
+        tracks = payload["tracks"]
+        assert isinstance(tracks, list)
+        source_track = tracks[0]
+        assert isinstance(source_track, dict)
+        source_track["assembly_id"] = "asm-dotmac-isp"
+        self.assertFails(
+            self.validate(payload),
+            "track role 'source-cutover' must use 'asm-dotmac-sub-legacy'",
+        )
 
     def test_control_dependency_cycle_fails_sensitivity(self) -> None:
         payload = valid_matrix()

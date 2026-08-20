@@ -11,6 +11,11 @@ reused for a different meaning. A state may become `verified` only with an
 immutable controlled-source reference. Proposed records are non-normative and
 cannot claim verified controls.
 
+A source-to-target migration programme declares concurrent source-cutover and
+target-construction tracks, but they are work lanes rather than competing
+authorities. Each track is bound to its named assembly, and every cohort
+retains one production authority until its sealed switch.
+
 The lifecycle is:
 
 1. draft the matrix and governing ADR as `proposed`;

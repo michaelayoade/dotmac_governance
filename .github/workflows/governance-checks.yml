@@ -41,17 +41,20 @@ jobs:
 
       - name: Check control-plane lint and formatting
         run: |
-          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control standards_control tests/test_agent_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-standards
-          python3 -m ruff format --check agent_control standards_control tests/test_agent_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-standards
+          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control programme_control standards_control tests/test_agent_control.py tests/test_programme_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff format --check agent_control programme_control standards_control tests/test_agent_control.py tests/test_programme_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
 
       - name: Check typed control-plane boundaries
-        run: python3 -m mypy --strict --scripts-are-modules agent_control standards_control tools/dotmac-agent tools/dotmac-standards
+        run: python3 -m mypy --strict --scripts-are-modules agent_control programme_control standards_control tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
 
       - name: Exercise known-good and known-bad controls
         run: python3 -m unittest discover --start-directory tests --verbose
 
       - name: Validate governance records
         run: python3 tools/check_adrs.py
+
+      - name: Validate cross-repository programme matrices
+        run: python3 -m programme_control --root .
 
       - name: Validate the agent-control pilot profile
         run: python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json

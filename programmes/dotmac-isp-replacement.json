@@ -1,0 +1,597 @@
+{
+  "schema_version": 1,
+  "programme_id": "pgm-dotmac-isp-replacement",
+  "title": "Build a thin Dotmac ISP assembly and cut over legacy Dotmac Sub",
+  "status": "proposed",
+  "owner": "Michael Ayoade",
+  "approver": "Michael Ayoade",
+  "authority": {
+    "source": {
+      "assembly_id": "asm-dotmac-sub-legacy",
+      "repository": "https://github.com/michaelayoade/dotmac_sub",
+      "authority_state": "source-authoritative"
+    },
+    "target": {
+      "assembly_id": "asm-dotmac-isp",
+      "repository_status": "assigned",
+      "repository": "https://github.com/michaelayoade/dotmac-isp",
+      "database_boundary": "independent",
+      "authority_state": "candidate"
+    }
+  },
+  "tracks": [
+    {
+      "track_id": "track-isp-sub-cutover",
+      "role": "source-cutover",
+      "assembly_id": "asm-dotmac-sub-legacy",
+      "responsibility": "Complete source dispositions, replay, shadow comparison, sealed cohort switches and displaced-writer retirement"
+    },
+    {
+      "track_id": "track-isp-target-build",
+      "role": "target-construction",
+      "assembly_id": "asm-dotmac-isp",
+      "responsibility": "Build, release, compose and verify the independent target runtime and database"
+    }
+  ],
+  "records": [
+    {
+      "record_id": "rec-isp-governance-decision",
+      "repository": "https://github.com/michaelayoade/dotmac_governance",
+      "revision": "SELF",
+      "path": "docs/adr/0012-dotmac-isp-replacement-programme.md",
+      "role": "governing-decision"
+    },
+    {
+      "record_id": "rec-isp-assembly-profile",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "fcdecad3a06ef0b2567ccb7892364d6f60cd4215",
+      "path": "docs/adr/0003-unified-deployment-profiles.md",
+      "role": "technical-source"
+    },
+    {
+      "record_id": "rec-isp-adoption-standard",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "fcdecad3a06ef0b2567ccb7892364d6f60cd4215",
+      "path": "docs/adr/0017-adoption-is-the-scarce-resource.md",
+      "role": "technical-source"
+    },
+    {
+      "record_id": "rec-isp-cutover-standard",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "fcdecad3a06ef0b2567ccb7892364d6f60cd4215",
+      "path": "docs/adr/0031-an-authority-cutover-is-sealed-by-its-own-evidence.md",
+      "role": "technical-source"
+    },
+    {
+      "record_id": "rec-isp-parity-decision",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "fcdecad3a06ef0b2567ccb7892364d6f60cd4215",
+      "path": "docs/adr/0040-sub-vnext-parity-capabilities-have-narrow-independent-owners.md",
+      "role": "technical-source"
+    },
+    {
+      "record_id": "rec-isp-fleet-measurement",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "fcdecad3a06ef0b2567ccb7892364d6f60cd4215",
+      "path": "docs/inventories/fleet-decomposition-matrix.md",
+      "role": "measured-evidence"
+    }
+  ],
+  "cutover_control_ids": [
+    "ctl-isp-001",
+    "ctl-isp-002",
+    "ctl-isp-003",
+    "ctl-isp-004",
+    "ctl-isp-005",
+    "ctl-isp-006",
+    "ctl-isp-007",
+    "ctl-isp-008",
+    "ctl-isp-009"
+  ],
+  "controls": [
+    {
+      "control_id": "ctl-isp-001",
+      "name": "Coordinated target-build and Sub-cutover programme receives attributable human approval",
+      "owner": "Michael Ayoade",
+      "state": "pending-approval",
+      "depends_on": [],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-002",
+      "name": "Target assembly repository runtime database and production deployment owner are named",
+      "owner": "Michael Ayoade",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-001"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-003",
+      "name": "Legacy Sub transition rule permits only bounded cutover work and justified local-writer retirement",
+      "owner": "Michael Ayoade",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-001"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-004",
+      "name": "Cohort components have immutable releases exact pins and one composed migration graph",
+      "owner": "Dotmac ISP technical owner",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-001",
+        "ctl-isp-002"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-005",
+      "name": "Target database catalog RLS grants runtime and migration rehearsal pass on exact pins",
+      "owner": "Dotmac ISP technical owner",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-004"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-006",
+      "name": "Every source row has an accepted quarantine or evidenced-retirement disposition and replay is idempotent",
+      "owner": "Dotmac Sub technical owner",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-003",
+        "ctl-isp-004"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-007",
+      "name": "Complete cohort shadow reaches zero unexplained drift at an immutable source watermark",
+      "owner": "Dotmac ISP technical owner",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-005",
+        "ctl-isp-006"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-008",
+      "name": "One sealed authority switch has delta capture rollback conditions and operator approval",
+      "owner": "Michael Ayoade",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-007"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-009",
+      "name": "Displaced writers and fallbacks reach a bidirectional ratchet of zero before rollback closure",
+      "owner": "Dotmac Sub technical owner",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-008"
+      ],
+      "evidence_refs": []
+    }
+  ],
+  "cohorts": [
+    {
+      "cohort_id": "cohort-isp-01",
+      "sequence": 1,
+      "name": "Foundation party and customer",
+      "state": "blocked",
+      "depends_on": [],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-kernel",
+          "owner_id": "dotmac-kernel",
+          "disposition": "reuse"
+        },
+        {
+          "component_id": "dotmac-ui",
+          "owner_id": "dotmac-ui",
+          "disposition": "reuse"
+        },
+        {
+          "component_id": "dotmac-party",
+          "owner_id": "dotmac-party",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-brand-profiles",
+          "owner_id": "dotmac-brand-profiles",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-customers",
+          "owner_id": "dotmac-customers",
+          "disposition": "build"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-02",
+      "sequence": 2,
+      "name": "Acquire qualify sell and order",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-01"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-service-catalog",
+          "owner_id": "dotmac-service-catalog",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-qualification",
+          "owner_id": "dotmac-qualification",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-sales",
+          "owner_id": "dotmac-sales",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-orders",
+          "owner_id": "dotmac-orders",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-subscriptions",
+          "owner_id": "dotmac-subscriptions",
+          "disposition": "release"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-03",
+      "sequence": 3,
+      "name": "Network suite as one sealed cohort",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-02"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-inventory",
+          "owner_id": "dotmac-inventory",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-assets",
+          "owner_id": "dotmac-assets",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-positioning",
+          "owner_id": "dotmac-positioning",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-ipam",
+          "owner_id": "dotmac-ipam",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-inventory",
+          "owner_id": "dotmac-network-inventory",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-observability",
+          "owner_id": "dotmac-network-observability",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-topology",
+          "owner_id": "dotmac-network-topology",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-assurance",
+          "owner_id": "dotmac-network-assurance",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-control",
+          "owner_id": "dotmac-network-control",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-fiber-plant",
+          "owner_id": "dotmac-fiber-plant",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-access",
+          "owner_id": "dotmac-network-access",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-pon-access",
+          "owner_id": "dotmac-pon-access",
+          "disposition": "adopt"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-04",
+      "sequence": 4,
+      "name": "Fulfill activate and operate service",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-03"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-projects",
+          "owner_id": "dotmac-projects",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-fulfillment",
+          "owner_id": "dotmac-fulfillment",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-services",
+          "owner_id": "dotmac-services",
+          "disposition": "build"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-05",
+      "sequence": 5,
+      "name": "Use rate bill collect and control access",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-04"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-usage",
+          "owner_id": "dotmac-usage",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-usage-rating",
+          "owner_id": "dotmac-usage-rating",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-billing",
+          "owner_id": "dotmac-billing",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-collections",
+          "owner_id": "dotmac-collections",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-service-access-policy",
+          "owner_id": "dotmac-service-access-policy",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-durable-timers",
+          "owner_id": "dotmac-durable-timers",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-numbering",
+          "owner_id": "dotmac-numbering",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-document-rendering",
+          "owner_id": "dotmac-document-rendering",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-files",
+          "owner_id": "dotmac-files",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-tax",
+          "owner_id": "dotmac-tax",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-fx-policy",
+          "owner_id": "dotmac-fx-policy",
+          "disposition": "build"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-06",
+      "sequence": 6,
+      "name": "Communicate support and dispatch",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-05"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-inbox",
+          "owner_id": "dotmac-inbox",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-inbox-operations",
+          "owner_id": "dotmac-inbox-operations",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-ticketing",
+          "owner_id": "dotmac-ticketing",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-workforce",
+          "owner_id": "dotmac-workforce",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-template-studio",
+          "owner_id": "dotmac-template-studio",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-approvals",
+          "owner_id": "dotmac-approvals",
+          "disposition": "adopt"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-07",
+      "sequence": 7,
+      "name": "Retained Sub vNext parity",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-06"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "dotmac-referrals",
+          "owner_id": "dotmac-referrals",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-reseller-management",
+          "owner_id": "dotmac-reseller-management",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-ai-operations",
+          "owner_id": "dotmac-ai-operations",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-remote-access",
+          "owner_id": "dotmac-remote-access",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-compliance-reporting",
+          "owner_id": "dotmac-compliance-reporting",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-workflow-runtime",
+          "owner_id": "dotmac-workflow-runtime",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-support-access",
+          "owner_id": "dotmac-support-access",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-platform-health",
+          "owner_id": "dotmac-platform-health",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-forms",
+          "owner_id": "dotmac-forms",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-deployment-control",
+          "owner_id": "dotmac-deployment-control",
+          "disposition": "adopt"
+        }
+      ]
+    },
+    {
+      "cohort_id": "cohort-isp-08",
+      "sequence": 8,
+      "name": "Analytics reconciliation and legacy retirement",
+      "state": "blocked",
+      "depends_on": [
+        "cohort-isp-07"
+      ],
+      "current_authority": "asm-dotmac-sub-legacy",
+      "target_authority": "asm-dotmac-isp",
+      "components": [
+        {
+          "component_id": "analytics-reporting",
+          "owner_id": "unassigned",
+          "disposition": "adjudicate"
+        },
+        {
+          "component_id": "legacy-dotmac-sub",
+          "owner_id": "asm-dotmac-sub-legacy",
+          "disposition": "retire"
+        }
+      ]
+    }
+  ],
+  "open_decisions": [
+    {
+      "decision_id": "dec-isp-001",
+      "question": "Approve the coordinated programme: build the independent Dotmac ISP target while Sub completes source-readiness, bounded shadow, sealed cohort cutover and retirement, with one production authority at a time?",
+      "owner": "Michael Ayoade",
+      "state": "open",
+      "blocks": [
+        "ctl-isp-001"
+      ]
+    },
+    {
+      "decision_id": "dec-isp-002",
+      "question": "Assign the target assembly canonical repository runtime database and deployment owner?",
+      "owner": "Michael Ayoade",
+      "state": "open",
+      "blocks": [
+        "ctl-isp-002",
+        "cohort-isp-01"
+      ]
+    },
+    {
+      "decision_id": "dec-isp-003",
+      "question": "Approve the enforceable legacy Sub transition rule, including its narrow exception workflow for bounded in-place module adoption that retires one local writer?",
+      "owner": "Michael Ayoade",
+      "state": "open",
+      "blocks": [
+        "ctl-isp-003"
+      ]
+    },
+    {
+      "decision_id": "dec-isp-004",
+      "question": "Adjudicate the reusable analytics and reporting owner before the final cohort starts?",
+      "owner": "Michael Ayoade",
+      "state": "open",
+      "blocks": [
+        "cohort-isp-08"
+      ]
+    }
+  ]
+}

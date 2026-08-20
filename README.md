@@ -17,7 +17,9 @@ ADR 0010 and renumbered chronologically when the askable-decision contract took
 that number; schema versions 7 and 8 are withdrawn and never accepted, and fail
 to load rather than upgrading — version 8 because it named a measured category
 `http_client`, after one transport rather than the concept, leaving a genuine
-SMTP delivery surface with no category at all.**
+SMTP delivery surface with no category at all. ADR 0012 and its Dotmac ISP
+replacement programme matrix are `Proposed`, non-normative and blocked on the
+open decisions they name.**
 
 ADR 0011 was amended on 2026-08-16 to state its own ceiling. It INVENTORIES AND
 FREEZES the direct connector surfaces a product still holds while it migrates
@@ -126,6 +128,10 @@ not reproduce standard text and does not itself establish conformity.
   contracts for the ADR 0005 pilot.
 - `standards_control/` — typed, development-only ownership and contract-boundary
   conformance engine accepted by ADR 0006 and extended by ADRs 0007 and 0008.
+- `programme_control/` — strict candidate validator for stable programme,
+  control, cohort and decision identities; validation is not approval.
+- `programmes/` — cross-repository programme matrices. Proposed matrices move
+  no authority and claim no verified control.
 - `.dotmac/agent-profile.json` — this repository's checked-in pilot profile.
 - `.dotmac/standards-profile.json` — the required engineering profile.
 - `.dotmac/managed-agent-policy.json` — accepted Codex/Claude policy restricted
@@ -140,12 +146,13 @@ not reproduce standard text and does not itself establish conformity.
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
-python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control standards_control tests/test_agent_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-standards
-python3 -m ruff format --check agent_control standards_control tests/test_agent_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-standards
-python3 -m mypy --strict --scripts-are-modules agent_control standards_control tools/dotmac-agent tools/dotmac-standards
+python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control programme_control standards_control tests/test_agent_control.py tests/test_programme_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
+python3 -m ruff format --check agent_control programme_control standards_control tests/test_agent_control.py tests/test_programme_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
+python3 -m mypy --strict --scripts-are-modules agent_control programme_control standards_control tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
 python3 -m unittest discover --start-directory tests --verbose
 python3 tools/check_adrs.py
 python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
+python3 -m programme_control --root .
 python3 -m standards_control verify --root . --profile .dotmac/standards-profile.json --default-branch main
 ```
 

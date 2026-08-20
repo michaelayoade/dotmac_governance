@@ -17,6 +17,8 @@
 - [ ] Any agent profile change passes `python3 -m agent_control verify`
 - [ ] Any standards profile passes `python3 -m standards_control verify`;
       Proposed governance remains `candidate`, never `required`
+- [ ] Any programme matrix passes `python3 -m programme_control`; Proposed
+      programmes claim no verified controls or active cohorts
 - [ ] Any managed policy or endpoint change passes strict typing, known-bad
       deployment tests, and reviewed staging; no bundle contains a credential
       value

@@ -13,8 +13,8 @@
     },
     "target": {
       "assembly_id": "asm-dotmac-isp",
-      "repository_status": "unassigned",
-      "repository": "unassigned",
+      "repository_status": "assigned",
+      "repository": "https://github.com/michaelayoade/dotmac-isp",
       "database_boundary": "independent",
       "authority_state": "candidate"
     }
@@ -99,7 +99,7 @@
     },
     {
       "control_id": "ctl-isp-002",
-      "name": "Target assembly repository runtime database and deployment owner are named",
+      "name": "Target assembly repository runtime database and production deployment owner are named",
       "owner": "Michael Ayoade",
       "state": "blocked",
       "depends_on": [

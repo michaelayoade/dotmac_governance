@@ -25,13 +25,16 @@ different cohort names, count package completion as adoption, start a later
 cohort before its dependencies, or claim a cutover without naming the exact
 evidence that sealed it.
 
-The target repository, runtime and deployment owner are not yet assigned. An
-agent must not infer them from the desired product name. The programme must not
-force a false choice between constructing that target and preparing Sub for a
-safe cutover: both are required, and each has different evidence. Accepting
-that coordinated direction still requires attributable human approval; this
-proposed record and its proposed matrix make the open decisions explicit rather
-than claiming that work has started.
+Michael named `https://github.com/michaelayoade/dotmac-isp` as the canonical
+target repository in the 2026-08-20 working session. Its candidate runtime is
+the independent `asm-dotmac-isp` thin assembly and its database boundary is
+independent. The production deployment owner remains unassigned; naming a
+repository does not authorize a host or a cutover. The programme must not force
+a false choice between constructing that target and preparing Sub for a safe
+cutover: both are required, and each has different evidence. Accepting that
+coordinated direction still requires an attributable GitHub approval record;
+this proposed record and matrix preserve that open control rather than treating
+an agent-authored source update as approval evidence.
 
 ## Decision
 
@@ -110,10 +113,10 @@ agent-authored assertion is not evidence.
 - Governance gains one programme state instead of a competing implementation
   plan. Product technical facts stay in product repositories and are cited by
   exact revision.
-- The target-build track can start as soon as its canonical repository, runtime,
-  independent database and deployment owner are named through review. It need
-  not wait for Sub source-readiness, but no cohort can become authoritative
-  without the complete cutover-control set.
+- The target-build track may construct a non-authoritative candidate in the
+  named repository before a production deployment owner is assigned. It need
+  not wait for Sub source-readiness, but no deployment or cohort authority can
+  advance without that owner and the complete cutover-control set.
 - The Sub cutover track is first-class programme work rather than legacy
   maintenance. Permanent new Sub domain logic remains barred; a separately
   approved transition rule may admit containment, evidence repair, migration or

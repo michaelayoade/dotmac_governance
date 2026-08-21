@@ -29,6 +29,8 @@ TOP_LEVEL_FIELDS = frozenset(
         "cutover_control_ids",
         "controls",
         "cohorts",
+        "capability_scope",
+        "capability_roster",
         "open_decisions",
     }
 )
@@ -62,6 +64,13 @@ COHORT_FIELDS = frozenset(
     }
 )
 COMPONENT_FIELDS = frozenset({"component_id", "owner_id", "disposition"})
+# Optional because "declares no sibling requirement" is the common, correct
+# state; see `_strict_fields`.
+COMPONENT_OPTIONAL_FIELDS = frozenset({"requires"})
+ROSTER_FIELDS = frozenset({"component_id", "disposition", "rationale"})
+# A capability that is not carried by a cohort must still be disposed of
+# explicitly. These are the only three ways to do that.
+ROSTER_DISPOSITIONS = frozenset({"retain", "replace", "retire"})
 DECISION_FIELDS = frozenset({"decision_id", "question", "owner", "state", "blocks"})
 
 PROGRAMME_STATUSES = frozenset({"proposed", "accepted", "active", "complete"})
@@ -98,10 +107,18 @@ def _strict_fields(
     expected: frozenset[str],
     location: str,
     errors: list[str],
+    optional: frozenset[str] = frozenset(),
 ) -> None:
+    """Every expected field present, and nothing beyond expected + optional.
+
+    `optional` exists for fields whose ABSENCE is a meaningful declaration
+    rather than an omission — a component with no `requires` is asserting it
+    needs no sibling capability, which is the common case and should not have
+    to be written out 54 times.
+    """
     for field in sorted(expected - record.keys()):
         errors.append(f"{location}: missing field {field!r}")
-    for field in sorted(record.keys() - expected):
+    for field in sorted(record.keys() - expected - optional):
         errors.append(f"{location}: unknown field {field!r}")
 
 
@@ -425,10 +442,32 @@ def _validate_controls(
     return seen, states
 
 
+def _cohort_sequence(
+    location: str | None, cohorts: list[object], errors: list[str]
+) -> int:
+    """The declared `sequence` of the cohort a component was recorded under.
+
+    `component_cohorts` stores the cohort's JSON location (`cohorts[3]`) rather
+    than its id, so ordering is read back from the same declaration the rest of
+    this module validates instead of a second index that could disagree.
+    """
+    if location is None:
+        return 0
+    index = int(location[len("cohorts[") : -1])
+    cohort = cohorts[index]
+    if not isinstance(cohort, dict):
+        return 0
+    sequence = cohort.get("sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool):
+        return 0
+    return sequence
+
+
 def _validate_components(
     values: list[object],
     location: str,
     component_cohorts: dict[str, str],
+    component_requires: dict[str, list[str]],
     errors: list[str],
 ) -> None:
     if not values:
@@ -438,7 +477,13 @@ def _validate_components(
         component = _object(value, component_location, errors)
         if component is None:
             continue
-        _strict_fields(component, COMPONENT_FIELDS, component_location, errors)
+        _strict_fields(
+            component,
+            COMPONENT_FIELDS,
+            component_location,
+            errors,
+            optional=COMPONENT_OPTIONAL_FIELDS,
+        )
         component_id = _identifier(
             component, "component_id", component_location, errors
         )
@@ -460,6 +505,15 @@ def _validate_components(
             )
         else:
             component_cohorts[component_id] = location.rsplit(".", 1)[0]
+        # A component may name the other components it cannot operate without.
+        # Cohort `depends_on` orders the SWITCHES; this orders the CAPABILITIES,
+        # and the two are not the same claim — a module whose manifest declares
+        # `dependencies=(...)` can sit in an earlier cohort than the module it
+        # depends on without any cohort edge being violated.
+        if "requires" in component:
+            component_requires[component_id] = _string_array(
+                component, "requires", component_location, errors
+            )
 
 
 def _validate_cohorts(
@@ -481,6 +535,7 @@ def _validate_cohorts(
     dependencies: dict[str, list[str]] = {}
     cohort_states: dict[str, str] = {}
     component_cohorts: dict[str, str] = {}
+    component_requires: dict[str, list[str]] = {}
     for index, value in enumerate(cohorts):
         location = f"cohorts[{index}]"
         cohort = _object(value, location, errors)
@@ -513,7 +568,11 @@ def _validate_cohorts(
         components = _array(cohort.get("components"), f"{location}.components", errors)
         if components is not None:
             _validate_components(
-                components, f"{location}.components", component_cohorts, errors
+                components,
+                f"{location}.components",
+                component_cohorts,
+                component_requires,
+                errors,
             )
         if cohort_id is not None:
             dependencies[cohort_id] = depends_on
@@ -542,6 +601,34 @@ def _validate_cohorts(
                     "to an earlier cohort"
                 )
 
+    # Component-level ordering. ADR 0012 forbids starting a cohort before its
+    # dependencies, but until now that was only ever checked between cohorts.
+    # A component could therefore be scheduled ahead of a capability it
+    # declares it needs — as `dotmac-fulfillment` (cohort 4) was, ahead of the
+    # `dotmac-durable-timers` (cohort 5) its manifest names in
+    # `dependencies=("durable_timers",)`. Same cohort is permitted: a cohort is
+    # one sealed switch, so its members cut over together.
+    for component_id, required in sorted(component_requires.items()):
+        holder = component_cohorts.get(component_id)
+        for requirement in required:
+            supplier = component_cohorts.get(requirement)
+            if supplier is None:
+                errors.append(
+                    f"component {component_id!r}: requires unknown component "
+                    f"{requirement!r}"
+                )
+                continue
+            if requirement == component_id:
+                errors.append(f"component {component_id!r}: requires itself")
+                continue
+            if _cohort_sequence(supplier, cohorts, errors) > _cohort_sequence(
+                holder, cohorts, errors
+            ):
+                errors.append(
+                    f"component {component_id!r}: requires {requirement!r}, which "
+                    "is scheduled in a later cohort"
+                )
+
     for cohort_id, state in cohort_states.items():
         if state not in {"in-progress", "verified"}:
             continue
@@ -556,6 +643,77 @@ def _validate_cohorts(
                 f"cutover controls; unverified: {', '.join(unverified)}"
             )
     return seen
+
+
+def _validate_capability_roster(root: JsonObject, errors: list[str]) -> None:
+    """Every in-scope capability is carried by a cohort or explicitly disposed.
+
+    The ordering checks catch a component scheduled ahead of what it needs, and
+    a `requires` that names nothing. Neither can see a capability that was
+    simply never mentioned — `dotmac-work-orders` was a built, ledger-allocated
+    module with a package on Starter main that appeared in no cohort at all,
+    and every check passed. Omission is the one failure mode a matrix cannot
+    detect from its own contents, so the scope has to be declared separately
+    and reconciled against them.
+
+    `capability_scope` is that declaration: the capabilities this programme is
+    answerable for. Each must appear in exactly one cohort, or carry a
+    retain/replace/retire disposition in `capability_roster` with a rationale.
+    Adding a module to the scope therefore forces the question rather than
+    letting silence answer it.
+    """
+    scope = _string_array(root, "capability_scope", "capability_scope", errors)
+    scoped = set(scope)
+    for duplicate in sorted({item for item in scope if scope.count(item) > 1}):
+        errors.append(f"capability_scope: duplicate entry {duplicate!r}")
+
+    in_cohorts: set[str] = set()
+    cohorts = root.get("cohorts")
+    if isinstance(cohorts, list):
+        for cohort in cohorts:
+            if not isinstance(cohort, dict):
+                continue
+            components = cohort.get("components")
+            if not isinstance(components, list):
+                continue
+            for component in components:
+                if isinstance(component, dict):
+                    component_id = component.get("component_id")
+                    if isinstance(component_id, str):
+                        in_cohorts.add(component_id)
+
+    rostered: set[str] = set()
+    entries = _array(root.get("capability_roster"), "capability_roster", errors)
+    for index, value in enumerate(entries or []):
+        location = f"capability_roster[{index}]"
+        entry = _object(value, location, errors)
+        if entry is None:
+            continue
+        _strict_fields(entry, ROSTER_FIELDS, location, errors)
+        component_id = _identifier(entry, "component_id", location, errors)
+        _enum(entry, "disposition", ROSTER_DISPOSITIONS, location, errors)
+        # A disposition with no reason is how "retain" becomes a shrug.
+        _string(entry, "rationale", location, errors)
+        if component_id is None:
+            continue
+        if component_id in rostered:
+            errors.append(f"{location}: duplicate roster entry {component_id!r}")
+        rostered.add(component_id)
+        if component_id in in_cohorts:
+            errors.append(
+                f"{location}: {component_id!r} is already carried by a cohort; "
+                "a capability is disposed of in one place, not two"
+            )
+
+    for component_id in sorted(in_cohorts - scoped):
+        errors.append(f"cohorts: component {component_id!r} is not in capability_scope")
+    for component_id in sorted(rostered - scoped):
+        errors.append(f"capability_roster: {component_id!r} is not in capability_scope")
+    for component_id in sorted(scoped - in_cohorts - rostered):
+        errors.append(
+            f"capability_scope: {component_id!r} has no cohort and no "
+            "retain/replace/retire disposition"
+        )
 
 
 def _validate_open_decisions(
@@ -637,6 +795,7 @@ def validate_matrix(path: Path) -> list[str]:
         cutover_control_ids,
         errors,
     )
+    _validate_capability_roster(root, errors)
     _validate_open_decisions(root, control_ids | cohort_ids, errors)
 
     if status == "proposed":

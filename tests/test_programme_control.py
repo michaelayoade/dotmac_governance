@@ -120,6 +120,18 @@ def valid_matrix() -> dict[str, object]:
                 ],
             },
         ],
+        "capability_scope": [
+            "dotmac-customers",
+            "dotmac-network-access",
+            "dotmac-campaigns",
+        ],
+        "capability_roster": [
+            {
+                "component_id": "dotmac-campaigns",
+                "disposition": "replace",
+                "rationale": "Sub owns campaign execution; not yet scheduled.",
+            }
+        ],
         "open_decisions": [
             {
                 "decision_id": "dec-isp-001",
@@ -237,6 +249,232 @@ class ProgrammeControlTests(unittest.TestCase):
         assert isinstance(first, dict)
         first["depends_on"] = ["cohort-isp-02"]
         self.assertFails(self.validate(payload), "must point to an earlier cohort")
+
+    def test_component_requires_a_later_cohort_fails_sensitivity(self) -> None:
+        """The defect this check exists for.
+
+        Cohort `depends_on` orders the SWITCHES and was the only ordering ever
+        validated. It cannot see a component scheduled ahead of a capability it
+        declares it needs, which is exactly how `dotmac-fulfillment` sat in
+        cohort 4 while the `dotmac-durable-timers` its manifest names in
+        `dependencies=("durable_timers",)` sat in cohort 5 — with every cohort
+        edge intact and the matrix green.
+        """
+        payload = valid_matrix()
+        cohorts = payload["cohorts"]
+        assert isinstance(cohorts, list)
+        first, second = cohorts[0], cohorts[1]
+        assert isinstance(first, dict) and isinstance(second, dict)
+        components = first["components"]
+        assert isinstance(components, list)
+        component = components[0]
+        assert isinstance(component, dict)
+        component["requires"] = ["dotmac-network-access"]  # lives in cohort 2
+
+        self.assertFails(self.validate(payload), "is scheduled in a later cohort")
+
+    def test_component_may_require_a_sibling_in_the_same_cohort(self) -> None:
+        """A cohort is one sealed switch, so its members cut over together.
+
+        The negative half of the check above: without this, the fix for the
+        ordering defect would be to forbid a dependency the programme model
+        actually permits, and cohort 3's twelve-module sealed switch could not
+        express any internal ordering at all.
+        """
+        payload = valid_matrix()
+        cohorts = payload["cohorts"]
+        assert isinstance(cohorts, list)
+        first = cohorts[0]
+        assert isinstance(first, dict)
+        components = first["components"]
+        assert isinstance(components, list)
+        components.append(
+            {
+                "component_id": "dotmac-work-orders",
+                "owner_id": "dotmac-work-orders",
+                "disposition": "release",
+                "requires": ["dotmac-customers"],
+            }
+        )
+        # A cohort component must also be in scope — the roster check enforces
+        # that, and leaving it out here would fail for the unrelated reason
+        # rather than proving same-cohort `requires` is accepted.
+        scope = payload["capability_scope"]
+        assert isinstance(scope, list)
+        scope.append("dotmac-work-orders")
+
+        self.assertEqual(self.validate(payload), [])
+
+    def test_component_requiring_an_unknown_component_fails_sensitivity(self) -> None:
+        """A requirement naming nothing is how a capability disappears.
+
+        `dotmac-work-orders` was a built, ledger-allocated module that no
+        cohort claimed at all; omission is silent in a way a dangling
+        reference is not.
+        """
+        payload = valid_matrix()
+        cohorts = payload["cohorts"]
+        assert isinstance(cohorts, list)
+        first = cohorts[0]
+        assert isinstance(first, dict)
+        components = first["components"]
+        assert isinstance(components, list)
+        component = components[0]
+        assert isinstance(component, dict)
+        component["requires"] = ["dotmac-not-a-component"]
+
+        self.assertFails(self.validate(payload), "requires unknown component")
+
+    def test_component_requiring_itself_fails_sensitivity(self) -> None:
+        payload = valid_matrix()
+        cohorts = payload["cohorts"]
+        assert isinstance(cohorts, list)
+        first = cohorts[0]
+        assert isinstance(first, dict)
+        components = first["components"]
+        assert isinstance(components, list)
+        component = components[0]
+        assert isinstance(component, dict)
+        component["requires"] = ["dotmac-customers"]
+
+        self.assertFails(self.validate(payload), "requires itself")
+
+    def test_an_unknown_component_field_is_still_rejected(self) -> None:
+        """`requires` became optional; that must not have opened the record.
+
+        `_strict_fields` gained an `optional` set for it, and an optional set
+        is exactly the kind of change that silently turns a closed record into
+        an open one.
+        """
+        payload = valid_matrix()
+        cohorts = payload["cohorts"]
+        assert isinstance(cohorts, list)
+        first = cohorts[0]
+        assert isinstance(first, dict)
+        components = first["components"]
+        assert isinstance(components, list)
+        component = components[0]
+        assert isinstance(component, dict)
+        component["cohort_note"] = "not a declared field"
+
+        self.assertFails(self.validate(payload), "unknown field 'cohort_note'")
+
+    def test_fulfillment_is_ordered_with_its_declared_prerequisites(self) -> None:
+        """Pinned against the checked-in matrix, not a synthetic one.
+
+        The generic ordering check above proves the RULE bites; this proves the
+        real programme now satisfies it, so a later slice cannot move Durable
+        Timers back out of cohort 4 and stay green.
+        """
+        payload = json.loads(MATRIX.read_text())
+        cohorts = payload["cohorts"]
+        by_component = {
+            component["component_id"]: cohort["sequence"]
+            for cohort in cohorts
+            for component in cohort["components"]
+        }
+
+        assert (
+            by_component["dotmac-durable-timers"] <= by_component["dotmac-fulfillment"]
+        )
+        assert by_component["dotmac-work-orders"] == by_component["dotmac-fulfillment"]
+
+    def test_a_scoped_capability_with_no_cohort_and_no_disposition_fails(self) -> None:
+        """The `dotmac-work-orders` failure mode, generalised.
+
+        Ordering checks read the matrix's own contents, so they cannot see a
+        capability that was never mentioned. Work Orders was a built,
+        ledger-allocated module with a package on Starter main that appeared in
+        no cohort at all, and everything passed. Only a separately declared
+        scope can turn silence into an error.
+        """
+        payload = valid_matrix()
+        scope = payload["capability_scope"]
+        assert isinstance(scope, list)
+        scope.append("dotmac-work-orders")
+
+        self.assertFails(
+            self.validate(payload),
+            "has no cohort and no retain/replace/retire disposition",
+        )
+
+    def test_a_capability_may_not_be_both_rostered_and_in_a_cohort(self) -> None:
+        payload = valid_matrix()
+        roster = payload["capability_roster"]
+        assert isinstance(roster, list)
+        roster.append(
+            {
+                "component_id": "dotmac-customers",
+                "disposition": "retain",
+                "rationale": "Also carried by cohort 1.",
+            }
+        )
+
+        self.assertFails(self.validate(payload), "already carried by a cohort")
+
+    def test_a_cohort_component_outside_capability_scope_fails(self) -> None:
+        """The ratchet runs both ways: scope may not silently shrink either."""
+        payload = valid_matrix()
+        scope = payload["capability_scope"]
+        assert isinstance(scope, list)
+        scope.remove("dotmac-network-access")
+
+        self.assertFails(self.validate(payload), "is not in capability_scope")
+
+    def test_a_roster_disposition_must_be_retain_replace_or_retire(self) -> None:
+        payload = valid_matrix()
+        roster = payload["capability_roster"]
+        assert isinstance(roster, list)
+        entry = roster[0]
+        assert isinstance(entry, dict)
+        entry["disposition"] = "defer"
+
+        self.assertFails(self.validate(payload), "expected one of")
+
+    def test_a_roster_entry_requires_a_rationale(self) -> None:
+        """A disposition with no reason is how "retain" becomes a shrug."""
+        payload = valid_matrix()
+        roster = payload["capability_roster"]
+        assert isinstance(roster, list)
+        entry = roster[0]
+        assert isinstance(entry, dict)
+        del entry["rationale"]
+
+        self.assertFails(self.validate(payload), "missing field 'rationale'")
+
+    def test_the_checked_in_matrix_disposes_of_every_scoped_capability(self) -> None:
+        """Pinned against the real programme, not a synthetic fixture.
+
+        The checks above prove the RULE bites. This proves the actual matrix
+        satisfies it, including the eleven packages that previously had no
+        programme disposition at all.
+        """
+        payload = json.loads(MATRIX.read_text())
+        scope = set(payload["capability_scope"])
+        in_cohorts = {
+            component["component_id"]
+            for cohort in payload["cohorts"]
+            for component in cohort["components"]
+        }
+        rostered = {entry["component_id"] for entry in payload["capability_roster"]}
+
+        assert scope == in_cohorts | rostered
+        assert not in_cohorts & rostered
+        assert "dotmac-work-orders" in in_cohorts
+        for previously_unclaimed in (
+            "dotmac-campaigns",
+            "dotmac-documents",
+            "dotmac-records",
+            "dotmac-content",
+            "dotmac-publishing",
+            "dotmac-sites",
+            "dotmac-surveys",
+            "dotmac-media-observations",
+            "dotmac-web-analytics",
+            "dotmac-procurement",
+            "dotmac-expenses",
+        ):
+            assert previously_unclaimed in rostered
 
     def test_open_decision_unknown_block_target_fails_sensitivity(self) -> None:
         payload = valid_matrix()

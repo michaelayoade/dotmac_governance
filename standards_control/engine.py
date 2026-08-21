@@ -66,6 +66,7 @@ class _ConnectorLockEntry(NamedTuple):
     name: str
     version: str
     groups: tuple[str, ...]
+    source_directory: PurePosixPath | None
 
 
 def _finding(
@@ -213,9 +214,116 @@ def _connector_lock_entries(
                 _normalized_distribution_name(name),
                 version,
                 tuple(sorted(set(groups))),
+                _connector_directory_source(package.get("source")),
             )
         )
     return tuple(entries), None
+
+
+def _connector_directory_source(value: object) -> PurePosixPath | None:
+    """Return a Poetry directory source without treating it as trusted yet."""
+    if not isinstance(value, dict) or value.get("type") != "directory":
+        return None
+    raw = value.get("url")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return PurePosixPath(raw)
+
+
+def _connector_source_distribution_roots(
+    root: Path,
+    profile: StandardsProfile,
+    *,
+    governance_root: Path | None,
+) -> tuple[PurePosixPath, ...]:
+    """Prove authored connector roots that are not legacy product debt.
+
+    This is intentionally derived from three independent authorities: the
+    Governance-owned source-repository list, Poetry's committed resolution,
+    and the distribution's connector entry point. A product profile cannot
+    declare an exclusion, and an invalid candidate simply remains measured.
+    """
+    if not isinstance(profile.governance_model, PinnedGovernanceModelRef):
+        return ()
+    authority, _ = _connector_runtime_authority(governance_root)
+    if (
+        authority is None
+        or profile.repository.canonical_url not in authority.source_repositories
+    ):
+        return ()
+    entries, _ = _connector_lock_entries(root)
+    if entries is None:
+        return ()
+
+    repository_root = root.resolve()
+    tomllib = importlib.import_module("tomllib")
+    proven: set[PurePosixPath] = set()
+    for entry in entries:
+        relative = entry.source_directory
+        if relative is None or "main" in entry.groups:
+            continue
+        if relative.is_absolute() or relative in {PurePosixPath("."), PurePosixPath()}:
+            continue
+        if ".." in relative.parts:
+            continue
+        package_root = root.joinpath(*relative.parts)
+        try:
+            resolved_package_root = package_root.resolve(strict=True)
+            resolved_package_root.relative_to(repository_root)
+        except (OSError, ValueError):
+            continue
+        if resolved_package_root != repository_root.joinpath(*relative.parts):
+            # A source path routed through a symlink can select an unrelated
+            # region of the repository (or leave it) and is not provenance.
+            continue
+        metadata_path = package_root / "pyproject.toml"
+        try:
+            metadata = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        tool = metadata.get("tool")
+        poetry = tool.get("poetry") if isinstance(tool, dict) else None
+        if not isinstance(poetry, dict):
+            continue
+        declared_name = poetry.get("name")
+        if (
+            not isinstance(declared_name, str)
+            or _normalized_distribution_name(declared_name) != entry.name
+        ):
+            continue
+        plugins = poetry.get("plugins")
+        connector_plugins = (
+            plugins.get("dotmac_integration.connectors")
+            if isinstance(plugins, dict)
+            else None
+        )
+        if not isinstance(connector_plugins, dict) or not connector_plugins:
+            continue
+        if any(
+            not isinstance(key, str)
+            or not key.strip()
+            or not isinstance(target, str)
+            or not target.strip()
+            for key, target in connector_plugins.items()
+        ):
+            continue
+        proven.add(relative)
+    return tuple(sorted(proven, key=PurePosixPath.as_posix))
+
+
+def _outside_connector_source_distributions(
+    inventory: tuple[PurePosixPath, ...] | None,
+    roots: tuple[PurePosixPath, ...],
+) -> tuple[PurePosixPath, ...] | None:
+    if inventory is None or not roots:
+        return inventory
+    return tuple(
+        relative
+        for relative in inventory
+        if not any(
+            relative == package or package in relative.parents for package in roots
+        )
+    )
 
 
 def _connector_runtime_dependencies(
@@ -4418,7 +4526,31 @@ def verify_repository(
         if inventory is not None
         else UntrackedPopulations((), ())
     )
-    scope = _derive_scope(root, inventory, untracked, _declared_runtime_paths(profile))
+    connector_source_roots = _connector_source_distribution_roots(
+        root,
+        profile,
+        governance_root=governance_root,
+    )
+    measured_inventory = _outside_connector_source_distributions(
+        inventory, connector_source_roots
+    )
+    for source_root in connector_source_roots:
+        findings.append(
+            _notice(
+                DiagnosticCode.CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED,
+                "Governance authorizes this repository to author connector "
+                "distributions, and the committed non-runtime Poetry resolution "
+                "plus connector entry point prove this package is distribution "
+                "source rather than legacy product-runtime connector debt",
+                path=source_root / "pyproject.toml",
+            )
+        )
+    scope = _derive_scope(
+        root,
+        measured_inventory,
+        untracked,
+        _declared_runtime_paths(profile),
+    )
     for relative in _grafted_trees(root):
         findings.append(
             _finding(

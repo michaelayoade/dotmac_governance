@@ -132,6 +132,7 @@ class DiagnosticCode(str, Enum):
     CONNECTOR_RUNTIME_AUTHORITY_UNAVAILABLE = "connector.runtime-authority.unavailable"
     CONNECTOR_DEPENDENCY_LOCK_UNAVAILABLE = "connector.dependency-lock.unavailable"
     CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN = "connector.runtime-dependency.forbidden"
+    CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED = "connector.source-distribution.excluded"
 
 
 @dataclass(frozen=True)

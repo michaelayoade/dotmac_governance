@@ -2062,3 +2062,46 @@ until those independent changes occur.
   six live connectors and on a clean ERPNext + Stripe integration. Report-only
   runs for one full conformance cycle before supersession, so a regression in
   S2 to S6 surfaces as a rising count while the counts are still produced.
+
+## Implementation correction — authored connector distributions are not product debt (2026-08-21)
+
+The first Starter repository to author several independently released connector
+distributions exposed a category error in the implementation. The transitional
+ratchet measured the source of those distributions as if it were a direct
+connector embedded in a product runtime. Raising Starter's baseline would have
+made accepted Integrator architecture appear as permanent legacy debt and would
+have prevented this ADR's all-zero sunset condition from ever being met.
+
+The engine now omits an authored connector distribution from the legacy product
+surface only when all of the following are independently proven:
+
+1. the repository is named by Governance's
+   `policies/external-connector-runtime-authority.json` as a source repository;
+2. the committed Poetry lock resolves a `dotmac-connector-*` distribution from
+   a relative in-repository directory in a group other than `main`;
+3. that directory's `pyproject.toml` declares the same normalized distribution
+   name and a non-empty `dotmac_integration.connectors` entry-point group; and
+4. the directory resolves directly beneath the repository root without `..` or
+   a symlink redirect.
+
+The omission is published as
+`connector.source-distribution.excluded`. It is derived entirely from
+Governance-owned authority and committed package metadata; no product profile
+key, path exemption, or baseline change is introduced. A product repository, a
+connector resolved in `main`, a name mismatch, a missing entry point, an
+unreadable package, or unsafe path remains measured. The untracked-source sweep
+continues to inspect the whole worktree, including these package roots, so a
+hidden source file still fails closed.
+
+The counterproofs plant the same executable transport inside a product, a
+runtime-group dependency, and a package without the connector entry point; all
+three remain debt. A fourth proof plants ignored untracked connector code inside
+an otherwise valid source distribution and retains
+`repository.source.untracked`. The exact Starter integration tree then proves
+seven connector distributions are omitted while the repository remains
+conformant without changing its legacy baseline.
+
+This is an implementation correction to the already accepted separation
+between the sole connector runtime, the authorized source repository, and
+product debt. It changes neither the ADR's status nor the conformance profile
+schema.

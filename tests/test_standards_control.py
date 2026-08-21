@@ -5341,7 +5341,12 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
         }
 
     @staticmethod
-    def lock(*, name: str | None = None, groups: tuple[str, ...] = ()) -> str:
+    def lock(
+        *,
+        name: str | None = None,
+        groups: tuple[str, ...] = (),
+        source: str | None = None,
+    ) -> str:
         package = ""
         if name is not None:
             rendered_groups = ", ".join(json.dumps(group) for group in groups)
@@ -5353,6 +5358,12 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
                 "optional = false\n"
                 'python-versions = "*"\n\n'
             )
+            if source is not None:
+                package += (
+                    "[package.source]\n"
+                    'type = "directory"\n'
+                    f"url = {json.dumps(source)}\n\n"
+                )
         return (
             package
             + "[metadata]\n"
@@ -5368,6 +5379,8 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
         lock: str | None = None,
         authority: dict[str, object] | None = None,
         product_authority: dict[str, object] | None = None,
+        extra: Mapping[str, str] | None = None,
+        untracked: Mapping[str, str] | None = None,
     ) -> ConformanceReport:
         value = profile()
         contract = value["repository"]
@@ -5386,12 +5399,12 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as governance_directory:
                 product = Path(product_directory)
                 governance = Path(governance_directory)
-                extra: dict[str, str] = {}
+                files: dict[str, str] = dict(extra or {})
                 if lock is not None:
-                    extra["poetry.lock"] = lock
+                    files["poetry.lock"] = lock
                 if product_authority is not None:
-                    extra[self.AUTHORITY_PATH] = json.dumps(product_authority)
-                path = Fixture(product).write(value, extra=extra)
+                    files[self.AUTHORITY_PATH] = json.dumps(product_authority)
+                path = Fixture(product).write(value, extra=files, untracked=untracked)
                 if lock is None:
                     (product / "poetry.lock").unlink()
 
@@ -5464,6 +5477,150 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
             DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN,
             self.codes(runtime),
             runtime.to_dict(),
+        )
+
+    def test_source_only_connector_distribution_code_is_not_product_debt(
+        self,
+    ) -> None:
+        package = "packages/dotmac-connector-fictional"
+        plugin = PLANTED_HTTP_TRANSPORT + "\n" + PLANTED_CHECKPOINT
+        report = self.report(
+            repository=self.SOURCE_REPOSITORY,
+            lock=self.lock(
+                name="dotmac-connector-fictional",
+                groups=("dev",),
+                source=package,
+            ),
+            authority=self.authority(),
+            extra={
+                f"{package}/pyproject.toml": (
+                    '[tool.poetry]\nname = "dotmac-connector-fictional"\n'
+                    '[tool.poetry.plugins."dotmac_integration.connectors"]\n'
+                    'fictional = "dotmac_connector_fictional:PLUGIN"\n'
+                ),
+                f"{package}/src/dotmac_connector_fictional/plugin.py": plugin,
+            },
+        )
+        codes = self.codes(report)
+        self.assertNotIn(DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED, codes)
+        self.assertNotIn(DiagnosticCode.CONNECTOR_CONSERVED_UNDECLARED, codes)
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED,
+            codes,
+        )
+
+    def test_a_product_cannot_disguise_connector_debt_as_distribution_source(
+        self,
+    ) -> None:
+        package = "packages/dotmac-connector-fictional"
+        report = self.report(
+            repository=PRODUCT_REPOSITORY,
+            lock=self.lock(
+                name="dotmac-connector-fictional",
+                groups=("dev",),
+                source=package,
+            ),
+            authority=self.authority(),
+            extra={
+                f"{package}/pyproject.toml": (
+                    '[tool.poetry]\nname = "dotmac-connector-fictional"\n'
+                    '[tool.poetry.plugins."dotmac_integration.connectors"]\n'
+                    'fictional = "dotmac_connector_fictional:PLUGIN"\n'
+                ),
+                f"{package}/src/dotmac_connector_fictional/plugin.py": (
+                    PLANTED_HTTP_TRANSPORT
+                ),
+            },
+        )
+        codes = self.codes(report)
+        self.assertIn(DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED, codes)
+        self.assertIn(DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN, codes)
+        self.assertNotIn(
+            DiagnosticCode.CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED,
+            codes,
+        )
+
+    def test_a_runtime_group_connector_is_not_source_only(self) -> None:
+        package = "packages/dotmac-connector-fictional"
+        report = self.report(
+            repository=self.SOURCE_REPOSITORY,
+            lock=self.lock(
+                name="dotmac-connector-fictional",
+                groups=("main",),
+                source=package,
+            ),
+            authority=self.authority(),
+            extra={
+                f"{package}/pyproject.toml": (
+                    '[tool.poetry]\nname = "dotmac-connector-fictional"\n'
+                    '[tool.poetry.plugins."dotmac_integration.connectors"]\n'
+                    'fictional = "dotmac_connector_fictional:PLUGIN"\n'
+                ),
+                f"{package}/src/dotmac_connector_fictional/plugin.py": (
+                    PLANTED_HTTP_TRANSPORT
+                ),
+            },
+        )
+        codes = self.codes(report)
+        self.assertIn(DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED, codes)
+        self.assertIn(DiagnosticCode.CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN, codes)
+        self.assertNotIn(
+            DiagnosticCode.CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED,
+            codes,
+        )
+
+    def test_source_exclusion_requires_a_real_connector_entry_point(self) -> None:
+        package = "packages/dotmac-connector-fictional"
+        report = self.report(
+            repository=self.SOURCE_REPOSITORY,
+            lock=self.lock(
+                name="dotmac-connector-fictional",
+                groups=("dev",),
+                source=package,
+            ),
+            authority=self.authority(),
+            extra={
+                f"{package}/pyproject.toml": (
+                    '[tool.poetry]\nname = "dotmac-connector-fictional"\n'
+                ),
+                f"{package}/src/dotmac_connector_fictional/plugin.py": (
+                    PLANTED_HTTP_TRANSPORT
+                ),
+            },
+        )
+        codes = self.codes(report)
+        self.assertIn(DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED, codes)
+        self.assertNotIn(
+            DiagnosticCode.CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED,
+            codes,
+        )
+
+    def test_untracked_code_inside_a_source_distribution_still_fails(self) -> None:
+        package = "packages/dotmac-connector-fictional"
+        report = self.report(
+            repository=self.SOURCE_REPOSITORY,
+            lock=self.lock(
+                name="dotmac-connector-fictional",
+                groups=("dev",),
+                source=package,
+            ),
+            authority=self.authority(),
+            extra={
+                f"{package}/pyproject.toml": (
+                    '[tool.poetry]\nname = "dotmac-connector-fictional"\n'
+                    '[tool.poetry.plugins."dotmac_integration.connectors"]\n'
+                    'fictional = "dotmac_connector_fictional:PLUGIN"\n'
+                )
+            },
+            untracked={
+                f"{package}/src/dotmac_connector_fictional/hidden.py": (
+                    PLANTED_HTTP_TRANSPORT
+                )
+            },
+        )
+        self.assertIn(
+            DiagnosticCode.REPOSITORY_SOURCE_UNTRACKED,
+            self.codes(report),
         )
 
     def test_the_product_cannot_self_authorize_a_connector(self) -> None:

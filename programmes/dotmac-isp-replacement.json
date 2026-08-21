@@ -2,7 +2,7 @@
   "schema_version": 1,
   "programme_id": "pgm-dotmac-isp-replacement",
   "title": "Build a thin Dotmac ISP assembly and cut over legacy Dotmac Sub",
-  "status": "proposed",
+  "status": "accepted",
   "owner": "Michael Ayoade",
   "approver": "Michael Ayoade",
   "authority": {
@@ -93,9 +93,16 @@
       "control_id": "ctl-isp-001",
       "name": "Coordinated target-build and Sub-cutover programme receives attributable human approval",
       "owner": "Michael Ayoade",
-      "state": "pending-approval",
+      "state": "verified",
       "depends_on": [],
-      "evidence_refs": []
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "6edec28a03395a507b39736c346b6ff9c54d2a85",
+          "subject": "Acceptance of ADR 0012 and pgm-dotmac-isp-replacement"
+        }
+      ]
     },
     {
       "control_id": "ctl-isp-002",
@@ -557,17 +564,8 @@
   ],
   "open_decisions": [
     {
-      "decision_id": "dec-isp-001",
-      "question": "Approve the coordinated programme: build the independent Dotmac ISP target while Sub completes source-readiness, bounded shadow, sealed cohort cutover and retirement, with one production authority at a time?",
-      "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "ctl-isp-001"
-      ]
-    },
-    {
       "decision_id": "dec-isp-002",
-      "question": "Assign the target assembly canonical repository runtime database and deployment owner?",
+      "question": "Assign the production deployment owner and any eventual target host for the already named independent Dotmac ISP assembly?",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [

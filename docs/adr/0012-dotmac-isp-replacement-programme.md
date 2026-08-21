@@ -1,9 +1,10 @@
 # 0012. The Dotmac ISP replacement is one controlled programme
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-20
+- Effective: 2026-08-20
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (intended while Proposed)
+- Approver: Michael Ayoade
 - Scope: Dotmac ISP replacement across Governance, Starter, Sub, the future target assembly, and participating product sources
 - Classification: Internal
 
@@ -31,14 +32,14 @@ the independent `asm-dotmac-isp` thin assembly and its database boundary is
 independent. The production deployment owner remains unassigned; naming a
 repository does not authorize a host or a cutover. The programme must not force
 a false choice between constructing that target and preparing Sub for a safe
-cutover: both are required, and each has different evidence. Accepting that
-coordinated direction still requires an attributable GitHub approval record;
-this proposed record and matrix preserve that open control rather than treating
-an agent-authored source update as approval evidence.
+cutover: both are required, and each has different evidence. Michael explicitly
+accepted this coordinated direction on 2026-08-20 and authorized the acceptance
+amendment. The accepted record approves the programme boundary; it does not
+approve a deployment, data movement or cohort authority switch.
 
 ## Decision
 
-If accepted, Governance owns the programme identity
+Governance owns the programme identity
 `pgm-dotmac-isp-replacement`, its stable control/cohort/decision identifiers,
 ordering, approval state and references to controlled evidence. The canonical
 record is
@@ -106,10 +107,20 @@ published package or deployed target never advances an authority state on its
 own. Each verified control cites an immutable controlled-source reference; an
 agent-authored assertion is not evidence.
 
+## Acceptance amendment — 2026-08-20
+
+Michael Ayoade explicitly accepted ADR 0012 and authorized this lifecycle
+amendment on 2026-08-20. Acceptance authorizes the two coordinated work tracks
+and the stable programme/control/cohort identities. It moves no production
+authority, assigns no deployment host, verifies no target catalog or replay,
+and opens no cohort. The matrix records the immutable acceptance revision for
+`ctl-isp-001`; every downstream control remains blocked on its own evidence.
+
 ## Consequences
 
-- This record and matrix are non-normative while `Proposed`. Every control and
-  cohort remains blocked; no authority, deployment or data changes.
+- This record and matrix are normative for programme ordering and control
+  identity. Every cohort remains blocked; acceptance alone makes no authority,
+  deployment or data change.
 - Governance gains one programme state instead of a competing implementation
   plan. Product technical facts stay in product repositories and are cited by
   exact revision.
@@ -148,5 +159,5 @@ agent-authored assertion is not evidence.
   the evaluated revision; it does not approve the decision or declare a
   production cutover.
 - Starter's technical replacement ADR must cite the immutable accepted
-  Governance revision. Until that exists, conflicting local first-cutover
-  statements remain unchanged and authoritative for their current scope.
+  Governance revision carrying this amendment before changing any conflicting
+  local first-cutover statement.

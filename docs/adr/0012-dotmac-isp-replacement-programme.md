@@ -116,6 +116,52 @@ authority, assigns no deployment host, verifies no target catalog or replay,
 and opens no cohort. The matrix records the immutable acceptance revision for
 `ctl-isp-001`; every downstream control remains blocked on its own evidence.
 
+## Ordering amendment — 2026-08-21
+
+Michael Ayoade approved this ordering amendment on 2026-08-21. The approval
+covers the two corrections and the capability-scope control below. It moves no
+production authority, assigns no deployment host, verifies no target catalog or
+replay, and opens no cohort; every cohort remains blocked on its own evidence,
+and `dec-isp-005` through `dec-isp-007` remain open.
+
+Two matrix defects were found and corrected. Neither changes the eight-cohort
+shape, the acceptance record, or any authority state.
+
+`dotmac-fulfillment` sat in cohort 4 while `dotmac-durable-timers`, which its
+manifest names in `dependencies=("durable_timers",)`, sat in cohort 5. Every
+cohort `depends_on` edge was intact and the matrix validated, because cohort
+edges order the *switches* and nothing ordered the *capabilities*. Durable
+Timers moves to cohort 4, and components may now declare `requires`, checked
+against the cohort sequence. Same-cohort requirements are permitted: a cohort
+is one sealed switch whose members cut over together.
+
+`dotmac-work-orders` was assigned to no cohort at all. It is a built module
+with a kernel ledger allocation (`prefix="wo"`, schema `mod_workorders`) and a
+package on Starter main, so its absence was omission rather than a decision.
+Physical execution of a dispatched job is distinct from the work structure
+Projects owns, the saga coordination Fulfillment owns and the capacity and
+routing decisions Workforce owns; it joins cohort 4 and is required by
+Workforce in cohort 6.
+
+The omission is the more general lesson: a dangling reference fails loudly
+while an unclaimed capability fails silently, and no check reading the matrix's
+own contents can see something that was never mentioned. The matrix therefore
+declares `capability_scope` — the capabilities this programme is answerable for
+— and every entry must be carried by exactly one cohort or hold a
+retain/replace/retire disposition with a rationale in `capability_roster`.
+Adding a module to the scope forces the question instead of letting silence
+answer it, and the two sets may not overlap: a capability is disposed of in one
+place, not two.
+
+The eleven Starter packages previously absent from this matrix — Campaigns,
+Documents, Records, Content, Publishing, Sites, Surveys, Media Observations,
+Web Analytics, Procurement and Expenses — now carry explicit dispositions. Ten
+are `retain` (available, with no ISP-owned authority in scope) and Campaigns is
+`replace` (Sub owns outbound campaign execution today). A roster disposition
+moves no authority and schedules no cutover; it records that the question was
+answered. Media Observations is retained specifically because Michael paused
+its adoption on 2026-08-18 and it must not enter a cohort while paused.
+
 ## Consequences
 
 - This record and matrix are normative for programme ordering and control

@@ -729,11 +729,18 @@ def _validate_open_decisions(
     root: JsonObject,
     block_targets: set[str],
     errors: list[str],
-) -> None:
+) -> set[str]:
+    """Validate the open decisions and return the identifiers they claim.
+
+    Returning the set rather than letting the caller re-parse the field means
+    the "open or answered, never both" rule is checked against exactly the ids
+    this function accepted, not against a second reading that could disagree.
+    """
+
     decisions = _array(root.get("open_decisions"), "open_decisions", errors)
-    if decisions is None:
-        return
     seen: set[str] = set()
+    if decisions is None:
+        return seen
     for index, value in enumerate(decisions):
         location = f"open_decisions[{index}]"
         decision = _object(value, location, errors)
@@ -757,6 +764,7 @@ def _validate_open_decisions(
         for target in blocks:
             if target not in block_targets:
                 errors.append(f"{location}: unknown block target {target!r}")
+    return seen
 
 
 def _validate_resolved_decisions(
@@ -854,12 +862,7 @@ def validate_matrix(path: Path) -> list[str]:
         errors,
     )
     _validate_capability_roster(root, errors)
-    open_ids = {
-        decision.get("decision_id")
-        for decision in (root.get("open_decisions") or [])
-        if isinstance(decision, dict) and isinstance(decision.get("decision_id"), str)
-    }
-    _validate_open_decisions(root, control_ids | cohort_ids, errors)
+    open_ids = _validate_open_decisions(root, control_ids | cohort_ids, errors)
     _validate_resolved_decisions(root, open_ids, errors)
 
     if status == "proposed":

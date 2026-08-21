@@ -2,7 +2,7 @@
   "schema_version": 1,
   "programme_id": "pgm-dotmac-isp-replacement",
   "title": "Build a thin Dotmac ISP assembly and cut over legacy Dotmac Sub",
-  "status": "proposed",
+  "status": "accepted",
   "owner": "Michael Ayoade",
   "approver": "Michael Ayoade",
   "authority": {
@@ -557,17 +557,8 @@
   ],
   "open_decisions": [
     {
-      "decision_id": "dec-isp-001",
-      "question": "Approve the coordinated programme: build the independent Dotmac ISP target while Sub completes source-readiness, bounded shadow, sealed cohort cutover and retirement, with one production authority at a time?",
-      "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "ctl-isp-001"
-      ]
-    },
-    {
       "decision_id": "dec-isp-002",
-      "question": "Assign the target assembly canonical repository runtime database and deployment owner?",
+      "question": "Assign the production deployment owner and any eventual target host for the already named independent Dotmac ISP assembly?",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [

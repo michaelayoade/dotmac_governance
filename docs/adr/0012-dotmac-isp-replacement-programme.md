@@ -162,6 +162,73 @@ moves no authority and schedules no cutover; it records that the question was
 answered. Media Observations is retained specifically because Michael paused
 its adoption on 2026-08-18 and it must not enter a cohort while paused.
 
+## Decision amendment — 2026-08-21: five open decisions answered
+
+Michael Ayoade granted standing authority across the programme on 2026-08-21
+and supplied the decision set below. Each is recorded here in prose and, in the
+programme matrix, as a `resolved_decisions` entry citing this revision. The
+matrix previously had nowhere to record a decision that was *made* —
+`open_decisions` accepts only `state: "open"`, so resolving one meant deleting
+it, discarding the answer, its owner and the revision proving when. That is the
+same loss this record's own drift-prevention clause forbids, so the schema
+gained `resolved_decisions` with mandatory immutable evidence.
+
+**dec-isp-003 — legacy Sub transition rule. Approved.** No new cohort writer
+and no growth of an existing one; bounded in-place module adoption is admitted
+only when it retires a local writer. Enforcement is not a promise: the
+two-directional cohort writer ratchets in `dotmac_sub` fail the build on an
+added or grown writer, and on a removed writer whose baseline was not lowered
+in the same change. `ctl-isp-003` is verified on that basis.
+
+**dec-isp-004 — analytics and reporting. Split into two owners.** Analytics
+owns semantic measures and derived analytical datasets. Reporting owns saved
+reports, execution, scheduling, exports and delivery. The `analytics-reporting`
+placeholder is replaced in cohort 8 by `dotmac-analytics` and
+`dotmac-reporting`, both `build`. There is no longer an unassigned
+adjudication anywhere in the matrix.
+
+**dec-isp-005 — three platform-plane modules. External.** Support Access,
+Platform Health and Deployment Control remain Vendor-control-plane
+dependencies consumed over versioned APIs. They leave cohort 7 and are rostered
+`retain`. No supported platform assembly is introduced; `asm-dotmac-isp` keeps
+`platform_surface_enabled=False` rather than growing a platform plane it would
+then have to govern.
+
+**dec-isp-006 — Inventory and Assets. ERP owns them.** ISP holds opaque
+references only. Both leave cohort 3 and are rostered `retain`. ISP's network
+stock and plant estate stay with the network modules that already own them, and
+because ISP composes neither lineage the refused parallel-writer shape cannot
+arise.
+
+**dec-isp-007 — cohort-1 identity boundaries. Four owners.** Party owns
+organization capacities, memberships and reachability. Customers owns the
+account-to-Party binding. A new product-first `dotmac-addresses` owner owns
+normalized address, geospatial data and verification history, and joins cohort
+1 as `build`. Customers, Services and Billing hold typed purpose links to
+address identities rather than copies of them. No product-owned link contract
+is approved in place of a named owner.
+
+### dec-isp-002 remains OPEN, and its question is narrowed
+
+`selfcare.dotmac.io` was offered as the host on 2026-08-21 and is **refused as
+stated**. It is the live `dotmac_sub` production host (`vmi3348415`) and the
+compiled-in default API base URL of shipped field-mobile store builds, so it
+names the system being replaced rather than an independent runtime — while
+`ctl-isp-002` asks for a host operating the independent ISP runtime and its own
+database.
+
+The question now asks two things separately, because they have different
+consequences and only one of them is a deployment decision:
+
+1. which host runs `asm-dotmac-isp` and its own database; and
+2. whether `selfcare.dotmac.io` is intended as the eventual cutover destination
+   for customer traffic. That is not a DNS change: every installed field-mobile
+   client resolves its API base to that name, so repointing it is a
+   client-compatibility commitment that has to be sequenced against a mobile
+   release.
+
+`ctl-isp-002` therefore stays `blocked`, and cohort 1 with it.
+
 ## Consequences
 
 - This record and matrix are normative for programme ordering and control

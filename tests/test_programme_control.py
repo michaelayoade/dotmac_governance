@@ -141,6 +141,7 @@ def valid_matrix() -> dict[str, object]:
                 "blocks": ["ctl-isp-001"],
             }
         ],
+        "resolved_decisions": [],
     }
 
 
@@ -496,6 +497,89 @@ class ProgrammeControlTests(unittest.TestCase):
             self.validate(payload),
             "assigned target repository must be a canonical HTTPS URL",
         )
+
+    # -- resolved decisions -------------------------------------------------
+    #
+    # `open_decisions` accepts only `state: "open"`, so before this field a
+    # decision was resolved by DELETING it — which discarded the answer, the
+    # person who gave it and the revision proving when. Each rule below is
+    # paired with the acceptance case for the same code path.
+
+    def _resolved(self) -> dict[str, object]:
+        return {
+            "decision_id": "dec-isp-002",
+            "question": "Assign the production deployment owner?",
+            "owner": "Michael Ayoade",
+            "resolution": "Named owner and host recorded in the governing ADR.",
+            "evidence_refs": [
+                {
+                    "producer": "Michael Ayoade",
+                    "repository": "https://github.com/michaelayoade/dotmac_governance",
+                    "revision": "a" * 40,
+                    "subject": "Resolution of dec-isp-002",
+                }
+            ],
+        }
+
+    def test_resolved_decision_with_immutable_evidence_passes(self) -> None:
+        payload = valid_matrix()
+        payload["resolved_decisions"] = [self._resolved()]
+        self.assertEqual(self.validate(payload), [])
+
+    def test_resolved_decision_without_evidence_fails_sensitivity(self) -> None:
+        payload = valid_matrix()
+        resolved = self._resolved()
+        resolved["evidence_refs"] = []
+        payload["resolved_decisions"] = [resolved]
+        self.assertFails(
+            self.validate(payload),
+            "an agent-authored assertion is not a decision record",
+        )
+
+    def test_resolved_decision_with_mutable_revision_fails_sensitivity(self) -> None:
+        payload = valid_matrix()
+        resolved = self._resolved()
+        evidence = resolved["evidence_refs"]
+        assert isinstance(evidence, list)
+        first = evidence[0]
+        assert isinstance(first, dict)
+        first["revision"] = "main"
+        payload["resolved_decisions"] = [resolved]
+        self.assertFails(
+            self.validate(payload),
+            "expected an immutable 40-character lower-case Git revision",
+        )
+
+    def test_a_decision_cannot_be_open_and_resolved_sensitivity(self) -> None:
+        payload = valid_matrix()
+        resolved = self._resolved()
+        resolved["decision_id"] = "dec-isp-001"
+        payload["resolved_decisions"] = [resolved]
+        self.assertFails(
+            self.validate(payload),
+            "is also listed as open; a decision is open or answered, never both",
+        )
+
+    def test_duplicate_resolved_decision_id_fails_sensitivity(self) -> None:
+        payload = valid_matrix()
+        payload["resolved_decisions"] = [self._resolved(), self._resolved()]
+        self.assertFails(self.validate(payload), "duplicate decision_id")
+
+    def test_resolved_decision_keeps_its_question_sensitivity(self) -> None:
+        """A resolution without its question is unreadable a month later."""
+
+        payload = valid_matrix()
+        resolved = self._resolved()
+        del resolved["question"]
+        payload["resolved_decisions"] = [resolved]
+        self.assertFails(self.validate(payload), "question")
+
+    def test_resolved_decision_rejects_an_unknown_field_sensitivity(self) -> None:
+        payload = valid_matrix()
+        resolved = self._resolved()
+        resolved["state"] = "resolved"
+        payload["resolved_decisions"] = [resolved]
+        self.assertFails(self.validate(payload), "resolved_decisions[0]")
 
 
 if __name__ == "__main__":

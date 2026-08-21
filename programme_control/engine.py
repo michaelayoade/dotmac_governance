@@ -32,6 +32,7 @@ TOP_LEVEL_FIELDS = frozenset(
         "capability_scope",
         "capability_roster",
         "open_decisions",
+        "resolved_decisions",
     }
 )
 AUTHORITY_FIELDS = frozenset({"source", "target"})
@@ -72,6 +73,14 @@ ROSTER_FIELDS = frozenset({"component_id", "disposition", "rationale"})
 # explicitly. These are the only three ways to do that.
 ROSTER_DISPOSITIONS = frozenset({"retain", "replace", "retire"})
 DECISION_FIELDS = frozenset({"decision_id", "question", "owner", "state", "blocks"})
+# A decision that was MADE needs somewhere to live. `open_decisions` accepts
+# only `state: "open"`, so resolving one used to mean deleting it — which threw
+# away the answer, the person who gave it, and the revision that proves when.
+# ADR 0012 forbids changing a stable identifier's meaning and requires explicit
+# history; silently dropping the identifier is the same loss by another route.
+RESOLVED_DECISION_FIELDS = frozenset(
+    {"decision_id", "question", "owner", "resolution", "evidence_refs"}
+)
 
 PROGRAMME_STATUSES = frozenset({"proposed", "accepted", "active", "complete"})
 CONTROL_STATES = frozenset(
@@ -750,6 +759,55 @@ def _validate_open_decisions(
                 errors.append(f"{location}: unknown block target {target!r}")
 
 
+def _validate_resolved_decisions(
+    root: JsonObject,
+    open_ids: set[str],
+    errors: list[str],
+) -> None:
+    """Every resolved decision keeps its question and cites immutable evidence.
+
+    The question is retained deliberately. A resolution recorded without the
+    question it answers is unreadable a month later, and re-deriving it from a
+    deleted `open_decisions` entry means reading Git history to understand a
+    record whose whole purpose is to make that unnecessary.
+
+    An id may not appear in both lists. A decision is open or it is answered;
+    holding both states is how two readers reach opposite conclusions from the
+    same file.
+    """
+
+    decisions = _array(root.get("resolved_decisions"), "resolved_decisions", errors)
+    if decisions is None:
+        return
+    seen: set[str] = set()
+    for index, value in enumerate(decisions):
+        location = f"resolved_decisions[{index}]"
+        decision = _object(value, location, errors)
+        if decision is None:
+            continue
+        _strict_fields(decision, RESOLVED_DECISION_FIELDS, location, errors)
+        decision_id = _identifier(decision, "decision_id", location, errors)
+        _unique_id(decision_id, "decision_id", seen, errors)
+        if decision_id is not None and decision_id in open_ids:
+            errors.append(
+                f"{location}: {decision_id!r} is also listed as open; a "
+                "decision is open or answered, never both"
+            )
+        _string(decision, "question", location, errors)
+        _string(decision, "owner", location, errors)
+        _string(decision, "resolution", location, errors)
+        evidence = _array(
+            decision.get("evidence_refs"), f"{location}.evidence_refs", errors
+        )
+        if not evidence:
+            errors.append(
+                f"{location}: a resolved decision must cite immutable evidence; "
+                "an agent-authored assertion is not a decision record"
+            )
+        else:
+            _validate_evidence(evidence, f"{location}.evidence_refs", errors)
+
+
 def validate_matrix(path: Path) -> list[str]:
     """Return every structural and state error for one programme matrix."""
     errors: list[str] = []
@@ -796,7 +854,13 @@ def validate_matrix(path: Path) -> list[str]:
         errors,
     )
     _validate_capability_roster(root, errors)
+    open_ids = {
+        decision.get("decision_id")
+        for decision in (root.get("open_decisions") or [])
+        if isinstance(decision, dict) and isinstance(decision.get("decision_id"), str)
+    }
     _validate_open_decisions(root, control_ids | cohort_ids, errors)
+    _validate_resolved_decisions(root, open_ids, errors)
 
     if status == "proposed":
         verified = sorted(

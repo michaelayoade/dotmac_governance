@@ -734,7 +734,7 @@
     },
     {
       "decision_id": "dec-isp-005",
-      "question": "Cohort 7 assigns three platform-plane modules — Support Access, Platform Health and Deployment Control — to the Dotmac ISP assembly, which declares platform_surface_enabled=False and can therefore never compose them. Treat all three as external control-plane dependencies consumed over versioned APIs, or introduce a separately governed supported platform assembly as their target?",
+      "question": "Cohort 7 assigns three platform-plane modules \u2014 Support Access, Platform Health and Deployment Control \u2014 to the Dotmac ISP assembly, which declares platform_surface_enabled=False and can therefore never compose them. Treat all three as external control-plane dependencies consumed over versioned APIs, or introduce a separately governed supported platform assembly as their target?",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [
@@ -759,5 +759,6 @@
         "cohort-isp-01"
       ]
     }
-  ]
+  ],
+  "resolved_decisions": []
 }

@@ -222,6 +222,11 @@
           "component_id": "dotmac-customers",
           "owner_id": "dotmac-customers",
           "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-addresses",
+          "owner_id": "dotmac-addresses",
+          "disposition": "build"
         }
       ]
     },
@@ -274,16 +279,6 @@
       "current_authority": "asm-dotmac-sub-legacy",
       "target_authority": "asm-dotmac-isp",
       "components": [
-        {
-          "component_id": "dotmac-inventory",
-          "owner_id": "dotmac-inventory",
-          "disposition": "adopt"
-        },
-        {
-          "component_id": "dotmac-assets",
-          "owner_id": "dotmac-assets",
-          "disposition": "adopt"
-        },
         {
           "component_id": "dotmac-positioning",
           "owner_id": "dotmac-positioning",
@@ -533,24 +528,9 @@
           "disposition": "build"
         },
         {
-          "component_id": "dotmac-support-access",
-          "owner_id": "dotmac-support-access",
-          "disposition": "build"
-        },
-        {
-          "component_id": "dotmac-platform-health",
-          "owner_id": "dotmac-platform-health",
-          "disposition": "build"
-        },
-        {
           "component_id": "dotmac-forms",
           "owner_id": "dotmac-forms",
           "disposition": "build"
-        },
-        {
-          "component_id": "dotmac-deployment-control",
-          "owner_id": "dotmac-deployment-control",
-          "disposition": "adopt"
         }
       ]
     },
@@ -566,9 +546,14 @@
       "target_authority": "asm-dotmac-isp",
       "components": [
         {
-          "component_id": "analytics-reporting",
-          "owner_id": "unassigned",
-          "disposition": "adjudicate"
+          "component_id": "dotmac-analytics",
+          "owner_id": "dotmac-analytics",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-reporting",
+          "owner_id": "dotmac-reporting",
+          "disposition": "build"
         },
         {
           "component_id": "legacy-dotmac-sub",
@@ -579,88 +564,85 @@
     }
   ],
   "capability_scope": [
-    "dotmac-kernel",
-    "dotmac-ui",
-    "dotmac-party",
-    "dotmac-brand-profiles",
-    "dotmac-customers",
-    "dotmac-service-catalog",
-    "dotmac-qualification",
-    "dotmac-sales",
-    "dotmac-orders",
-    "dotmac-subscriptions",
-    "dotmac-inventory",
+    "dotmac-addresses",
+    "dotmac-ai-operations",
+    "dotmac-analytics",
+    "dotmac-approvals",
     "dotmac-assets",
-    "dotmac-positioning",
-    "dotmac-ipam",
-    "dotmac-network-inventory",
-    "dotmac-network-observability",
-    "dotmac-network-topology",
-    "dotmac-network-assurance",
-    "dotmac-network-control",
-    "dotmac-fiber-plant",
-    "dotmac-network-access",
-    "dotmac-pon-access",
-    "dotmac-projects",
-    "dotmac-durable-timers",
-    "dotmac-fulfillment",
-    "dotmac-services",
-    "dotmac-work-orders",
-    "dotmac-usage",
-    "dotmac-usage-rating",
     "dotmac-billing",
+    "dotmac-brand-profiles",
+    "dotmac-campaigns",
     "dotmac-collections",
-    "dotmac-service-access-policy",
-    "dotmac-numbering",
+    "dotmac-compliance-reporting",
+    "dotmac-content",
+    "dotmac-customers",
+    "dotmac-deployment-control",
     "dotmac-document-rendering",
+    "dotmac-documents",
+    "dotmac-durable-timers",
+    "dotmac-expenses",
+    "dotmac-fiber-plant",
     "dotmac-files",
-    "dotmac-tax",
+    "dotmac-forms",
+    "dotmac-fulfillment",
     "dotmac-fx-policy",
     "dotmac-inbox",
     "dotmac-inbox-operations",
-    "dotmac-ticketing",
-    "dotmac-workforce",
-    "dotmac-template-studio",
-    "dotmac-approvals",
-    "dotmac-referrals",
-    "dotmac-reseller-management",
-    "dotmac-ai-operations",
-    "dotmac-remote-access",
-    "dotmac-compliance-reporting",
-    "dotmac-workflow-runtime",
-    "dotmac-support-access",
-    "dotmac-platform-health",
-    "dotmac-forms",
-    "dotmac-deployment-control",
-    "analytics-reporting",
-    "legacy-dotmac-sub",
-    "dotmac-campaigns",
-    "dotmac-documents",
-    "dotmac-records",
-    "dotmac-content",
-    "dotmac-publishing",
-    "dotmac-sites",
-    "dotmac-surveys",
+    "dotmac-inventory",
+    "dotmac-ipam",
+    "dotmac-kernel",
     "dotmac-media-observations",
-    "dotmac-web-analytics",
+    "dotmac-network-access",
+    "dotmac-network-assurance",
+    "dotmac-network-control",
+    "dotmac-network-inventory",
+    "dotmac-network-observability",
+    "dotmac-network-topology",
+    "dotmac-numbering",
+    "dotmac-orders",
+    "dotmac-party",
+    "dotmac-platform-health",
+    "dotmac-pon-access",
+    "dotmac-positioning",
     "dotmac-procurement",
-    "dotmac-expenses"
+    "dotmac-projects",
+    "dotmac-publishing",
+    "dotmac-qualification",
+    "dotmac-records",
+    "dotmac-referrals",
+    "dotmac-remote-access",
+    "dotmac-reporting",
+    "dotmac-reseller-management",
+    "dotmac-sales",
+    "dotmac-service-access-policy",
+    "dotmac-service-catalog",
+    "dotmac-services",
+    "dotmac-sites",
+    "dotmac-subscriptions",
+    "dotmac-support-access",
+    "dotmac-surveys",
+    "dotmac-tax",
+    "dotmac-template-studio",
+    "dotmac-ticketing",
+    "dotmac-ui",
+    "dotmac-usage",
+    "dotmac-usage-rating",
+    "dotmac-web-analytics",
+    "dotmac-work-orders",
+    "dotmac-workflow-runtime",
+    "dotmac-workforce",
+    "legacy-dotmac-sub"
   ],
   "capability_roster": [
+    {
+      "component_id": "dotmac-assets",
+      "disposition": "retain",
+      "rationale": "dec-isp-006: ERP is the authoritative owner of the general asset estate. ISP's network plant stays with the network modules that already own it; ISP holds opaque references only."
+    },
     {
       "component_id": "dotmac-campaigns",
       "disposition": "replace",
       "rationale": "Sub owns outbound campaign execution today; cutover 1 is already Sub-first in the Starter dossier. Enters a cohort when the Sub campaign writer retirement is scheduled."
-    },
-    {
-      "component_id": "dotmac-documents",
-      "disposition": "retain",
-      "rationale": "Document storage is a shared enabling capability consumed through Files and Document Rendering. ISP composes it only if a cohort names a document writer it owns."
-    },
-    {
-      "component_id": "dotmac-records",
-      "disposition": "retain",
-      "rationale": "Retention/records policy is an enabling capability with no ISP-owned decision in the current cohorts."
     },
     {
       "component_id": "dotmac-content",
@@ -668,19 +650,24 @@
       "rationale": "Editorial content is a marketing-side capability; the Dotmac ERP product is its named first cutover, not ISP."
     },
     {
-      "component_id": "dotmac-publishing",
+      "component_id": "dotmac-deployment-control",
       "disposition": "retain",
-      "rationale": "Publishing targets the Dotmac ERP product as cutover 1; ISP has no publishing authority in scope."
+      "rationale": "dec-isp-005: desired state and rollout evidence are Vendor control-plane authority. ISP is a data plane and consumes the decision rather than owning it."
     },
     {
-      "component_id": "dotmac-sites",
+      "component_id": "dotmac-documents",
       "disposition": "retain",
-      "rationale": "Site builder targets the Dotmac ERP product as cutover 1; no ISP-owned site authority exists."
+      "rationale": "Document storage is a shared enabling capability consumed through Files and Document Rendering. ISP composes it only if a cohort names a document writer it owns."
     },
     {
-      "component_id": "dotmac-surveys",
+      "component_id": "dotmac-expenses",
       "disposition": "retain",
-      "rationale": "Feedback evidence only (ADR-0035); no ISP subject-consequence owner is in scope, so it stays available rather than scheduled."
+      "rationale": "Expenses is an ERP-authoritative back-office domain with no ISP writer in scope."
+    },
+    {
+      "component_id": "dotmac-inventory",
+      "disposition": "retain",
+      "rationale": "dec-isp-006: ERP is the authoritative owner of general inventory. ISP holds opaque references and composes no inventory lineage, so the two products never write the same stock."
     },
     {
       "component_id": "dotmac-media-observations",
@@ -688,9 +675,9 @@
       "rationale": "Adoption PAUSED by Michael on 2026-08-18 and not resumed; it must not enter a cohort while paused."
     },
     {
-      "component_id": "dotmac-web-analytics",
+      "component_id": "dotmac-platform-health",
       "disposition": "retain",
-      "rationale": "First-party website observations; the Dotmac ERP product and Sub are the named independent adopters, not ISP."
+      "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API, for the same platform-surface reason as Support Access."
     },
     {
       "component_id": "dotmac-procurement",
@@ -698,65 +685,117 @@
       "rationale": "Procurement is an ERP-authoritative back-office domain; ISP holds opaque references rather than owning supply."
     },
     {
-      "component_id": "dotmac-expenses",
+      "component_id": "dotmac-publishing",
       "disposition": "retain",
-      "rationale": "Expenses is an ERP-authoritative back-office domain with no ISP writer in scope."
+      "rationale": "Publishing targets the Dotmac ERP product as cutover 1; ISP has no publishing authority in scope."
+    },
+    {
+      "component_id": "dotmac-records",
+      "disposition": "retain",
+      "rationale": "Retention/records policy is an enabling capability with no ISP-owned decision in the current cohorts."
+    },
+    {
+      "component_id": "dotmac-sites",
+      "disposition": "retain",
+      "rationale": "Site builder targets the Dotmac ERP product as cutover 1; no ISP-owned site authority exists."
+    },
+    {
+      "component_id": "dotmac-support-access",
+      "disposition": "retain",
+      "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API. asm-dotmac-isp declares platform_surface_enabled=False and must not grow a platform plane to host it."
+    },
+    {
+      "component_id": "dotmac-surveys",
+      "disposition": "retain",
+      "rationale": "Feedback evidence only (ADR-0035); no ISP subject-consequence owner is in scope, so it stays available rather than scheduled."
+    },
+    {
+      "component_id": "dotmac-web-analytics",
+      "disposition": "retain",
+      "rationale": "First-party website observations; the Dotmac ERP product and Sub are the named independent adopters, not ISP."
     }
   ],
   "open_decisions": [
     {
       "decision_id": "dec-isp-002",
-      "question": "Assign the production deployment owner and any eventual target host for the already named independent Dotmac ISP assembly?",
+      "question": "Name the accountable production deployment owner and the runtime host for the independent Dotmac ISP assembly. `selfcare.dotmac.io` was offered on 2026-08-21 and is REFUSED as stated: it is the live dotmac_sub production host (vmi3348415) and the compiled-in default API base URL of shipped field-mobile store builds, so it names the system being replaced rather than an independent runtime. Answer two things separately: which host runs asm-dotmac-isp and its own database, and whether selfcare.dotmac.io is intended as the eventual cutover destination for customer traffic \u2014 which would repoint every installed mobile client and is a client-compatibility commitment, not a DNS change.",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [
         "ctl-isp-002",
         "cohort-isp-01"
       ]
-    },
+    }
+  ],
+  "resolved_decisions": [
     {
       "decision_id": "dec-isp-003",
       "question": "Approve the enforceable legacy Sub transition rule, including its narrow exception workflow for bounded in-place module adoption that retires one local writer?",
       "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "ctl-isp-003"
+      "resolution": "Approved. The legacy Sub transition rule is: no new cohort writer and no growth of an existing one; bounded in-place module adoption is admitted only when it retires a local writer. Enforcement is the two-directional cohort writer ratchets in dotmac_sub, which fail the build on an added or grown writer and on a removed writer whose baseline was not lowered in the same change.",
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+          "subject": "Decision amendment answering dec-isp-003"
+        }
       ]
     },
     {
       "decision_id": "dec-isp-004",
       "question": "Adjudicate the reusable analytics and reporting owner before the final cohort starts?",
       "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "cohort-isp-08"
+      "resolution": "Split into two owners. Analytics owns semantic measures and derived analytical datasets. Reporting owns saved reports, execution, scheduling, exports and delivery. The `analytics-reporting` placeholder is replaced by `dotmac-analytics` and `dotmac-reporting` in cohort 8; neither is an unassigned adjudication any longer.",
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+          "subject": "Decision amendment answering dec-isp-004"
+        }
       ]
     },
     {
       "decision_id": "dec-isp-005",
-      "question": "Cohort 7 assigns three platform-plane modules — Support Access, Platform Health and Deployment Control — to the Dotmac ISP assembly, which declares platform_surface_enabled=False and can therefore never compose them. Treat all three as external control-plane dependencies consumed over versioned APIs, or introduce a separately governed supported platform assembly as their target?",
+      "question": "Cohort 7 assigns three platform-plane modules \u2014 Support Access, Platform Health and Deployment Control \u2014 to the Dotmac ISP assembly, which declares platform_surface_enabled=False and can therefore never compose them. Treat all three as external control-plane dependencies consumed over versioned APIs, or introduce a separately governed supported platform assembly as their target?",
       "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "cohort-isp-07"
+      "resolution": "All three remain EXTERNAL Vendor-control-plane dependencies consumed over versioned APIs. Support Access, Platform Health and Deployment Control leave cohort 7 and are rostered `retain`. No supported platform assembly is introduced, and `asm-dotmac-isp` keeps platform_surface_enabled=False rather than growing a platform plane it would then have to govern.",
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+          "subject": "Decision amendment answering dec-isp-005"
+        }
       ]
     },
     {
       "decision_id": "dec-isp-006",
       "question": "Inventory and Assets are adopted by ISP in cohort 3, while their Starter extraction dossiers name ERP as first cutover. Does ISP own a separate network stock and asset estate, or does it hold opaque references to ERP-owned stock and assets? Both products composing these lineages as parallel writers is refused either way.",
       "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "cohort-isp-03"
+      "resolution": "ERP owns general Inventory and Assets; ISP holds opaque references only. Both leave cohort 3 and are rostered `retain`. ISP's network stock and plant estate stay with the network modules that already own them; ISP composes neither lineage, so the refused parallel-writer shape cannot arise.",
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+          "subject": "Decision amendment answering dec-isp-006"
+        }
       ]
     },
     {
       "decision_id": "dec-isp-007",
       "question": "Cohort 1 maps Sub customer contacts, addresses, organizations and organization memberships onto Customers. Organizations and memberships normally resolve through Party capacities; postal addresses and customer-contact linkage have no named owner at all. Name the owner for each, or approve a product-owned link contract.",
       "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "cohort-isp-01"
+      "resolution": "Four owners, no product-owned link contract. Party owns organization capacities, memberships and reachability. Customers owns the account-to-Party binding. A new product-first `dotmac-addresses` owner owns normalized address, geospatial data and verification history. Customers, Services and Billing hold typed purpose links to address identities rather than copies of them.",
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+          "subject": "Decision amendment answering dec-isp-007"
+        }
       ]
     }
   ]

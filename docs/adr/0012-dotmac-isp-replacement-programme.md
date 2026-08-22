@@ -368,6 +368,104 @@ maintenance window measured against customer traffic.
   one never will be, so leaving it there is a permanent silent block on the
   whole programme.
 
+## Capability amendment — 2026-08-22: four owners added, five capabilities scheduled
+
+Michael Ayoade directed this amendment on 2026-08-22 from a journey audit of Sub
+against Starter `origin/main` and the ISP conversion matrix. It adds programme
+scope and corrects two roster rationales that were factually wrong. It moves no
+authority, opens no cohort and verifies no control.
+
+### Four new owners
+
+Each is narrower than the journey it closes, and each is being built to fix a
+source defect rather than port it. Kernel `0.1.0a91` carries their ledger
+allocations — fourteen allocations, zero behaviour.
+
+| Owner | Prefix | Cohort | Journey | Defect NOT ported |
+|---|---|---|---|---|
+| `dotmac-service-orders` | `so` | 4 | Installation, provisioning, activation readiness, customer handoff | Sub reads Projects/Tasks/Work Orders/IP Assignments to build readiness checks; the module takes normalized observations from the caller instead |
+| `dotmac-payments` | `pm` | 5 | Top-up/payment intent, transfer proof, gateway observation and routing | Active `external_id` uniqueness was partial on `provider_id IS NOT NULL`, leaving CRM-origin payments able to double-record cash |
+| `dotmac-service-changes` | `sch` | 6 | Plan change, relocation, vacation hold/resume, reprovisioning | `execution_state` written by several handlers with no guard — a request could reach `fulfillment_released` with no settlement recorded |
+| `dotmac-operational-escalations` | `oe` | 6 | Ticket, outage and Inbox escalation | A mutable policy row silently rewrote the terms every open escalation had been raised under |
+
+Boundaries, so none of them grows into its neighbours: Service Orders owns the
+service-delivery order and readiness decision while commercial Orders,
+Fulfillment mechanics, Work Orders and realized Services stay separate; Payments
+owns intent and confirmation correlation while Billing owns receivables and
+settlement allocation, Banking owns accounts and Integrator owns provider
+transport; Service Changes owns the durable customer request, evidence and
+checkpoints across Qualification, Billing, Fulfillment, Services and Access;
+Operational Escalations owns versioned policy, instances, acknowledgement and
+cancellation while Timers provide scheduling and delivery stays with
+Messaging/Integrator.
+
+Ordering follows the dependencies rather than the priority list: Service Orders
+requires Work Orders (cohort 4); Payments requires Billing (cohort 5); Service
+Changes requires Qualification, Billing, Fulfillment, Services and Access
+Policy, so it cannot precede cohort 5 and lands in 6; Operational Escalations
+requires Durable Timers, Ticketing and Inbox Operations.
+
+### Five rostered capabilities become cohort members
+
+A roster disposition records that the question was answered. For these five the
+answer was wrong or stale, and two of them contradicted the modules' own
+checked-in dossiers.
+
+| Capability | Was | Now | Why |
+|---|---|---|---|
+| `dotmac-records` | `retain` | cohort 1, `adopt` | Owns retention, legal holds and disposition authority. The cohort-1 account-lifecycle slice needs exactly that for deletion eligibility and purge authorization. |
+| `dotmac-documents` | `retain` | cohort 5, `adopt` | Controlled legal terms and customer agreements; joins Files and Document Rendering, which are already there. |
+| `dotmac-surveys` | `retain` | cohort 6, `adopt` | **The rationale was contradicted by the module.** |
+| `dotmac-campaigns` | `replace` | cohort 6, `adopt` | Already `replace` with Sub-first cutover, and "enters a cohort when the Sub campaign writer retirement is scheduled". This schedules it. |
+| `dotmac-expenses` | `retain` | cohort 6, `adopt` | **The rationale was contradicted by the module.** |
+
+### Two rationales were factually wrong
+
+Both are the same failure the drift-prevention clause exists to catch — two
+controlled records disagreeing — and neither was caught, because nothing
+compares a roster rationale against the module dossier it describes.
+
+**`dotmac-expenses`** was rostered `retain` because *"Expenses is an
+ERP-authoritative back-office domain with no ISP writer in scope."* Its own
+dossier names `dotmac_sub` in `source_repositories` with a pinned revision, and
+its `local_copy_retirement` requires *"two-directional ratchets reach zero for
+… CRM/**Sub** request/line writers"*. Sub has writers that must retire; the
+rationale said there were none.
+
+**`dotmac-surveys`** was rostered `retain` because *"no ISP subject-consequence
+owner is in scope, so it stays available rather than scheduled."* Its dossier
+opens *"**dotmac_sub is cutover 1**"*, carries a full Sub adoption plan naming
+the Sub writers to retire, and its `next_action` is *"land Sub's expand
+migration and typed composition adapter as the first adoption slice."* Sub is
+its first cutover; the rationale said nothing was scheduled.
+
+ERP remains the qualifying implementation source for Expenses and cutover 2 for
+Surveys. Neither correction changes those; what changes is that Sub's own
+retirement is now scheduled instead of denied.
+
+### `dotmac-records` in cohort 1 is the placement to challenge first
+
+It is the least comfortable entry here and is recorded as such rather than
+presented as settled. Records' own dossier names ERP as its first cutover, and
+this schedules its Sub adoption in the programme's earliest cohort because the
+account-lifecycle slice cannot complete without disposition authority.
+
+Those are not in conflict — a module's adoption plan and a programme's cohort
+ordering are different records — but the consequence is real: cohort 1 now
+cannot close until a module with destructive authority is adopted. If that is
+the wrong trade, the alternative is to keep Sub's existing purge behaviour
+until a later cohort, which means keeping a purge that
+[destroys nothing](https://github.com/michaelayoade/dotmac_starter_mt/blob/main/docs/inventories/subscriber-account-disposition-sources.md)
+while the account it marks purged retains every byte of personal data.
+
+### What this amendment does not do
+
+It schedules capabilities; it does not authorize implementation. Every one of
+the four new owners needs a completed rule-24 product-first dossier before its
+shared behaviour is built, and the five newly scheduled capabilities keep
+whatever adoption gates their own dossiers already declare. No control advances
+and no cohort opens.
+
 ## Consequences
 
 - This record and matrix are normative for programme ordering and control

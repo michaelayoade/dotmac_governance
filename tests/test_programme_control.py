@@ -572,20 +572,41 @@ class ProgrammeControlTests(unittest.TestCase):
         assert scope == in_cohorts | rostered
         assert not in_cohorts & rostered
         assert "dotmac-work-orders" in in_cohorts
-        for previously_unclaimed in (
-            "dotmac-campaigns",
-            "dotmac-documents",
+
+        # The eleven capabilities the 2026-08-21 ordering amendment rescued
+        # from silence. Five were SCHEDULED on 2026-08-22 and six still hold a
+        # roster disposition; both halves are pinned, because the property that
+        # matters is that each is disposed of deliberately in exactly one
+        # place, not which place it happens to be in today.
+        for scheduled in (
             "dotmac-records",
+            "dotmac-documents",
+            "dotmac-surveys",
+            "dotmac-campaigns",
+            "dotmac-expenses",
+        ):
+            assert scheduled in in_cohorts, scheduled
+        for still_rostered in (
             "dotmac-content",
             "dotmac-publishing",
             "dotmac-sites",
-            "dotmac-surveys",
             "dotmac-media-observations",
             "dotmac-web-analytics",
             "dotmac-procurement",
-            "dotmac-expenses",
         ):
-            assert previously_unclaimed in rostered
+            assert still_rostered in rostered, still_rostered
+
+        # The four owners added on 2026-08-22 are scoped and scheduled, never
+        # scoped and forgotten — the failure mode that made `capability_scope`
+        # necessary in the first place.
+        for added in (
+            "dotmac-service-orders",
+            "dotmac-payments",
+            "dotmac-service-changes",
+            "dotmac-operational-escalations",
+        ):
+            assert added in scope, added
+            assert added in in_cohorts, added
 
     def test_open_decision_unknown_block_target_fails_sensitivity(self) -> None:
         payload = valid_matrix()

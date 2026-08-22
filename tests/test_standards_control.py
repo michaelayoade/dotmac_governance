@@ -254,6 +254,22 @@ class InboxTeamRoundRobinCursor:
     last_assigned_person_id: str = ""
     rotation_count: int = 0
 """
+# The same miscount one word over: a workflow engine's durable position inside
+# an INTERNAL execution. Keyed on the execution and an ordinal, in a module
+# importing nothing but the kernel, SQLAlchemy and stdlib — no feed, no
+# watermark, no external system. `WorkflowCheckpoint` in dotmac-workflow-runtime.
+WORKFLOW_EXECUTION_CHECKPOINT = """\
+class WorkflowCheckpoint:
+    execution_id: str = ""
+    code: str = ""
+    position: int = 0
+"""
+# Same word, opposite verdict: this one names the feed it is a position in.
+FEED_CHECKPOINT = """\
+class ProviderSyncCheckpoint:
+    position: str = ""
+"""
+
 LOOKALIKE_PAGINATION_CURSOR = """\
 class PaginationCursor:
     offset: int = 0
@@ -3019,6 +3035,40 @@ class StandardsTests(unittest.TestCase):
         """Same word, opposite verdict: naming the feed is the whole rule."""
         self.assertEqual(
             self.exceeded_categories(self.connector_report(runtime=FEED_CURSOR)),
+            {"sync_checkpoint"},
+        )
+
+    def test_an_internal_workflow_checkpoint_is_not_a_sync_checkpoint(self) -> None:
+        """`checkpoint` alone is a spelling, not evidence of an external feed.
+
+        Third instance of one error class, after `AsyncCursor` and
+        `InboxTeamRoundRobinCursor`. A workflow engine's `WorkflowCheckpoint`
+        is a durable position inside an internal execution; counting it said a
+        product had grown an external-connector surface when it had grown a
+        state machine. It blocked a real seven-module landing in
+        `dotmac_starter_mt` on a number that described nothing.
+        """
+        report = self.connector_report(runtime=WORKFLOW_EXECUTION_CHECKPOINT)
+
+        self.assertTrue(report.conforms, report.to_dict())
+
+    def test_a_bare_checkpoint_counts_once_it_names_a_feed(self) -> None:
+        """The recall half: narrowing the hint must not blind the rule."""
+        self.assertEqual(
+            self.exceeded_categories(self.connector_report(runtime=FEED_CHECKPOINT)),
+            {"sync_checkpoint"},
+        )
+
+    def test_a_polling_checkpoint_still_counts(self) -> None:
+        """The row this rule must never stop seeing.
+
+        `PollingCheckpoint` in `dotmac-integration` is a real external-feed
+        watermark and one of the sources the starter baseline already counts.
+        If narrowing `checkpoint` dropped it, the ratchet would fall silently —
+        which the two-directional rule treats as a failure in its own right.
+        """
+        self.assertEqual(
+            self.exceeded_categories(self.connector_report(runtime=PLANTED_CHECKPOINT)),
             {"sync_checkpoint"},
         )
 

@@ -1539,8 +1539,23 @@ def _hint_pattern(hint: str) -> re.Pattern[str]:
 #: (`InboxTeamRoundRobinCursor` in dotmac_sub), which has no feed, no watermark
 #: and no external system anywhere near it. A bare `*Cursor` must therefore also
 #: name the feed it is a position in.
-FEED_CHECKPOINT_CLASS_HINTS = ("checkpoint", "syncstate", "synccursor")
-AMBIGUOUS_CHECKPOINT_CLASS_HINTS = ("cursor",)
+#: `syncstate` and `synccursor` name durable progress over a STREAM outright,
+#: so they stand alone. `checkpoint` does NOT, and treating it as standalone
+#: evidence was the same error already fixed twice here: a workflow engine's
+#: `WorkflowCheckpoint` is a durable position inside an INTERNAL execution —
+#: keyed on `(execution_id, code)` and `(execution_id, position)`, in a module
+#: importing nothing but the kernel, SQLAlchemy and stdlib — with no feed, no
+#: watermark and no external system anywhere near it. That is
+#: `InboxTeamRoundRobinCursor` again, and `AsyncCursor` before it: a spelling
+#: taken for evidence.
+#:
+#: So `checkpoint` joins `cursor` in the ambiguous set and must also name the
+#: feed it is a position in. Recall is unaffected in the cases that matter —
+#: `PollingCheckpoint` still counts through `poll`, `SyncCheckpoint` through
+#: `sync` — and the COLUMN net below is untouched, so anything that actually
+#: stores a watermark counts whatever its class is called.
+FEED_CHECKPOINT_CLASS_HINTS = ("syncstate", "synccursor")
+AMBIGUOUS_CHECKPOINT_CLASS_HINTS = ("cursor", "checkpoint")
 #: `meta_` is a provider prefix in a SETTINGS name but an ordinary programming
 #: prefix in a CLASS name (`MetadataCursor`), so it does not qualify a cursor.
 NOT_A_CLASS_NAME_PROVIDER = frozenset({"meta_"})

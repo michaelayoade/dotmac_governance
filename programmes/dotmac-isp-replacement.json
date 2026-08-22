@@ -281,11 +281,6 @@
           "disposition": "release"
         },
         {
-          "component_id": "dotmac-records",
-          "owner_id": "dotmac-records",
-          "disposition": "adopt"
-        },
-        {
           "component_id": "dotmac-ui",
           "owner_id": "dotmac-ui",
           "disposition": "reuse"
@@ -575,6 +570,16 @@
             "dotmac-durable-timers",
             "dotmac-ticketing",
             "dotmac-inbox-operations"
+          ]
+        },
+        {
+          "component_id": "dotmac-records",
+          "owner_id": "dotmac-records",
+          "disposition": "adopt",
+          "requires": [
+            "dotmac-durable-timers",
+            "dotmac-files",
+            "dotmac-approvals"
           ]
         },
         {

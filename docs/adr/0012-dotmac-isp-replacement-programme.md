@@ -443,20 +443,39 @@ ERP remains the qualifying implementation source for Expenses and cutover 2 for
 Surveys. Neither correction changes those; what changes is that Sub's own
 retirement is now scheduled instead of denied.
 
-### `dotmac-records` in cohort 1 is the placement to challenge first
+### `dotmac-records` was placed in cohort 1 and that was wrong
 
-It is the least comfortable entry here and is recorded as such rather than
-presented as settled. Records' own dossier names ERP as its first cutover, and
-this schedules its Sub adoption in the programme's earliest cohort because the
-account-lifecycle slice cannot complete without disposition authority.
+Corrected the same day. It is recorded rather than rewritten, because the error
+is an ordering defect of a class this programme has already been bitten by once.
 
-Those are not in conflict — a module's adoption plan and a programme's cohort
-ordering are different records — but the consequence is real: cohort 1 now
-cannot close until a module with destructive authority is adopted. If that is
-the wrong trade, the alternative is to keep Sub's existing purge behaviour
-until a later cohort, which means keeping a purge that
-[destroys nothing](https://github.com/michaelayoade/dotmac_starter_mt/blob/main/docs/inventories/subscriber-account-disposition-sources.md)
-while the account it marks purged retains every byte of personal data.
+The reasoning for cohort 1 was that the account-lifecycle slice cannot complete
+without disposition authority. That is true and it is not sufficient: it asks
+where Records is NEEDED and never asks what Records itself REQUIRES.
+
+Its contract needs Durable Timers to return review requests, Files to authorize
+destruction and finalize from physical confirmation, and Approvals to bind the
+disposition digest. Those land in cohorts 4, 5 and 6. Scheduling Records in
+cohort 1 therefore schedules the whole owner **before the capabilities its
+destructive contract is exercised through**, with no later activation gate — so
+either the cohort cannot close, or it closes with the contract unexercised and
+nothing scheduled to exercise it afterwards.
+
+This is the `dotmac-fulfillment` / `dotmac-durable-timers` defect again: cohort
+edges order the SWITCHES, and until a component declares `requires` nothing
+orders the CAPABILITIES. The check exists; it was not used.
+
+**Records moves to cohort 6**, requiring Durable Timers, Files and Approvals.
+Same-cohort requirement of Approvals is permitted — a cohort is one sealed
+switch whose members cut over together.
+
+**Cohort 1 adopts Customers' deletion and restoration state with terminal
+destruction disabled.** The account lifecycle it needs — request, execute,
+restore, and the eligibility that governs them — belongs to Customers and is
+available in cohort 1. What waits for cohort 6 is only the destruction itself,
+which Sub does not perform today in any case: its
+[purge destroys nothing](https://github.com/michaelayoade/dotmac_starter_mt/blob/main/docs/inventories/subscriber-account-disposition-sources.md)
+and merely stamps a flag that blocks restore. Deferring destruction to the
+cohort that can govern it defers nothing that currently happens.
 
 ### What this amendment does not do
 

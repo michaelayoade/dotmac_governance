@@ -718,7 +718,7 @@
   "open_decisions": [
     {
       "decision_id": "dec-isp-002",
-      "question": "Name the accountable production deployment owner and the runtime host for the independent Dotmac ISP assembly. `selfcare.dotmac.io` was offered on 2026-08-21 and is REFUSED as stated: it is the live dotmac_sub production host (vmi3348415) and the compiled-in default API base URL of shipped field-mobile store builds, so it names the system being replaced rather than an independent runtime. Answer two things separately: which host runs asm-dotmac-isp and its own database, and whether selfcare.dotmac.io is intended as the eventual cutover destination for customer traffic \u2014 which would repoint every installed mobile client and is a client-compatibility commitment, not a DNS change.",
+      "question": "Name the accountable production deployment owner and the runtime host for the independent Dotmac ISP assembly. TWO hosts have now been offered and both are REFUSED as stated, for the same reason: each is already carrying live production traffic for a different system. (1) `selfcare.dotmac.io` (2026-08-21) is the live dotmac_sub production host (vmi3348415) and the compiled-in default API base URL of shipped field-mobile store builds, so it names the system being replaced rather than an independent runtime. (2) `158.220.82.88` (2026-08-22) is `ns3.dotmac.ng` (vmi3519229), a live PowerDNS authoritative secondary and one of three nodes serving the `dotmac.ng` zone; placing an application runtime or a test database on it puts DNS resolution for the whole estate behind an unrelated workload. Answer two things separately: which host runs asm-dotmac-isp and its own database — it must be a host with no existing production role — and whether `selfcare.dotmac.io` is intended as the eventual cutover destination for customer traffic, which would repoint every installed mobile client and is a client-compatibility commitment, not a DNS change.",
       "owner": "Michael Ayoade",
       "state": "open",
       "blocks": [
@@ -758,7 +758,7 @@
     },
     {
       "decision_id": "dec-isp-005",
-      "question": "Cohort 7 assigns three platform-plane modules \u2014 Support Access, Platform Health and Deployment Control \u2014 to the Dotmac ISP assembly, which declares platform_surface_enabled=False and can therefore never compose them. Treat all three as external control-plane dependencies consumed over versioned APIs, or introduce a separately governed supported platform assembly as their target?",
+      "question": "Cohort 7 assigns three platform-plane modules — Support Access, Platform Health and Deployment Control — to the Dotmac ISP assembly, which declares platform_surface_enabled=False and can therefore never compose them. Treat all three as external control-plane dependencies consumed over versioned APIs, or introduce a separately governed supported platform assembly as their target?",
       "owner": "Michael Ayoade",
       "resolution": "All three remain EXTERNAL Vendor-control-plane dependencies consumed over versioned APIs. Support Access, Platform Health and Deployment Control leave cohort 7 and are rostered `retain`. No supported platform assembly is introduced, and `asm-dotmac-isp` keeps platform_surface_enabled=False rather than growing a platform plane it would then have to govern.",
       "evidence_refs": [

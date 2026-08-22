@@ -84,7 +84,19 @@ RESOLVED_DECISION_FIELDS = frozenset(
 
 PROGRAMME_STATUSES = frozenset({"proposed", "accepted", "active", "complete"})
 CONTROL_STATES = frozenset(
-    {"pending-approval", "blocked", "not-started", "in-progress", "verified"}
+    {
+        "pending-approval",
+        "blocked",
+        "not-started",
+        "in-progress",
+        "verified",
+        # A control whose PREMISE was removed by a later accepted amendment.
+        # Distinct from every other state: the others say how far the control
+        # got, this one says the question stopped applying. Deleting the row
+        # instead would discard the identifier, its history and the revision
+        # that retired it — the same loss `resolved_decisions` exists to stop.
+        "superseded",
+    }
 )
 COHORT_STATES = frozenset({"blocked", "not-started", "in-progress", "verified"})
 DISPOSITIONS = frozenset({"adjudicate", "adopt", "build", "release", "reuse", "retire"})
@@ -258,7 +270,13 @@ def _validate_authority(
         _enum(
             target,
             "database_boundary",
-            frozenset({"independent"}),
+            # `independent` is a separate database reached over a network.
+            # `shared-in-process` is the same database as the source, with
+            # isolation by module schema and one authority per fact rather
+            # than by database. The second admits an in-place conversion; it
+            # does NOT admit two writers, which the cutover controls still
+            # forbid.
+            frozenset({"independent", "shared-in-process"}),
             "authority.target",
             errors,
         )
@@ -431,6 +449,14 @@ def _validate_controls(
             _validate_evidence(evidence, f"{location}.evidence_refs", errors)
         if state == "verified" and not evidence:
             errors.append(f"{location}: verified control has no evidence_refs")
+        if state == "superseded" and not evidence:
+            # Same bar as `verified`, for the same reason: a state that ends a
+            # control's life must cite the immutable revision that ended it, or
+            # the matrix cannot say who retired the question or when.
+            errors.append(
+                f"{location}: superseded control has no evidence_refs naming "
+                "the amendment that removed its premise"
+            )
         if state == "blocked" and not depends_on:
             errors.append(f"{location}: blocked control must name depends_on")
         if control_id is not None:
@@ -445,6 +471,19 @@ def _validate_controls(
                 )
             if dependency == control_id:
                 errors.append(f"control {control_id!r}: depends on itself")
+            # A live control gated on a superseded one can never open: nothing
+            # will ever advance the dependency, because its question no longer
+            # applies. Superseding a control therefore forces its dependents to
+            # be re-pointed in the same change, which is the edit most likely
+            # to be forgotten.
+            if (
+                states.get(dependency) == "superseded"
+                and states.get(control_id) != "superseded"
+            ):
+                errors.append(
+                    f"control {control_id!r}: depends on superseded control "
+                    f"{dependency!r}; re-point it or supersede this control too"
+                )
     cycle = _cycle_nodes(dependencies)
     if cycle:
         errors.append(f"control dependency cycle: {', '.join(cycle)}")
@@ -851,6 +890,16 @@ def validate_matrix(path: Path) -> list[str]:
         if control_id not in control_ids:
             errors.append(
                 f"{path.name}.cutover_control_ids: unknown control {control_id!r}"
+            )
+        # A cohort may only reach `in-progress` once every cutover control is
+        # `verified`, and a superseded control never will be. Left in this list
+        # it is a permanent, silent block on the whole programme — the gate
+        # would read as "not ready yet" forever rather than as a stale entry.
+        if control_states.get(control_id) == "superseded":
+            errors.append(
+                f"{path.name}.cutover_control_ids: {control_id!r} is superseded "
+                "and can never be verified; remove it from the cutover gate in "
+                "the change that supersedes it"
             )
 
     cohort_ids = _validate_cohorts(

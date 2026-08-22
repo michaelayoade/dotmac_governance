@@ -75,6 +75,34 @@
       "revision": "fcdecad3a06ef0b2567ccb7892364d6f60cd4215",
       "path": "docs/inventories/fleet-decomposition-matrix.md",
       "role": "measured-evidence"
+    },
+    {
+      "record_id": "rec-dossier-web-analytics",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "c7fd24d63eeaf77c50aeb41e9260bfb872e5cc6a",
+      "path": "packages/dotmac-web-analytics/EXTRACTION.toml",
+      "role": "module-dossier"
+    },
+    {
+      "record_id": "rec-dossier-expenses",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "c7fd24d63eeaf77c50aeb41e9260bfb872e5cc6a",
+      "path": "packages/dotmac-expenses/EXTRACTION.toml",
+      "role": "module-dossier"
+    },
+    {
+      "record_id": "rec-dossier-surveys",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "c7fd24d63eeaf77c50aeb41e9260bfb872e5cc6a",
+      "path": "packages/dotmac-surveys/EXTRACTION.toml",
+      "role": "module-dossier"
+    },
+    {
+      "record_id": "rec-dossier-records",
+      "repository": "https://github.com/michaelayoade/dotmac_starter_mt",
+      "revision": "c7fd24d63eeaf77c50aeb41e9260bfb872e5cc6a",
+      "path": "packages/dotmac-records/EXTRACTION.toml",
+      "role": "module-dossier"
     }
   ],
   "cutover_control_ids": [
@@ -779,57 +807,70 @@
     {
       "component_id": "dotmac-assets",
       "disposition": "retain",
-      "rationale": "dec-isp-006: ERP is the authoritative owner of the general asset estate. ISP's network plant stays with the network modules that already own it; ISP holds opaque references only."
+      "rationale": "dec-isp-006: ERP is the authoritative owner of the general asset estate. ISP's network plant stays with the network modules that already own it; ISP holds opaque references only.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-content",
       "disposition": "retain",
-      "rationale": "Editorial content is a marketing-side capability; the Dotmac ERP product is its named first cutover, not ISP."
+      "rationale": "Editorial content is a marketing-side capability; the Dotmac ERP product is its named first cutover, not ISP.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-deployment-control",
       "disposition": "retain",
-      "rationale": "dec-isp-005: desired state and rollout evidence are Vendor control-plane authority. ISP is a data plane and consumes the decision rather than owning it."
+      "rationale": "dec-isp-005: desired state and rollout evidence are Vendor control-plane authority. ISP is a data plane and consumes the decision rather than owning it.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-inventory",
       "disposition": "retain",
-      "rationale": "dec-isp-006: ERP is the authoritative owner of general inventory. ISP holds opaque references and composes no inventory lineage, so the two products never write the same stock."
+      "rationale": "dec-isp-006: ERP is the authoritative owner of general inventory. ISP holds opaque references and composes no inventory lineage, so the two products never write the same stock.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-media-observations",
       "disposition": "retain",
-      "rationale": "Adoption PAUSED by Michael on 2026-08-18 and not resumed; it must not enter a cohort while paused."
+      "rationale": "Adoption PAUSED by Michael on 2026-08-18 and not resumed; it must not enter a cohort while paused.",
+      "rationale_code": "paused_by_decision"
     },
     {
       "component_id": "dotmac-platform-health",
       "disposition": "retain",
-      "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API, for the same platform-surface reason as Support Access."
+      "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API, for the same platform-surface reason as Support Access.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-procurement",
       "disposition": "retain",
-      "rationale": "Procurement is an ERP-authoritative back-office domain; ISP holds opaque references rather than owning supply."
+      "rationale": "Procurement is an ERP-authoritative back-office domain; ISP holds opaque references rather than owning supply.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-publishing",
       "disposition": "retain",
-      "rationale": "Publishing targets the Dotmac ERP product as cutover 1; ISP has no publishing authority in scope."
+      "rationale": "Publishing targets the Dotmac ERP product as cutover 1; ISP has no publishing authority in scope.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-sites",
       "disposition": "retain",
-      "rationale": "Site builder targets the Dotmac ERP product as cutover 1; no ISP-owned site authority exists."
+      "rationale": "Site builder targets the Dotmac ERP product as cutover 1; no ISP-owned site authority exists.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-support-access",
       "disposition": "retain",
-      "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API. asm-dotmac-isp declares platform_surface_enabled=False and must not grow a platform plane to host it."
+      "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API. asm-dotmac-isp declares platform_surface_enabled=False and must not grow a platform plane to host it.",
+      "rationale_code": "external_authority"
     },
     {
       "component_id": "dotmac-web-analytics",
       "disposition": "retain",
-      "rationale": "First-party website observations; the Dotmac ERP product and Sub are the named independent adopters, not ISP."
+      "rationale": "First-party website observations. Sub adopts the released module and has NO writer to retire — its dossier states “No qualifying first-party writer exists to port” and retires only CRM's chat-widget analytics. The previous rationale said Sub was an adopter “not ISP”, which the 2026-08-22 conversion amendment made self-contradictory: Sub IS the ISP product. Nothing to schedule is not the same as nothing to do, and this is the former.",
+      "rationale_code": "no_product_writer",
+      "subject_repository": "dotmac_sub",
+      "evidence_record_id": "rec-dossier-web-analytics"
     }
   ],
   "open_decisions": [],

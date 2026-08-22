@@ -68,7 +68,38 @@ COMPONENT_FIELDS = frozenset({"component_id", "owner_id", "disposition"})
 # Optional because "declares no sibling requirement" is the common, correct
 # state; see `_strict_fields`.
 COMPONENT_OPTIONAL_FIELDS = frozenset({"requires"})
-ROSTER_FIELDS = frozenset({"component_id", "disposition", "rationale"})
+ROSTER_FIELDS = frozenset(
+    {"component_id", "disposition", "rationale", "rationale_code"}
+)
+
+#: Required only for `no_product_writer`, forbidden otherwise — a scope
+#: judgement has no subject product and no dossier that could settle it.
+ROSTER_CLAIM_FIELDS = frozenset({"subject_repository", "evidence_record_id"})
+
+#: Why a capability holds its roster disposition, as a closed vocabulary.
+#:
+#: A rationale is prose making a factual claim about ANOTHER repository, and
+#: prose cannot be compared to anything. Two entries in this programme asserted
+#: that Sub had no writer and nothing scheduled while Sub's own Starter dossiers
+#: named Sub writers requiring retirement and Sub as cutover 1. Both survived
+#: review, because the only thing that could have refuted them was a sentence in
+#: a different repository at a different revision.
+#:
+#: `no_product_writer` is the member that makes a refutable claim, so it is the
+#: one this module checks. The others record judgements about scope that no
+#: dossier can settle.
+ROSTER_RATIONALE_CODES = frozenset(
+    {
+        # "the named product does not write this capability" — CHECKED.
+        "no_product_writer",
+        # Available to compose; the programme owns no decision in it.
+        "enabling_capability",
+        # Another application owns the authority outright.
+        "external_authority",
+        # Deliberately paused by an accepted decision.
+        "paused_by_decision",
+    }
+)
 # A capability that is not carried by a cohort must still be disposed of
 # explicitly. These are the only three ways to do that.
 ROSTER_DISPOSITIONS = frozenset({"retain", "replace", "retire"})
@@ -101,7 +132,16 @@ CONTROL_STATES = frozenset(
 COHORT_STATES = frozenset({"blocked", "not-started", "in-progress", "verified"})
 DISPOSITIONS = frozenset({"adjudicate", "adopt", "build", "release", "reuse", "retire"})
 RECORD_ROLES = frozenset(
-    {"governing-decision", "measured-evidence", "technical-source"}
+    {
+        "governing-decision",
+        "measured-evidence",
+        "technical-source",
+        # An `EXTRACTION.toml` carrying typed product writer claims. Its own
+        # role, because `technical-source` is prose a human reads and this is
+        # data a check reads — pinning them the same way hides which records the
+        # control can actually consult.
+        "module-dossier",
+    }
 )
 TRACK_ROLES = frozenset({"source-cutover", "target-construction"})
 
@@ -337,10 +377,18 @@ def _validate_tracks(
         errors.append(f"tracks: missing required roles: {', '.join(missing_roles)}")
 
 
-def _validate_records(root: JsonObject, errors: list[str]) -> None:
+def _validate_records(root: JsonObject, errors: list[str]) -> set[str]:
+    """Validate the controlled records and return the `module-dossier` ids.
+
+    Those ids are what a `no_product_writer` roster claim must cite. Returning
+    them rather than re-deriving them elsewhere keeps one reading of what
+    counts as a dossier record.
+    """
+
+    dossier_ids: set[str] = set()
     records = _array(root.get("records"), "records", errors)
     if records is None:
-        return
+        return dossier_ids
     if not records:
         errors.append("records: expected at least one controlled record")
     seen: set[str] = set()
@@ -365,10 +413,31 @@ def _validate_records(root: JsonObject, errors: list[str]) -> None:
                 f"{location}.revision: must be SELF or a 40-character lower-case "
                 "Git revision"
             )
+        role = record.get("role")
+        if role == "module-dossier":
+            if record_id is not None:
+                dossier_ids.add(record_id)
+            # A dossier is read by a check, not by a person, so it must be
+            # pinned to an exact tree and point at the file the check parses.
+            if revision == "SELF":
+                errors.append(
+                    f"{location}.revision: a 'module-dossier' record is read at an "
+                    "exact external revision and can never be SELF"
+                )
+            dossier_path = record.get("path")
+            if isinstance(dossier_path, str) and not dossier_path.endswith(
+                "EXTRACTION.toml"
+            ):
+                errors.append(
+                    f"{location}.path: a 'module-dossier' record must point at an "
+                    "EXTRACTION.toml; prose is not a typed claim"
+                )
+
         path = _string(record, "path", location, errors)
         if path is not None and (path.startswith("/") or ".." in Path(path).parts):
             errors.append(f"{location}.path: expected a repository-relative path")
         _enum(record, "role", RECORD_ROLES, location, errors)
+    return dossier_ids
 
 
 def _validate_evidence(values: list[object], location: str, errors: list[str]) -> None:
@@ -693,7 +762,9 @@ def _validate_cohorts(
     return seen
 
 
-def _validate_capability_roster(root: JsonObject, errors: list[str]) -> None:
+def _validate_capability_roster(
+    root: JsonObject, dossier_record_ids: set[str], errors: list[str]
+) -> None:
     """Every in-scope capability is carried by a cohort or explicitly disposed.
 
     The ordering checks catch a component scheduled ahead of what it needs, and
@@ -737,11 +808,44 @@ def _validate_capability_roster(root: JsonObject, errors: list[str]) -> None:
         entry = _object(value, location, errors)
         if entry is None:
             continue
-        _strict_fields(entry, ROSTER_FIELDS, location, errors)
+        _strict_fields(
+            entry, ROSTER_FIELDS, location, errors, optional=ROSTER_CLAIM_FIELDS
+        )
         component_id = _identifier(entry, "component_id", location, errors)
         _enum(entry, "disposition", ROSTER_DISPOSITIONS, location, errors)
         # A disposition with no reason is how "retain" becomes a shrug.
         _string(entry, "rationale", location, errors)
+        code = _enum(entry, "rationale_code", ROSTER_RATIONALE_CODES, location, errors)
+        # `no_product_writer` is the only code asserting a fact another
+        # repository can refute, so it is the only one that must say WHICH
+        # product and cite the dossier record that settles it.
+        if code == "no_product_writer":
+            for required in sorted(ROSTER_CLAIM_FIELDS - entry.keys()):
+                errors.append(
+                    f"{location}: a 'no_product_writer' claim must declare "
+                    f"{required!r} — an unrefutable claim is not a claim"
+                )
+            subject = _string(entry, "subject_repository", location, errors)
+            evidence_id = _string(entry, "evidence_record_id", location, errors)
+            if subject is not None and not subject.strip():
+                errors.append(
+                    f"{location}.subject_repository: a 'no_product_writer' claim "
+                    "must name the product it is about"
+                )
+            if evidence_id is not None and evidence_id not in dossier_record_ids:
+                errors.append(
+                    f"{location}.evidence_record_id: {evidence_id!r} is not a "
+                    "'module-dossier' record. The claim is about a dossier, so "
+                    "it must cite the pinned dossier rather than an ADR"
+                )
+        else:
+            for forbidden in ("subject_repository", "evidence_record_id"):
+                if forbidden in entry:
+                    errors.append(
+                        f"{location}.{forbidden} is only meaningful for a "
+                        "'no_product_writer' claim; the other codes record a "
+                        "scope judgement no dossier can settle"
+                    )
         if component_id is None:
             continue
         if component_id in rostered:
@@ -879,7 +983,7 @@ def validate_matrix(path: Path) -> list[str]:
 
     source_id, target_id = _validate_authority(root, errors)
     _validate_tracks(root, source_id, target_id, errors)
-    _validate_records(root, errors)
+    dossier_record_ids = _validate_records(root, errors)
     control_ids, control_states = _validate_controls(root, errors)
     cutover_control_ids = _string_array(root, "cutover_control_ids", path.name, errors)
     if not cutover_control_ids:
@@ -910,7 +1014,7 @@ def validate_matrix(path: Path) -> list[str]:
         cutover_control_ids,
         errors,
     )
-    _validate_capability_roster(root, errors)
+    _validate_capability_roster(root, dossier_record_ids, errors)
     open_ids = _validate_open_decisions(root, control_ids | cohort_ids, errors)
     _validate_resolved_decisions(root, open_ids, errors)
 

@@ -130,6 +130,7 @@ def valid_matrix() -> dict[str, object]:
                 "component_id": "dotmac-campaigns",
                 "disposition": "replace",
                 "rationale": "Sub owns campaign execution; not yet scheduled.",
+                "rationale_code": "external_authority",
             }
         ],
         "open_decisions": [

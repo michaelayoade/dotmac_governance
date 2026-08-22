@@ -178,7 +178,21 @@ and no growth of an existing one; bounded in-place module adoption is admitted
 only when it retires a local writer. Enforcement is not a promise: the
 two-directional cohort writer ratchets in `dotmac_sub` fail the build on an
 added or grown writer, and on a removed writer whose baseline was not lowered
-in the same change. `ctl-isp-003` is verified on that basis.
+in the same change.
+
+The control it blocks stays where it is. `ctl-isp-003` is programme-wide, and
+those ratchets cover **cohort 1 only** — cohorts 2 through 8 have no writer
+census at all, so the rule is approved and partly enforced rather than proved.
+The same decision set makes controls and active authority cohort-scoped with
+non-reusable evidence, and a cohort-1-scoped control is what this enforcement
+can honestly verify. Until that scoping exists, the matrix keeps `ctl-isp-003`
+`blocked`, and this record says so rather than claiming otherwise.
+
+> Amended 2026-08-22. The first version of this paragraph ended "`ctl-isp-003`
+> is verified on that basis" while the matrix left it `blocked`. Two controlled
+> records disagreeing about one control is precisely what the drift-prevention
+> clause below exists to stop, and nothing enforced it. `programme_control` now
+> refuses an ADR that asserts a control state its own matrix contradicts.
 
 **dec-isp-004 — analytics and reporting. Split into two owners.** Analytics
 owns semantic measures and derived analytical datasets. Reporting owns saved
@@ -255,6 +269,12 @@ consequences and only one of them is a deployment decision:
 
 ## Drift prevention
 
+- `programme_control` refuses an ADR that asserts a control state its own
+  matrix contradicts. The pairing is read from the matrix's own
+  `governing-decision` record rather than guessed, and the check is
+  deliberately one sentence shape — a backticked control id followed by "is
+  <state>" — so a record can still discuss its controls without arguing with
+  the validator.
 - `programme_control` rejects unknown fields, malformed or duplicate stable
   identifiers, missing or misbound source-cutover and target-construction
   tracks, dependency cycles, out-of-order cohorts, duplicate components,

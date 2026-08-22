@@ -56,6 +56,46 @@ jobs:
       - name: Validate cross-repository programme matrices
         run: python3 -m programme_control --root .
 
+      # The half the step above cannot do. A `no_product_writer` roster claim
+      # asserts a fact about another repository's dossier, so the dossier is
+      # fetched at the exact revision the matrix pins — never a branch, or the
+      # result would depend on when the check ran.
+      #
+      # Fetching a single commit by SHA needs no ref and no history; if the pin
+      # is unreachable the checkout fails and the claim is never silently
+      # skipped.
+      - name: Check out the pinned Starter dossiers
+        run: |
+          set -euo pipefail
+          PIN="$(python3 - <<'PY'
+          import json, pathlib, sys
+          pins = set()
+          for path in sorted(pathlib.Path("programmes").glob("*.json")):
+              matrix = json.loads(path.read_text(encoding="utf-8"))
+              for record in matrix.get("records", []):
+                  if record.get("role") == "module-dossier":
+                      pins.add(record["revision"])
+          if len(pins) != 1:
+              print(f"expected exactly one pinned dossier revision, got {sorted(pins)}",
+                    file=sys.stderr)
+              raise SystemExit(1)
+          print(pins.pop())
+          PY
+          )"
+          rm -rf "${RUNNER_TEMP}/pinned-starter"
+          mkdir -p "${RUNNER_TEMP}/pinned-starter"
+          cd "${RUNNER_TEMP}/pinned-starter"
+          git init -q .
+          git remote add origin https://github.com/michaelayoade/dotmac_starter_mt.git
+          git fetch -q --depth 1 origin "$PIN"
+          git checkout -q FETCH_HEAD
+          echo "pinned Starter at $PIN"
+
+      - name: Check roster writer claims against the pinned dossiers
+        run: >-
+          python3 -m programme_control --root .
+          --starter-checkout "${RUNNER_TEMP}/pinned-starter"
+
       - name: Validate the agent-control pilot profile
         run: python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
 

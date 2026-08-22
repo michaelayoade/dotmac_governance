@@ -574,6 +574,115 @@ class ProgrammeControlTests(unittest.TestCase):
         payload["resolved_decisions"] = [resolved]
         self.assertFails(self.validate(payload), "question")
 
+    # -- ADR / matrix agreement ---------------------------------------------
+    #
+    # A 2026-08-21 amendment declared `ctl-isp-003` verified in prose while the
+    # matrix left it blocked. Nothing caught it, and a reader had no way to
+    # know which controlled record to believe.
+
+    def _repo_with(self, adr_body: str, control_state: str) -> Path:
+        """Build a throwaway Governance checkout with one ADR and one matrix."""
+        root = Path(tempfile.mkdtemp())
+        (root / "programmes").mkdir()
+        (root / "docs" / "adr").mkdir(parents=True)
+        (root / "docs" / "adr" / "0001-governing.md").write_text(
+            adr_body, encoding="utf-8"
+        )
+        payload = valid_matrix()
+        controls = payload["controls"]
+        assert isinstance(controls, list)
+        first = controls[0]
+        assert isinstance(first, dict)
+        first["state"] = control_state
+        if control_state == "verified":
+            # A verified control needs immutable evidence, and a proposed
+            # programme may not claim one at all.
+            payload["status"] = "accepted"
+            first["depends_on"] = []
+            first["evidence_refs"] = [
+                {
+                    "producer": "Michael Ayoade",
+                    "repository": (
+                        "https://github.com/michaelayoade/dotmac_governance"
+                    ),
+                    "revision": "b" * 40,
+                    "subject": "Approval",
+                }
+            ]
+        else:
+            first["evidence_refs"] = []
+            first["depends_on"] = ["ctl-isp-000"]
+            controls.insert(
+                0,
+                {
+                    "control_id": "ctl-isp-000",
+                    "name": "Prerequisite",
+                    "owner": "Michael Ayoade",
+                    "state": "not-started",
+                    "depends_on": [],
+                    "evidence_refs": [],
+                },
+            )
+        payload["records"] = [
+            {
+                "record_id": "rec-governing",
+                "repository": "https://github.com/michaelayoade/dotmac_governance",
+                "revision": "SELF",
+                "path": "docs/adr/0001-governing.md",
+                "role": "governing-decision",
+            }
+        ]
+        (root / "programmes" / "p.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+        return root
+
+    def test_adr_may_not_contradict_the_matrix_sensitivity(self) -> None:
+        root = self._repo_with("`ctl-isp-001` is verified on that basis.\n", "blocked")
+        errors = verify_repository(root)
+        self.assertTrue(
+            any("may not disagree about a control" in error for error in errors),
+            f"expected an ADR/matrix disagreement, got {errors!r}",
+        )
+
+    def test_adr_agreeing_with_the_matrix_passes(self) -> None:
+        """The acceptance half: the same sentence is fine when it is true."""
+        root = self._repo_with("`ctl-isp-001` is verified on that basis.\n", "verified")
+        self.assertEqual(verify_repository(root), [])
+
+    def test_adr_discussing_a_control_without_claiming_a_state_passes(self) -> None:
+        """The guard reads one sentence shape, not prose generally.
+
+        Without this it would be tempting to widen the pattern until any
+        mention of a control near any state word failed, and an ADR that
+        cannot discuss its own controls is worse than the drift.
+        """
+        root = self._repo_with(
+            "`ctl-isp-001` stays where it is until cohort scoping exists, and "
+            "nothing here is verified yet.\n",
+            "blocked",
+        )
+        self.assertEqual(verify_repository(root), [])
+
+    def test_adr_claiming_a_state_for_an_unknown_control_fails_sensitivity(
+        self,
+    ) -> None:
+        root = self._repo_with("`ctl-isp-404` is verified.\n", "blocked")
+        errors = verify_repository(root)
+        self.assertTrue(
+            any("unknown control" in error for error in errors),
+            f"expected an unknown-control error, got {errors!r}",
+        )
+
+    def test_missing_governing_decision_document_fails_sensitivity(self) -> None:
+        root = self._repo_with("nothing to see\n", "blocked")
+        (root / "docs" / "adr" / "0001-governing.md").unlink()
+        errors = verify_repository(root)
+        self.assertTrue(
+            any("is missing" in error for error in errors),
+            f"expected a missing-document error, got {errors!r}",
+        )
+
     def test_resolved_decision_rejects_an_unknown_field_sensitivity(self) -> None:
         payload = valid_matrix()
         resolved = self._resolved()

@@ -879,6 +879,68 @@ def validate_matrix(path: Path) -> list[str]:
     return errors
 
 
+#: An ADR sentence asserting a control's state, e.g. "`ctl-isp-003` is
+#: verified on that basis". Deliberately narrow: this is not prose analysis,
+#: it is the one sentence shape that has actually gone wrong. Matching only
+#: a backticked control id followed by "is <state>" keeps the guard from
+#: arguing with ordinary discussion of a control.
+_ADR_STATE_CLAIM = re.compile(
+    r"`(ctl-[a-z0-9-]+)`\s+is\s+(?:now\s+)?"
+    r"(pending-approval|blocked|not-started|in-progress|verified)\b"
+)
+
+
+def _adr_state_claims(root: Path, matrix: JsonObject, errors: list[str]) -> None:
+    """Refuse an ADR that asserts a control state its own matrix contradicts.
+
+    ADR 0012's drift-prevention clause requires the decision record and the
+    matrix to agree, and nothing enforced it. A 2026-08-21 amendment declared
+    `ctl-isp-003` verified in prose while the matrix left it `blocked` — two
+    controlled records disagreeing about the same control, which is exactly
+    the state the clause exists to prevent. A reader had no way to know which
+    one to believe.
+
+    Only records with role `governing-decision` are read: those are the ADRs
+    the matrix itself points at, so the pairing is declared rather than
+    guessed, and an unrelated ADR mentioning a control is not this guard's
+    business.
+    """
+
+    raw_controls = matrix.get("controls")
+    states: dict[object, object] = {}
+    if isinstance(raw_controls, list):
+        for control in raw_controls:
+            if isinstance(control, dict):
+                states[control.get("control_id")] = control.get("state")
+
+    raw_records = matrix.get("records")
+    if not isinstance(raw_records, list):
+        return
+    for record in raw_records:
+        if not isinstance(record, dict) or record.get("role") != "governing-decision":
+            continue
+        relative = record.get("path")
+        if not isinstance(relative, str):
+            continue
+        document = root / relative
+        if not document.is_file():
+            errors.append(f"records: governing decision {relative!r} is missing")
+            continue
+        text = document.read_text(encoding="utf-8")
+        for control_id, claimed in _ADR_STATE_CLAIM.findall(text):
+            actual = states.get(control_id)
+            if actual is None:
+                errors.append(
+                    f"{relative}: claims a state for unknown control {control_id!r}"
+                )
+            elif actual != claimed:
+                errors.append(
+                    f"{relative}: says {control_id!r} is {claimed!r}; the "
+                    f"matrix says {actual!r}. A decision record and its matrix "
+                    "may not disagree about a control."
+                )
+
+
 def verify_repository(root: Path) -> list[str]:
     """Return errors for every canonical matrix in a Governance checkout."""
     programme_dir = root / "programmes"
@@ -900,4 +962,5 @@ def verify_repository(root: Path) -> list[str]:
         if programme_id in seen_programmes:
             errors.append(f"duplicate programme_id {programme_id!r}")
         seen_programmes.add(programme_id)
+        _adr_state_claims(root, root_record, errors)
     return errors

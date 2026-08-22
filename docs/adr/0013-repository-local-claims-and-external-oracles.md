@@ -1,9 +1,10 @@
 # 0013. Repository-local claims and external oracles
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-21
+- Effective: 2026-08-22
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (intended while Proposed)
+- Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards and every enrolled Dotmac repository
 - Classification: Internal
 
@@ -242,3 +243,43 @@ and § 4 are a separate reviewed change, gated on this record being accepted.
 Recording that plainly is required: a decision whose drift-prevention section
 describes an unbuilt control as though it were running is the failure this
 repository exists to prevent.
+
+## Acceptance amendment — 2026-08-22
+
+Michael Ayoade approved this record on 2026-08-22. The approval is his; this
+section records it as an attributable event, written by the agent that drafted
+the record. Under `AGENTS.md` an agent may not occupy the approver role or
+approve its own output, and neither happened here — the decision was made by the
+named human and is transcribed, not made, below.
+
+### What acceptance changes
+
+The standard in § 1 is now normative for enrolled repositories. In particular
+`dotmac_vendor_control_plane` rule 17 stops binding on that repository's own
+local authority and starts citing an accepted fleet record — which matters
+because the work it governs now spans three repositories and its release,
+registry and adoption claims are exactly the kind this record is about.
+
+### What acceptance does NOT change
+
+Nothing operational. § 5 and the drift-prevention section already state that the
+control is **unimplemented**: no `standards-profile.schema.json` field, no
+`standards_control` rule, no CI gate, and therefore no enrolled repository's
+profile changes on acceptance. Conformance outside a machine-readable contract
+remains review discipline, and saying so is part of the decision rather than a
+caveat on it.
+
+Open decisions **17** (machine-readable representation of the oracle kinds) and
+**18** (resolving citations against their producing systems) are unchanged and
+still require their own decisions. Accepting this record does not pre-approve
+either.
+
+### First application
+
+The rule was applied before it was accepted, which is the ordinary way a
+standard earns acceptance rather than a defect: `dotmac_vendor_control_plane`
+retracted an `AWAITING_RELEASE_TAG`-shaped guard that asserted a release tag while
+reading only `pyproject.toml`, and its cutover documents now carry release-run
+ids, peeled tag commits and exact `EXTRACTION.toml` commit-and-path citations.
+That is the § 2 vocabulary in use, and it is the evidence this record is
+accepted on.

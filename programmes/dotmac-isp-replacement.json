@@ -256,19 +256,9 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
-          "component_id": "dotmac-kernel",
-          "owner_id": "dotmac-kernel",
-          "disposition": "reuse"
-        },
-        {
-          "component_id": "dotmac-ui",
-          "owner_id": "dotmac-ui",
-          "disposition": "reuse"
-        },
-        {
-          "component_id": "dotmac-party",
-          "owner_id": "dotmac-party",
-          "disposition": "release"
+          "component_id": "dotmac-addresses",
+          "owner_id": "dotmac-addresses",
+          "disposition": "build"
         },
         {
           "component_id": "dotmac-brand-profiles",
@@ -281,9 +271,24 @@
           "disposition": "build"
         },
         {
-          "component_id": "dotmac-addresses",
-          "owner_id": "dotmac-addresses",
-          "disposition": "build"
+          "component_id": "dotmac-kernel",
+          "owner_id": "dotmac-kernel",
+          "disposition": "reuse"
+        },
+        {
+          "component_id": "dotmac-party",
+          "owner_id": "dotmac-party",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-records",
+          "owner_id": "dotmac-records",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-ui",
+          "owner_id": "dotmac-ui",
+          "disposition": "reuse"
         }
       ]
     },
@@ -299,9 +304,9 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
-          "component_id": "dotmac-service-catalog",
-          "owner_id": "dotmac-service-catalog",
-          "disposition": "build"
+          "component_id": "dotmac-orders",
+          "owner_id": "dotmac-orders",
+          "disposition": "release"
         },
         {
           "component_id": "dotmac-qualification",
@@ -314,9 +319,9 @@
           "disposition": "release"
         },
         {
-          "component_id": "dotmac-orders",
-          "owner_id": "dotmac-orders",
-          "disposition": "release"
+          "component_id": "dotmac-service-catalog",
+          "owner_id": "dotmac-service-catalog",
+          "disposition": "build"
         },
         {
           "component_id": "dotmac-subscriptions",
@@ -337,13 +342,28 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
-          "component_id": "dotmac-positioning",
-          "owner_id": "dotmac-positioning",
+          "component_id": "dotmac-fiber-plant",
+          "owner_id": "dotmac-fiber-plant",
           "disposition": "adopt"
         },
         {
           "component_id": "dotmac-ipam",
           "owner_id": "dotmac-ipam",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-access",
+          "owner_id": "dotmac-network-access",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-assurance",
+          "owner_id": "dotmac-network-assurance",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-network-control",
+          "owner_id": "dotmac-network-control",
           "disposition": "adopt"
         },
         {
@@ -362,28 +382,13 @@
           "disposition": "adopt"
         },
         {
-          "component_id": "dotmac-network-assurance",
-          "owner_id": "dotmac-network-assurance",
-          "disposition": "adopt"
-        },
-        {
-          "component_id": "dotmac-network-control",
-          "owner_id": "dotmac-network-control",
-          "disposition": "adopt"
-        },
-        {
-          "component_id": "dotmac-fiber-plant",
-          "owner_id": "dotmac-fiber-plant",
-          "disposition": "adopt"
-        },
-        {
-          "component_id": "dotmac-network-access",
-          "owner_id": "dotmac-network-access",
-          "disposition": "adopt"
-        },
-        {
           "component_id": "dotmac-pon-access",
           "owner_id": "dotmac-pon-access",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-positioning",
+          "owner_id": "dotmac-positioning",
           "disposition": "adopt"
         }
       ]
@@ -400,11 +405,6 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
-          "component_id": "dotmac-projects",
-          "owner_id": "dotmac-projects",
-          "disposition": "release"
-        },
-        {
           "component_id": "dotmac-durable-timers",
           "owner_id": "dotmac-durable-timers",
           "disposition": "adopt"
@@ -416,6 +416,19 @@
           "requires": [
             "dotmac-durable-timers",
             "dotmac-projects"
+          ]
+        },
+        {
+          "component_id": "dotmac-projects",
+          "owner_id": "dotmac-projects",
+          "disposition": "release"
+        },
+        {
+          "component_id": "dotmac-service-orders",
+          "owner_id": "dotmac-service-orders",
+          "disposition": "build",
+          "requires": [
+            "dotmac-work-orders"
           ]
         },
         {
@@ -445,16 +458,6 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
-          "component_id": "dotmac-usage",
-          "owner_id": "dotmac-usage",
-          "disposition": "build"
-        },
-        {
-          "component_id": "dotmac-usage-rating",
-          "owner_id": "dotmac-usage-rating",
-          "disposition": "build"
-        },
-        {
           "component_id": "dotmac-billing",
           "owner_id": "dotmac-billing",
           "disposition": "release"
@@ -465,8 +468,26 @@
           "disposition": "release"
         },
         {
-          "component_id": "dotmac-service-access-policy",
-          "owner_id": "dotmac-service-access-policy",
+          "component_id": "dotmac-document-rendering",
+          "owner_id": "dotmac-document-rendering",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-documents",
+          "owner_id": "dotmac-documents",
+          "disposition": "adopt",
+          "requires": [
+            "dotmac-files"
+          ]
+        },
+        {
+          "component_id": "dotmac-files",
+          "owner_id": "dotmac-files",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-fx-policy",
+          "owner_id": "dotmac-fx-policy",
           "disposition": "build"
         },
         {
@@ -475,14 +496,17 @@
           "disposition": "adopt"
         },
         {
-          "component_id": "dotmac-document-rendering",
-          "owner_id": "dotmac-document-rendering",
-          "disposition": "adopt"
+          "component_id": "dotmac-payments",
+          "owner_id": "dotmac-payments",
+          "disposition": "build",
+          "requires": [
+            "dotmac-billing"
+          ]
         },
         {
-          "component_id": "dotmac-files",
-          "owner_id": "dotmac-files",
-          "disposition": "adopt"
+          "component_id": "dotmac-service-access-policy",
+          "owner_id": "dotmac-service-access-policy",
+          "disposition": "build"
         },
         {
           "component_id": "dotmac-tax",
@@ -490,8 +514,13 @@
           "disposition": "release"
         },
         {
-          "component_id": "dotmac-fx-policy",
-          "owner_id": "dotmac-fx-policy",
+          "component_id": "dotmac-usage",
+          "owner_id": "dotmac-usage",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-usage-rating",
+          "owner_id": "dotmac-usage-rating",
           "disposition": "build"
         }
       ]
@@ -508,6 +537,27 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
+          "component_id": "dotmac-approvals",
+          "owner_id": "dotmac-approvals",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-campaigns",
+          "owner_id": "dotmac-campaigns",
+          "disposition": "adopt",
+          "requires": [
+            "dotmac-template-studio"
+          ]
+        },
+        {
+          "component_id": "dotmac-expenses",
+          "owner_id": "dotmac-expenses",
+          "disposition": "adopt",
+          "requires": [
+            "dotmac-workforce"
+          ]
+        },
+        {
           "component_id": "dotmac-inbox",
           "owner_id": "dotmac-inbox",
           "disposition": "release"
@@ -516,6 +566,42 @@
           "component_id": "dotmac-inbox-operations",
           "owner_id": "dotmac-inbox-operations",
           "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-operational-escalations",
+          "owner_id": "dotmac-operational-escalations",
+          "disposition": "build",
+          "requires": [
+            "dotmac-durable-timers",
+            "dotmac-ticketing",
+            "dotmac-inbox-operations"
+          ]
+        },
+        {
+          "component_id": "dotmac-service-changes",
+          "owner_id": "dotmac-service-changes",
+          "disposition": "build",
+          "requires": [
+            "dotmac-qualification",
+            "dotmac-billing",
+            "dotmac-fulfillment",
+            "dotmac-services",
+            "dotmac-service-access-policy"
+          ]
+        },
+        {
+          "component_id": "dotmac-surveys",
+          "owner_id": "dotmac-surveys",
+          "disposition": "adopt",
+          "requires": [
+            "dotmac-ticketing",
+            "dotmac-work-orders"
+          ]
+        },
+        {
+          "component_id": "dotmac-template-studio",
+          "owner_id": "dotmac-template-studio",
+          "disposition": "adopt"
         },
         {
           "component_id": "dotmac-ticketing",
@@ -530,16 +616,6 @@
             "dotmac-work-orders",
             "dotmac-ticketing"
           ]
-        },
-        {
-          "component_id": "dotmac-template-studio",
-          "owner_id": "dotmac-template-studio",
-          "disposition": "adopt"
-        },
-        {
-          "component_id": "dotmac-approvals",
-          "owner_id": "dotmac-approvals",
-          "disposition": "adopt"
         }
       ]
     },
@@ -555,23 +631,8 @@
       "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
-          "component_id": "dotmac-referrals",
-          "owner_id": "dotmac-referrals",
-          "disposition": "adopt"
-        },
-        {
-          "component_id": "dotmac-reseller-management",
-          "owner_id": "dotmac-reseller-management",
-          "disposition": "adopt"
-        },
-        {
           "component_id": "dotmac-ai-operations",
           "owner_id": "dotmac-ai-operations",
-          "disposition": "build"
-        },
-        {
-          "component_id": "dotmac-remote-access",
-          "owner_id": "dotmac-remote-access",
           "disposition": "build"
         },
         {
@@ -580,13 +641,28 @@
           "disposition": "build"
         },
         {
-          "component_id": "dotmac-workflow-runtime",
-          "owner_id": "dotmac-workflow-runtime",
+          "component_id": "dotmac-forms",
+          "owner_id": "dotmac-forms",
           "disposition": "build"
         },
         {
-          "component_id": "dotmac-forms",
-          "owner_id": "dotmac-forms",
+          "component_id": "dotmac-referrals",
+          "owner_id": "dotmac-referrals",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-remote-access",
+          "owner_id": "dotmac-remote-access",
+          "disposition": "build"
+        },
+        {
+          "component_id": "dotmac-reseller-management",
+          "owner_id": "dotmac-reseller-management",
+          "disposition": "adopt"
+        },
+        {
+          "component_id": "dotmac-workflow-runtime",
+          "owner_id": "dotmac-workflow-runtime",
           "disposition": "build"
         }
       ]
@@ -656,8 +732,10 @@
     "dotmac-network-observability",
     "dotmac-network-topology",
     "dotmac-numbering",
+    "dotmac-operational-escalations",
     "dotmac-orders",
     "dotmac-party",
+    "dotmac-payments",
     "dotmac-platform-health",
     "dotmac-pon-access",
     "dotmac-positioning",
@@ -673,6 +751,8 @@
     "dotmac-sales",
     "dotmac-service-access-policy",
     "dotmac-service-catalog",
+    "dotmac-service-changes",
+    "dotmac-service-orders",
     "dotmac-services",
     "dotmac-sites",
     "dotmac-subscriptions",
@@ -697,11 +777,6 @@
       "rationale": "dec-isp-006: ERP is the authoritative owner of the general asset estate. ISP's network plant stays with the network modules that already own it; ISP holds opaque references only."
     },
     {
-      "component_id": "dotmac-campaigns",
-      "disposition": "replace",
-      "rationale": "Sub owns outbound campaign execution today; cutover 1 is already Sub-first in the Starter dossier. Enters a cohort when the Sub campaign writer retirement is scheduled."
-    },
-    {
       "component_id": "dotmac-content",
       "disposition": "retain",
       "rationale": "Editorial content is a marketing-side capability; the Dotmac ERP product is its named first cutover, not ISP."
@@ -710,16 +785,6 @@
       "component_id": "dotmac-deployment-control",
       "disposition": "retain",
       "rationale": "dec-isp-005: desired state and rollout evidence are Vendor control-plane authority. ISP is a data plane and consumes the decision rather than owning it."
-    },
-    {
-      "component_id": "dotmac-documents",
-      "disposition": "retain",
-      "rationale": "Document storage is a shared enabling capability consumed through Files and Document Rendering. ISP composes it only if a cohort names a document writer it owns."
-    },
-    {
-      "component_id": "dotmac-expenses",
-      "disposition": "retain",
-      "rationale": "Expenses is an ERP-authoritative back-office domain with no ISP writer in scope."
     },
     {
       "component_id": "dotmac-inventory",
@@ -747,11 +812,6 @@
       "rationale": "Publishing targets the Dotmac ERP product as cutover 1; ISP has no publishing authority in scope."
     },
     {
-      "component_id": "dotmac-records",
-      "disposition": "retain",
-      "rationale": "Retention/records policy is an enabling capability with no ISP-owned decision in the current cohorts."
-    },
-    {
       "component_id": "dotmac-sites",
       "disposition": "retain",
       "rationale": "Site builder targets the Dotmac ERP product as cutover 1; no ISP-owned site authority exists."
@@ -760,11 +820,6 @@
       "component_id": "dotmac-support-access",
       "disposition": "retain",
       "rationale": "dec-isp-005: a Vendor control-plane capability consumed over a versioned API. asm-dotmac-isp declares platform_surface_enabled=False and must not grow a platform plane to host it."
-    },
-    {
-      "component_id": "dotmac-surveys",
-      "disposition": "retain",
-      "rationale": "Feedback evidence only (ADR-0035); no ISP subject-consequence owner is in scope, so it stays available rather than scheduled."
     },
     {
       "component_id": "dotmac-web-analytics",

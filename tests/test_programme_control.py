@@ -220,6 +220,116 @@ class ProgrammeControlTests(unittest.TestCase):
             self.validate(payload), "verified control has no evidence_refs"
         )
 
+    # ------------------------------------------------------------------
+    # superseded: a control whose PREMISE was removed, not one that stalled
+    # ------------------------------------------------------------------
+
+    def _superseded_first_control(self, payload: dict[str, object]) -> dict:
+        controls = payload["controls"]
+        assert isinstance(controls, list)
+        first = controls[0]
+        assert isinstance(first, dict)
+        first["state"] = "superseded"
+        first["evidence_refs"] = [
+            {
+                "producer": "Michael Ayoade",
+                "repository": "https://github.com/michaelayoade/dotmac_governance",
+                "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+                "subject": "amendment removing the premise",
+            }
+        ]
+        return first
+
+    def test_superseded_control_without_evidence_fails_sensitivity(self) -> None:
+        """Ending a control's life must cite the revision that ended it."""
+
+        payload = valid_matrix()
+        controls = payload["controls"]
+        assert isinstance(controls, list)
+        first = controls[0]
+        assert isinstance(first, dict)
+        first["state"] = "superseded"
+        self.assertFails(
+            self.validate(payload), "superseded control has no evidence_refs"
+        )
+
+    def test_live_control_may_not_depend_on_a_superseded_one_sensitivity(self) -> None:
+        """Such a control could never open — nothing advances its dependency."""
+
+        payload = valid_matrix()
+        self._superseded_first_control(payload)
+        # ctl-isp-002 still depends on ctl-isp-001 and is still blocked.
+        payload["cutover_control_ids"] = ["ctl-isp-002"]
+        self.assertFails(
+            self.validate(payload), "depends on superseded control 'ctl-isp-001'"
+        )
+
+    def test_a_superseded_control_may_be_depended_on_by_another_superseded_one(
+        self,
+    ) -> None:
+        """The rule targets a dangling gate, not the act of superseding a pair."""
+
+        payload = valid_matrix()
+        self._superseded_first_control(payload)
+        controls = payload["controls"]
+        assert isinstance(controls, list)
+        second = controls[1]
+        assert isinstance(second, dict)
+        second["state"] = "superseded"
+        second["evidence_refs"] = [
+            {
+                "producer": "Michael Ayoade",
+                "repository": "https://github.com/michaelayoade/dotmac_governance",
+                "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
+                "subject": "amendment removing the premise",
+            }
+        ]
+        payload["cutover_control_ids"] = ["ctl-isp-001", "ctl-isp-002"]
+        errors = self.validate(payload)
+        self.assertFalse(
+            [e for e in errors if "depends on superseded control" in e],
+            f"a superseded dependent must not trip the rule: {errors!r}",
+        )
+
+    def test_superseded_control_in_the_cutover_gate_fails_sensitivity(self) -> None:
+        """It can never be verified, so it blocks every cohort forever."""
+
+        payload = valid_matrix()
+        self._superseded_first_control(payload)
+        controls = payload["controls"]
+        assert isinstance(controls, list)
+        second = controls[1]
+        assert isinstance(second, dict)
+        second["depends_on"] = []
+        second["state"] = "not-started"
+        # ctl-isp-001 is superseded and still listed in the gate.
+        self.assertFails(
+            self.validate(payload),
+            "'ctl-isp-001' is superseded and can never be verified",
+        )
+
+    def test_shared_in_process_database_boundary_is_accepted(self) -> None:
+        """An in-place conversion shares one database; that is not two writers."""
+
+        payload = valid_matrix()
+        authority = payload["authority"]
+        assert isinstance(authority, dict)
+        target = authority["target"]
+        assert isinstance(target, dict)
+        target["database_boundary"] = "shared-in-process"
+        self.assertEqual(self.validate(payload), [])
+
+    def test_an_invented_database_boundary_is_still_rejected(self) -> None:
+        """Widening the enum by two must not widen it to anything."""
+
+        payload = valid_matrix()
+        authority = payload["authority"]
+        assert isinstance(authority, dict)
+        target = authority["target"]
+        assert isinstance(target, dict)
+        target["database_boundary"] = "mostly-independent"
+        self.assertFails(self.validate(payload), "database_boundary")
+
     def test_non_immutable_external_revision_fails_sensitivity(self) -> None:
         payload = valid_matrix()
         records = payload["records"]

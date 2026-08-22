@@ -243,6 +243,131 @@ consequences and only one of them is a deployment decision:
 
 `ctl-isp-002` therefore stays `blocked`, and cohort 1 with it.
 
+## Conversion amendment — 2026-08-22: Sub is converted in place, not replaced
+
+Michael Ayoade directed this amendment on 2026-08-22. It changes the programme's
+**mechanism**, not its goal. Every earlier record above stands as written; this
+section supersedes the specific clauses it names.
+
+> **Retire legacy Sub implementations, not Dotmac Sub.**
+
+### What changed
+
+Dotmac Sub is **not** being retired. It remains the ISP product, runtime, API
+identity, hostname and customer-facing application. What is being retired is its
+monolithic domain implementations and its duplicate writers, as Sub itself
+becomes the thin assembly.
+
+The intended end state:
+
+- `dotmac_sub` **is** the assembly.
+- It pins `dotmac-kernel`, `dotmac-ui` and released domain modules.
+- Modules run locally inside Sub and own their schemas, migrations, services
+  and decisions.
+- Existing Sub routes, UI and integrations become thin adapters.
+- Each domain switches authority **internally**, from legacy Sub code to its
+  module.
+- Customers and mobile clients keep using the same product endpoints.
+
+### What this makes irrelevant
+
+Five requirements the replacement model carried are removed outright, and none
+of them is deferred — the question stops applying:
+
+- no separate `asm-dotmac-isp` production host;
+- no second production database;
+- no mobile API-base repoint;
+- no cross-database sealing protocol;
+- no external Sub-to-ISP synchronisation layer.
+
+The `https://github.com/michaelayoade/dotmac-isp` walking skeleton is **frozen**.
+It is not deleted — it is the record of a direction that was accepted and then
+corrected — but no further construction happens there, and it holds no
+programme control.
+
+### What remains directly relevant
+
+Unchanged and still load-bearing: extracted Starter modules and their migration
+lineages; product-first parity with existing Sub behaviour; the writer censuses
+and one-writer enforcement; account-recovery decomposition;
+`subscribers.metadata` and `organizations` ownership; address data repair when
+that slice migrates; and per-module backfill, shadow comparison and legacy-path
+removal.
+
+The eight cohorts are unchanged. They order **which domains switch authority in
+what sequence**, and that ordering never depended on where the code ran.
+
+### Authority, restated
+
+The programme's authority transfer is now *within* one runtime and one database:
+
+| | Before | After |
+|---|---|---|
+| Source | `asm-dotmac-sub-legacy` — the whole legacy application | `asm-dotmac-sub-legacy-domains` — the legacy domain implementations inside Sub |
+| Target | `asm-dotmac-isp` — an independent assembly | `asm-dotmac-sub-composed` — pinned modules composed inside the same Sub |
+| Database boundary | `independent` | `shared-in-process` |
+
+`shared-in-process` means one database, with isolation by module schema
+(`mod_<code>`) and one authority per fact — **not** two writers. Every
+single-authority clause above survives intact and applies per domain rather than
+per assembly. Concurrent work still does not create concurrent authority.
+
+### Controls: four superseded, three added
+
+A control whose premise is removed is **superseded**, never deleted and never
+repurposed — this record already forbids changing a stable identifier's meaning,
+so a control that now asks a different question gets a new identifier and the
+old one keeps its history.
+
+| Control | Fate |
+|---|---|
+| `ctl-isp-002` target host, database and deployment owner | superseded — nothing separate exists to name |
+| `ctl-isp-005` target database catalog, RLS and rehearsal | superseded by `ctl-isp-010` — there is no target database; the rehearsal is now against Sub's own |
+| `ctl-isp-007` cohort shadow at an immutable source watermark | superseded by `ctl-isp-011` — no cross-database watermark exists when both paths read one database |
+| `ctl-isp-008` sealed switch with delta capture and traffic drain | superseded by `ctl-isp-012` — nothing to drain and no delta to capture; the switch is a configuration change inside one transaction boundary |
+| `ctl-isp-001`, `ctl-isp-003`, `ctl-isp-004`, `ctl-isp-006`, `ctl-isp-009` | unchanged in meaning |
+
+`ctl-isp-009` — displaced writers and fallbacks ratchet to zero — is now the
+programme's centre of gravity rather than its last step. It is the thing that
+distinguishes a domain that was genuinely converted from one that merely gained
+a module beside its legacy code.
+
+`dec-isp-002` is **superseded, not answered**. It asked which host runs the
+independent ISP runtime. Three hosts were offered between 2026-08-21 and
+2026-08-22 and each already carried live production; that search is closed
+because the question was wrong, not because it was won. Host procurement is no
+longer a programme gate.
+
+### Why this is the safer programme
+
+The replacement model's hardest and least reversible step was the cross-database
+sealed switch: drain the source, seal it, capture the delta, prove zero drift at
+a watermark, then move authority to a different database on a different host —
+with a rollback that must not create two writers. In-place conversion deletes
+that step. A domain's switch becomes a configuration change between two
+implementations that share one transaction, and rollback is the same
+configuration change in reverse.
+
+What it introduces instead is narrower and better understood: module lineages
+must compose into Sub's live production database (`ctl-isp-010`), and each
+domain's module path must be proven against its legacy path before the switch
+(`ctl-isp-011`). Both are ordinary migration engineering. Neither requires a
+maintenance window measured against customer traffic.
+
+### Enforcement added with this amendment
+
+- `superseded` is a control state, and it requires immutable evidence naming the
+  amendment that removed the control's premise — the same bar `verified` carries,
+  for the same reason.
+- A live control may not depend on a superseded one. Such a control could never
+  open, because nothing will ever advance its dependency; the gate would read as
+  "not ready yet" forever instead of as a stale edge. Superseding a control now
+  forces its dependents to be re-pointed in the same change.
+- A superseded control may not remain in `cutover_control_ids`. A cohort reaches
+  `in-progress` only when every cutover control is `verified`, and a superseded
+  one never will be, so leaving it there is a permanent silent block on the
+  whole programme.
+
 ## Consequences
 
 - This record and matrix are normative for programme ordering and control

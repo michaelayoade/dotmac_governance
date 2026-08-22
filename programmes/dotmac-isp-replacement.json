@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "programme_id": "pgm-dotmac-isp-replacement",
-  "title": "Build a thin Dotmac ISP assembly and cut over legacy Dotmac Sub",
+  "title": "Convert Dotmac Sub in place into a thin assembly by retiring its legacy domain implementations",
   "status": "accepted",
   "owner": "Michael Ayoade",
   "approver": "Michael Ayoade",
   "authority": {
     "source": {
-      "assembly_id": "asm-dotmac-sub-legacy",
+      "assembly_id": "asm-dotmac-sub-legacy-domains",
       "repository": "https://github.com/michaelayoade/dotmac_sub",
       "authority_state": "source-authoritative"
     },
     "target": {
-      "assembly_id": "asm-dotmac-isp",
+      "assembly_id": "asm-dotmac-sub-composed",
       "repository_status": "assigned",
-      "repository": "https://github.com/michaelayoade/dotmac-isp",
-      "database_boundary": "independent",
+      "repository": "https://github.com/michaelayoade/dotmac_sub",
+      "database_boundary": "shared-in-process",
       "authority_state": "candidate"
     }
   },
@@ -23,14 +23,14 @@
     {
       "track_id": "track-isp-sub-cutover",
       "role": "source-cutover",
-      "assembly_id": "asm-dotmac-sub-legacy",
-      "responsibility": "Complete source dispositions, replay, shadow comparison, sealed cohort switches and displaced-writer retirement"
+      "assembly_id": "asm-dotmac-sub-legacy-domains",
+      "responsibility": "Retire legacy Sub domain implementations and duplicate writers one domain at a time, preserving the existing product endpoints"
     },
     {
       "track_id": "track-isp-target-build",
       "role": "target-construction",
-      "assembly_id": "asm-dotmac-isp",
-      "responsibility": "Build, release, compose and verify the independent target runtime and database"
+      "assembly_id": "asm-dotmac-sub-composed",
+      "responsibility": "Build, release and compose pinned Starter modules inside Sub so each domain's authority moves from legacy code to its module"
     }
   ],
   "records": [
@@ -79,14 +79,13 @@
   ],
   "cutover_control_ids": [
     "ctl-isp-001",
-    "ctl-isp-002",
     "ctl-isp-003",
     "ctl-isp-004",
-    "ctl-isp-005",
     "ctl-isp-006",
-    "ctl-isp-007",
-    "ctl-isp-008",
-    "ctl-isp-009"
+    "ctl-isp-009",
+    "ctl-isp-010",
+    "ctl-isp-011",
+    "ctl-isp-012"
   ],
   "controls": [
     {
@@ -108,11 +107,18 @@
       "control_id": "ctl-isp-002",
       "name": "Target assembly repository runtime database and production deployment owner are named",
       "owner": "Michael Ayoade",
-      "state": "blocked",
+      "state": "superseded",
       "depends_on": [
         "ctl-isp-001"
       ],
-      "evidence_refs": []
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "09e349e358ccc8d1f9d87b538f5b95910c6bb56e",
+          "subject": "Conversion amendment supersedes ctl-isp-002: no separate host, database or deployment owner exists to name"
+        }
+      ]
     },
     {
       "control_id": "ctl-isp-003",
@@ -130,8 +136,7 @@
       "owner": "Dotmac ISP technical owner",
       "state": "blocked",
       "depends_on": [
-        "ctl-isp-001",
-        "ctl-isp-002"
+        "ctl-isp-001"
       ],
       "evidence_refs": []
     },
@@ -139,11 +144,18 @@
       "control_id": "ctl-isp-005",
       "name": "Target database catalog RLS grants runtime and migration rehearsal pass on exact pins",
       "owner": "Dotmac ISP technical owner",
-      "state": "blocked",
+      "state": "superseded",
       "depends_on": [
         "ctl-isp-004"
       ],
-      "evidence_refs": []
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "09e349e358ccc8d1f9d87b538f5b95910c6bb56e",
+          "subject": "Conversion amendment supersedes ctl-isp-005: there is no target database to rehearse; replaced by ctl-isp-010"
+        }
+      ]
     },
     {
       "control_id": "ctl-isp-006",
@@ -160,22 +172,36 @@
       "control_id": "ctl-isp-007",
       "name": "Complete cohort shadow reaches zero unexplained drift at an immutable source watermark",
       "owner": "Dotmac ISP technical owner",
-      "state": "blocked",
+      "state": "superseded",
       "depends_on": [
         "ctl-isp-005",
         "ctl-isp-006"
       ],
-      "evidence_refs": []
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "09e349e358ccc8d1f9d87b538f5b95910c6bb56e",
+          "subject": "Conversion amendment supersedes ctl-isp-007: no cross-database watermark exists; replaced by ctl-isp-011"
+        }
+      ]
     },
     {
       "control_id": "ctl-isp-008",
       "name": "One sealed authority switch has delta capture rollback conditions and operator approval",
       "owner": "Michael Ayoade",
-      "state": "blocked",
+      "state": "superseded",
       "depends_on": [
         "ctl-isp-007"
       ],
-      "evidence_refs": []
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "09e349e358ccc8d1f9d87b538f5b95910c6bb56e",
+          "subject": "Conversion amendment supersedes ctl-isp-008: no delta capture or traffic drain applies; replaced by ctl-isp-012"
+        }
+      ]
     },
     {
       "control_id": "ctl-isp-009",
@@ -183,7 +209,38 @@
       "owner": "Dotmac Sub technical owner",
       "state": "blocked",
       "depends_on": [
-        "ctl-isp-008"
+        "ctl-isp-012"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-010",
+      "owner": "Dotmac Sub technical owner",
+      "name": "Sub's own database admits the cohort's module schemas and lineages rehearsed on a production-shaped copy",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-004"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-011",
+      "owner": "Dotmac Sub technical owner",
+      "name": "In-process shadow proves the module path and the legacy path agree on the same database before either is switched",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-006",
+        "ctl-isp-010"
+      ],
+      "evidence_refs": []
+    },
+    {
+      "control_id": "ctl-isp-012",
+      "owner": "Michael Ayoade",
+      "name": "One in-place authority switch per domain leaves exactly one writer with a configuration rollback and operator approval",
+      "state": "blocked",
+      "depends_on": [
+        "ctl-isp-011"
       ],
       "evidence_refs": []
     }
@@ -195,8 +252,8 @@
       "name": "Foundation party and customer",
       "state": "blocked",
       "depends_on": [],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-kernel",
@@ -238,8 +295,8 @@
       "depends_on": [
         "cohort-isp-01"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-service-catalog",
@@ -276,8 +333,8 @@
       "depends_on": [
         "cohort-isp-02"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-positioning",
@@ -339,8 +396,8 @@
       "depends_on": [
         "cohort-isp-03"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-projects",
@@ -384,8 +441,8 @@
       "depends_on": [
         "cohort-isp-04"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-usage",
@@ -447,8 +504,8 @@
       "depends_on": [
         "cohort-isp-05"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-inbox",
@@ -494,8 +551,8 @@
       "depends_on": [
         "cohort-isp-06"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-referrals",
@@ -542,8 +599,8 @@
       "depends_on": [
         "cohort-isp-07"
       ],
-      "current_authority": "asm-dotmac-sub-legacy",
-      "target_authority": "asm-dotmac-isp",
+      "current_authority": "asm-dotmac-sub-legacy-domains",
+      "target_authority": "asm-dotmac-sub-composed",
       "components": [
         {
           "component_id": "dotmac-analytics",
@@ -715,18 +772,7 @@
       "rationale": "First-party website observations; the Dotmac ERP product and Sub are the named independent adopters, not ISP."
     }
   ],
-  "open_decisions": [
-    {
-      "decision_id": "dec-isp-002",
-      "question": "Name the accountable production deployment owner and the runtime host for the independent Dotmac ISP assembly. TWO hosts have now been offered and both are REFUSED as stated, for the same reason: each is already carrying live production traffic for a different system. (1) `selfcare.dotmac.io` (2026-08-21) is the live dotmac_sub production host (vmi3348415) and the compiled-in default API base URL of shipped field-mobile store builds, so it names the system being replaced rather than an independent runtime. (2) `158.220.82.88` (2026-08-22) is `ns3.dotmac.ng` (vmi3519229), a live PowerDNS authoritative secondary and one of three nodes serving the `dotmac.ng` zone; placing an application runtime or a test database on it puts DNS resolution for the whole estate behind an unrelated workload. Answer two things separately: which host runs asm-dotmac-isp and its own database — it must be a host with no existing production role — and whether `selfcare.dotmac.io` is intended as the eventual cutover destination for customer traffic, which would repoint every installed mobile client and is a client-compatibility commitment, not a DNS change.",
-      "owner": "Michael Ayoade",
-      "state": "open",
-      "blocks": [
-        "ctl-isp-002",
-        "cohort-isp-01"
-      ]
-    }
-  ],
+  "open_decisions": [],
   "resolved_decisions": [
     {
       "decision_id": "dec-isp-003",
@@ -795,6 +841,20 @@
           "repository": "https://github.com/michaelayoade/dotmac_governance",
           "revision": "b36dbb913a2ff24414f77fd6807183c10593cae0",
           "subject": "Decision amendment answering dec-isp-007"
+        }
+      ]
+    },
+    {
+      "decision_id": "dec-isp-002",
+      "question": "Name the accountable production deployment owner and the runtime host for the independent Dotmac ISP assembly. TWO hosts have now been offered and both are REFUSED as stated, for the same reason: each is already carrying live production traffic for a different system. (1) `selfcare.dotmac.io` (2026-08-21) is the live dotmac_sub production host (vmi3348415) and the compiled-in default API base URL of shipped field-mobile store builds, so it names the system being replaced rather than an independent runtime. (2) `158.220.82.88` (2026-08-22) is `ns3.dotmac.ng` (vmi3519229), a live PowerDNS authoritative secondary and one of three nodes serving the `dotmac.ng` zone; placing an application runtime or a test database on it puts DNS resolution for the whole estate behind an unrelated workload. Answer two things separately: which host runs asm-dotmac-isp and its own database — it must be a host with no existing production role — and whether `selfcare.dotmac.io` is intended as the eventual cutover destination for customer traffic, which would repoint every installed mobile client and is a client-compatibility commitment, not a DNS change.",
+      "owner": "Michael Ayoade",
+      "resolution": "SUPERSEDED, not answered. The question presumed a separate ISP runtime needing its own host, database and deployment owner. Dotmac Sub is not being retired: it remains the ISP product, runtime, API identity, hostname and customer-facing application, and becomes a thin assembly in place. No separate host, second production database, mobile API-base repoint or cross-database sealing protocol is required, so host procurement stops being a programme gate. Three hosts had been offered and each already carried production; that search is closed rather than won.",
+      "evidence_refs": [
+        {
+          "producer": "Michael Ayoade",
+          "repository": "https://github.com/michaelayoade/dotmac_governance",
+          "revision": "09e349e358ccc8d1f9d87b538f5b95910c6bb56e",
+          "subject": "Conversion amendment supersedes dec-isp-002"
         }
       ]
     }

@@ -1,0 +1,1301 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-08-12",
+  "source_revisions": {
+    "dotmac_starter_mt": "c8237bd",
+    "dotmac_sub": "9f6f9f36b",
+    "dotmac_crm": "c64b5aa0",
+    "dotmac_erp": "766d4c0e",
+    "dotmac_vendor_control_plane": "eb667fa"
+  },
+  "assemblies": [
+    {
+      "id": "asm.starter",
+      "name": "Dotmac Starter (reference assembly)",
+      "sku": false,
+      "repository": "dotmac_starter_mt"
+    },
+    {
+      "id": "asm.isp",
+      "name": "Dotmac ISP",
+      "sku": true,
+      "repository": "dotmac_sub",
+      "note": "Subscriber/network modules plus selected shared modules."
+    },
+    {
+      "id": "asm.backoffice",
+      "name": "Dotmac Backoffice",
+      "sku": true,
+      "repository": "dotmac_erp",
+      "note": "Selected business modules. ERP has adopted no kernel — see dec.adoption.erp-kernel-prerequisite."
+    },
+    {
+      "id": "asm.engagement",
+      "name": "Dotmac Engagement",
+      "sku": true,
+      "repository": "dotmac_crm",
+      "note": "CRM capabilities. Duplicate operational state is retired, not extracted."
+    },
+    {
+      "id": "asm.academy",
+      "name": "Dotmac Academy",
+      "sku": true,
+      "repository": "dotmac_academy_app"
+    },
+    {
+      "id": "asm.vendor-cp",
+      "name": "Dotmac Vendor Control Plane",
+      "sku": false,
+      "repository": "dotmac_vendor_control_plane"
+    }
+  ],
+  "modules": [
+    {
+      "id": "mod.kernel",
+      "display_code": "M00",
+      "name": "dotmac-kernel",
+      "kind": "host-facility",
+      "band": "foundation",
+      "distribution": "dotmac-kernel",
+      "namespace": null,
+      "owns_capabilities": [
+        "cap.platform.tenancy",
+        "cap.platform.party-registry",
+        "cap.platform.idempotent-execution",
+        "cap.platform.transactional-outbox",
+        "cap.comms.consent",
+        "cap.comms.delivery-dispatch",
+        "cap.comms.channel-policy",
+        "cap.licensing.envelope-verification"
+      ],
+      "source_repositories": [
+        "dotmac_starter_mt"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/ARCHITECTURE.md"
+      ],
+      "note": "The host. Owns `public`; not a stateful module and has no mod_* lineage."
+    },
+    {
+      "id": "mod.ui",
+      "display_code": "M0U",
+      "name": "dotmac-ui",
+      "kind": "host-facility",
+      "band": "foundation",
+      "distribution": "dotmac-ui",
+      "namespace": null,
+      "owns_capabilities": [
+        "cap.presentation.design-tokens"
+      ],
+      "source_repositories": [
+        "dotmac_sub",
+        "dotmac_erp"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/ui-surface-inventory.md"
+      ]
+    },
+    {
+      "id": "mod.template-studio",
+      "display_code": "M01",
+      "name": "dotmac-template-studio",
+      "kind": "module",
+      "band": "shared-capability",
+      "distribution": "dotmac-template-studio",
+      "namespace": {
+        "db_schema": "mod_tstudio",
+        "migration_prefix": "ts",
+        "branch_label": "template_studio",
+        "allocated": true
+      },
+      "owns_capabilities": [
+        "cap.content.template-authoring"
+      ],
+      "source_repositories": [
+        "dotmac_erp",
+        "dotmac_sub"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/template-studio-source-audit.md"
+      ]
+    },
+    {
+      "id": "mod.ticketing",
+      "display_code": "M02",
+      "name": "dotmac-ticketing",
+      "kind": "module",
+      "band": "shared-capability",
+      "distribution": "dotmac-ticketing",
+      "namespace": {
+        "db_schema": "mod_tkt",
+        "migration_prefix": "tk",
+        "branch_label": "ticketing",
+        "allocated": true
+      },
+      "owns_capabilities": [
+        "cap.support.ticket-lifecycle"
+      ],
+      "source_repositories": [
+        "dotmac_sub",
+        "dotmac_crm",
+        "dotmac_erp"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/ticket-sources.md"
+      ]
+    },
+    {
+      "id": "mod.conversations",
+      "display_code": "M03",
+      "name": "dotmac-conversations",
+      "kind": "module",
+      "band": "shared-capability",
+      "distribution": null,
+      "namespace": {
+        "db_schema": "mod_ibx",
+        "migration_prefix": "ib",
+        "branch_label": "inbox",
+        "allocated": true
+      },
+      "owns_capabilities": [
+        "cap.inbound.conversation-thread"
+      ],
+      "source_repositories": [
+        "dotmac_sub",
+        "dotmac_crm"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/inbox-sources.md"
+      ],
+      "note": "Prototype on branch docs/omni-inbox-sources. Distribution deliberately null: not published, no kernel owner declared."
+    },
+    {
+      "id": "mod.licensing",
+      "display_code": "M51",
+      "name": "licensing",
+      "kind": "host-facility",
+      "band": "foundation",
+      "distribution": null,
+      "namespace": null,
+      "owns_capabilities": [
+        "cap.licensing.grant-projection"
+      ],
+      "source_repositories": [
+        "dotmac_starter_mt",
+        "dotmac_vendor_control_plane"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/adr/0007-deployment-authenticated-applied-state.md"
+      ],
+      "note": "Classified host-facility, not a stateful module: its tables live in the host assembly's own lineage (a002/a003), so it cannot also claim a mod_* namespace. Resolves the draft's M51 contradiction."
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "cap.platform.tenancy",
+      "name": "Tenant identity, domains and request-scoped isolation",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.platform.tenant-exists",
+          "statement": "A tenant and its domains exist and resolve.",
+          "transitions": [
+            "provisioned->active",
+            "active->suspended"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.models"
+        }
+      ],
+      "adjudication": null
+    },
+    {
+      "id": "cap.platform.party-registry",
+      "name": "Fleet-wide principal identity (Party)",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.identity.party-exists",
+          "statement": "A person or organization exists as one fleet-wide principal."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.models.Party"
+        },
+        {
+          "repository": "dotmac_sub",
+          "owner": "party.registry",
+          "evidence": [
+            "dotmac_sub:app/services/sot_registry/domains/party_identity.py"
+          ]
+        },
+        {
+          "repository": "dotmac_erp",
+          "owner": "app/models/person.py + app/models/people/",
+          "evidence": [
+            "dotmac_erp:app/models/people"
+          ]
+        },
+        {
+          "repository": "dotmac_crm",
+          "owner": "app/models/person.py",
+          "evidence": [
+            "dotmac_crm:app/models/person.py"
+          ]
+        }
+      ],
+      "adjudication": "dec.identity.principal-mapping"
+    },
+    {
+      "id": "cap.platform.idempotent-execution",
+      "name": "At-most-once execution with result replay",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.platform.operation-executed-once",
+          "statement": "An operation ran at most once per (tenant, scope, key), with its result replayable.",
+          "transitions": [
+            "absent->executed",
+            "executed->replayed",
+            "executed->conflict"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.idempotency",
+          "evidence": [
+            "dotmac_starter_mt:docs/adr/0014-at-most-once-execution-has-one-owner.md"
+          ]
+        }
+      ],
+      "adjudication": null,
+      "note": "ADR-0014, hard rule 21. Settled: no other module may re-decide this."
+    },
+    {
+      "id": "cap.platform.transactional-outbox",
+      "name": "Durable queue, relay, lease and retry",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.platform.event-enqueued",
+          "statement": "A domain event was enqueued atomically with its state change and will be delivered.",
+          "transitions": [
+            "pending->claimed",
+            "claimed->sent",
+            "claimed->dead-letter"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.messaging"
+        },
+        {
+          "repository": "dotmac_sub",
+          "owner": "Notification queue + tasks/notifications.py",
+          "evidence": [
+            "dotmac_starter_mt:docs/inventories/delivery-outbox-sources.md"
+          ]
+        }
+      ],
+      "adjudication": "dec.comms.sub-notification-queue-retirement"
+    },
+    {
+      "id": "cap.comms.consent",
+      "name": "May we contact this address on this channel",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.comms.address-suppressed",
+          "statement": "An address is suppressed for marketing or for all traffic, and why.",
+          "transitions": [
+            "contactable->suppressed",
+            "suppressed->contactable"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.consent"
+        }
+      ],
+      "adjudication": null
+    },
+    {
+      "id": "cap.comms.delivery-dispatch",
+      "name": "Send path and delivery receipts",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.comms.dispatch-outcome",
+          "statement": "One dispatch was sent, suppressed or failed, and what the provider said about it.",
+          "transitions": [
+            "pending->sent",
+            "pending->suppressed",
+            "sent->bounced",
+            "sent->delivered"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.delivery_providers + dotmac_kernel.delivery"
+        }
+      ],
+      "adjudication": null
+    },
+    {
+      "id": "cap.comms.channel-policy",
+      "name": "Which channels carry a class of message",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.comms.event-channel-set",
+          "statement": "The channel set an event or category goes out on."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.channel_policy"
+        }
+      ],
+      "adjudication": null
+    },
+    {
+      "id": "cap.comms.channel-vocabulary",
+      "name": "What a channel is, and how it behaves",
+      "target_boundary": "undecided",
+      "owned_facts": [
+        {
+          "key": "fact.comms.channel-traits",
+          "statement": "A channel's address form, transport, thread identity and message-id scope."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.consent.register_numeric_channels (one facet only)"
+        },
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.channel_policy (unvalidated open string)"
+        },
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.delivery_providers.OutboundMessage.channel (bare str)"
+        }
+      ],
+      "adjudication": "dec.comms.channel-vocabulary-owner",
+      "note": "Known in three kernel places, validated in none. A prototype fourth registry was built and withdrawn."
+    },
+    {
+      "id": "cap.presentation.design-tokens",
+      "name": "Semantic design tokens and the compiled stylesheet",
+      "target_boundary": "shared-module",
+      "owned_facts": [
+        {
+          "key": "fact.presentation.token-value",
+          "statement": "The value of a role-named design token."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_ui"
+        }
+      ],
+      "adjudication": null
+    },
+    {
+      "id": "cap.content.template-authoring",
+      "name": "Template identity, versioning, publication and placeholder contract",
+      "target_boundary": "shared-module",
+      "owned_facts": [
+        {
+          "key": "fact.content.template-published",
+          "statement": "Which version of a template is published for a context.",
+          "transitions": [
+            "draft->published",
+            "published->superseded"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_erp",
+          "owner": "document templates"
+        },
+        {
+          "repository": "dotmac_sub",
+          "owner": "notification templates"
+        }
+      ],
+      "adjudication": "dec.content.template-cutover-owner"
+    },
+    {
+      "id": "cap.support.ticket-lifecycle",
+      "name": "Durable request for work with a guarded lifecycle",
+      "target_boundary": "shared-module",
+      "owned_facts": [
+        {
+          "key": "fact.support.ticket-status",
+          "statement": "A ticket's status within the closed standard vocabulary, and its reason.",
+          "transitions": [
+            "new->open",
+            "open->waiting",
+            "waiting->open",
+            "open->resolved",
+            "resolved->closed",
+            "resolved->open"
+          ]
+        },
+        {
+          "key": "fact.support.ticket-assignment",
+          "statement": "Which person and team currently own a ticket."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "support.ticket_lifecycle",
+          "evidence": [
+            "dotmac_starter_mt:docs/inventories/ticket-sources.md"
+          ]
+        }
+      ],
+      "adjudication": null,
+      "note": "CRM's copy is a retirement source, not a second claim."
+    },
+    {
+      "id": "cap.inbound.provider-verification",
+      "display_code": "I1",
+      "name": "Provider clients and signature verification",
+      "target_boundary": "provider-adapter",
+      "owned_facts": [
+        {
+          "key": "fact.inbound.request-authentic",
+          "statement": "This request genuinely came from the provider that claims to have sent it."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "services/integrations/connectors"
+        },
+        {
+          "repository": "dotmac_crm",
+          "owner": "services/meta_webhooks.py (3282 LOC)"
+        }
+      ],
+      "adjudication": "dec.inbound.connected-account-boundary",
+      "depends_on": [
+        "cap.inbound.connected-account"
+      ],
+      "note": "RESOLVED disposition: provider adapters, per product. The kernel ships a Protocol and no clients — verification needs the RAW body, so it must stay separate from parsing."
+    },
+    {
+      "id": "cap.inbound.connected-account",
+      "display_code": "I2",
+      "name": "Connected accounts and endpoint configuration",
+      "target_boundary": "undecided",
+      "owned_facts": [
+        {
+          "key": "fact.inbound.account-connected",
+          "statement": "This tenant has connected this mailbox/page/number at this provider, and how to authenticate to it.",
+          "transitions": [
+            "absent->active",
+            "active->inactive"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "team_inbox_email_routes + team_inbox_channel_routes"
+        },
+        {
+          "repository": "dotmac_crm",
+          "owner": "connector_configs + integration_targets"
+        }
+      ],
+      "adjudication": "dec.inbound.connected-account-boundary",
+      "note": "OPEN: integration module versus product-owned configuration. Blocks everything downstream — account_scope has no source without it."
+    },
+    {
+      "id": "cap.inbound.idempotent-admission",
+      "display_code": "I3",
+      "name": "Idempotent admission of a provider event",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.idempotency"
+        }
+      ],
+      "adjudication": null,
+      "depends_on": [
+        "cap.platform.idempotent-execution"
+      ],
+      "note": "RESOLVED: no new owner. This IS cap.platform.idempotent-execution applied at the ingress; it owns no facts of its own. A separate inbound owner would be a fourth idempotency implementation."
+    },
+    {
+      "id": "cap.inbound.observation",
+      "display_code": "I4",
+      "name": "Authenticated receipt and normalized observation",
+      "target_boundary": "undecided",
+      "owned_facts": [
+        {
+          "key": "fact.inbound.provider-said",
+          "statement": "The normalized content of what a provider reported, durable and replayable so consequences can be re-derived after a parsing fix.",
+          "transitions": [
+            "recorded->processed",
+            "recorded->rejected"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "communications.team_inbox_observations",
+          "evidence": [
+            "dotmac_starter_mt:docs/inventories/inbox-sources.md"
+          ]
+        }
+      ],
+      "adjudication": "dec.inbound.shared-ingress",
+      "depends_on": [
+        "cap.inbound.provider-verification",
+        "cap.inbound.idempotent-admission"
+      ],
+      "note": "OPEN: shared ingress module only after product-first proof. ONE implementation, ZERO other consumers — characterizable, not yet extractable."
+    },
+    {
+      "id": "cap.isp.inbound-routing",
+      "display_code": "I5",
+      "name": "Contact matching and routing decisions",
+      "target_boundary": "owning-domain-module",
+      "owned_facts": [
+        {
+          "key": "fact.isp.contact-resolved",
+          "statement": "Which subscriber or reseller an observed contact endpoint belongs to, and on what evidence."
+        },
+        {
+          "key": "fact.isp.conversation-routed",
+          "statement": "Which team or agent owns a conversation."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "communications.team_inbox_contact_resolution + team_inbox_routing"
+        }
+      ],
+      "adjudication": null,
+      "note": "RESOLVED: not shared. ~340 lines of ISP identity policy in Sub alone; belongs to the owning domain module, never to an ingress."
+    },
+    {
+      "id": "cap.inbound.conversation-thread",
+      "display_code": "I6",
+      "name": "Conversations and messages",
+      "target_boundary": "shared-module",
+      "owned_facts": [
+        {
+          "key": "fact.conversation.thread-identity",
+          "statement": "Which conversation a message belongs to."
+        },
+        {
+          "key": "fact.conversation.message-recorded",
+          "statement": "The authoritative record of one message on a conversation."
+        },
+        {
+          "key": "fact.conversation.status",
+          "statement": "A conversation's status within the closed four-value vocabulary, and its reason.",
+          "transitions": [
+            "open->pending",
+            "open->snoozed",
+            "open->resolved",
+            "resolved->open"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "communications.team_inbox_threads"
+        }
+      ],
+      "adjudication": null,
+      "depends_on": [
+        "cap.inbound.observation",
+        "cap.comms.channel-vocabulary"
+      ]
+    },
+    {
+      "id": "cap.isp.conversation-consequences",
+      "display_code": "I7",
+      "name": "Ticket and work-order consequences of a conversation",
+      "target_boundary": "owning-domain-module",
+      "owned_facts": [
+        {
+          "key": "fact.isp.conversation-ticket-link",
+          "statement": "The durable provenance from a conversation to the ticket it produced."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "communications.conversation_ticket_handoff"
+        }
+      ],
+      "adjudication": null,
+      "depends_on": [
+        "cap.inbound.conversation-thread",
+        "cap.support.ticket-lifecycle"
+      ],
+      "note": "RESOLVED: Sub-derived operational modules."
+    },
+    {
+      "id": "cap.inbound.reply-delivery",
+      "display_code": "I8",
+      "name": "Replies and external delivery",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.messaging + dotmac_kernel.delivery_providers"
+        }
+      ],
+      "adjudication": null,
+      "depends_on": [
+        "cap.comms.delivery-dispatch",
+        "cap.comms.consent"
+      ],
+      "note": "RESOLVED: no new owner. A reply is an OutboundMessage on the existing send path; routing it there is what makes the consent check structural."
+    },
+    {
+      "id": "cap.engagement.lead-pipeline",
+      "name": "Generic lead identity, qualification and pipeline stage",
+      "target_boundary": "shared-module",
+      "owned_facts": [
+        {
+          "key": "fact.engagement.lead-stage",
+          "statement": "A lead's pipeline stage and conversion outcome.",
+          "transitions": [
+            "new->contacted",
+            "contacted->qualified",
+            "qualified->won",
+            "qualified->lost"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_crm",
+          "owner": "app/models/crm/sales.py"
+        }
+      ],
+      "adjudication": null,
+      "note": "RESOLVED via dec.acquisition.lead-scope: generic acquisition and ISP qualification are DISTINCT capabilities, not one contested claim."
+    },
+    {
+      "id": "cap.isp.service-qualification",
+      "name": "ISP service qualification and acquisition",
+      "target_boundary": "owning-domain-module",
+      "owned_facts": [
+        {
+          "key": "fact.isp.service-qualified",
+          "statement": "Whether a prospect's location can be served, and on what network evidence."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "sales_referrals/acquisition (12 owners)"
+        }
+      ],
+      "adjudication": null,
+      "note": "RESOLVED via dec.acquisition.lead-scope: distinct from cap.engagement.lead-pipeline."
+    },
+    {
+      "id": "cap.finance.general-ledger",
+      "name": "Accounts, journal entries, periods and posting rules",
+      "target_boundary": "shared-module",
+      "owned_facts": [
+        {
+          "key": "fact.finance.journal-posted",
+          "statement": "A balanced journal entry is posted to a period."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_erp",
+          "owner": "app/models/finance (134 tables)"
+        }
+      ],
+      "adjudication": null,
+      "note": "High-level disposition settled: accounting and ISP billing are SEPARATE authorities."
+    },
+    {
+      "id": "cap.isp.subscriber-billing",
+      "name": "Subscriber invoice lifecycle, prepaid balance and arrears",
+      "target_boundary": "owning-domain-module",
+      "owned_facts": [
+        {
+          "key": "fact.isp.subscriber-invoice",
+          "statement": "A subscriber invoice and its settlement state.",
+          "transitions": [
+            "draft->issued",
+            "issued->paid",
+            "issued->overdue"
+          ]
+        },
+        {
+          "key": "fact.isp.prepaid-balance",
+          "statement": "A subscriber's prepaid balance and FUP window."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "financial_access (74 owners)"
+        }
+      ],
+      "adjudication": "dec.finance.posting-contract",
+      "note": "Separate authority from the ledger; the OPEN question is the precise invoice/AR/posting contract between them."
+    },
+    {
+      "id": "cap.workforce.service-team",
+      "name": "Team identity, membership, capability and dispatch assignment",
+      "target_boundary": "undecided",
+      "owned_facts": [
+        {
+          "key": "fact.workforce.team-membership",
+          "statement": "Which parties belong to which team, in which role."
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_sub",
+          "owner": "operations.service_team_lifecycle + service_team_composition"
+        },
+        {
+          "repository": "dotmac_crm",
+          "owner": "app/web/admin/service_teams.py (retiring)"
+        },
+        {
+          "repository": "dotmac_erp",
+          "owner": "app/models/people (136 tables)"
+        }
+      ],
+      "adjudication": "dec.workforce.service-team-destination"
+    },
+    {
+      "id": "cap.licensing.envelope-verification",
+      "name": "Verify a vendor-signed licence envelope and its revocation list",
+      "target_boundary": "kernel-primitive",
+      "owned_facts": [
+        {
+          "key": "fact.licensing.envelope-valid",
+          "statement": "A licence envelope is authentic, unrevoked and bound to this deployment.",
+          "transitions": [
+            "unverified->accepted",
+            "unverified->rejected",
+            "accepted->revoked"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "dotmac_kernel.licensing"
+        }
+      ],
+      "adjudication": null,
+      "note": "Verification is LOCAL and offline by design: a request-time check never depends on reaching the vendor."
+    },
+    {
+      "id": "cap.licensing.grant-projection",
+      "name": "Entitlement grants projected from an accepted licence",
+      "target_boundary": "product-owned",
+      "owned_facts": [
+        {
+          "key": "fact.licensing.grant-applied",
+          "statement": "Which entitlement grants this deployment currently holds, and which licence version produced them.",
+          "transitions": [
+            "absent->applied",
+            "applied->superseded",
+            "applied->revoked"
+          ]
+        }
+      ],
+      "current_claims": [
+        {
+          "repository": "dotmac_starter_mt",
+          "owner": "app.features.licensing"
+        }
+      ],
+      "adjudication": null,
+      "note": "The GRANT is decided remotely by the vendor control plane (bind.starter.licensing-grant); the local projection is a rebuildable cache, never a parallel authority."
+    }
+  ],
+  "bindings": [
+    {
+      "id": "bind.vendor-cp.ticket-lifecycle",
+      "assembly": "asm.vendor-cp",
+      "capability": "cap.support.ticket-lifecycle",
+      "installation": "local",
+      "state": "planned",
+      "note": "Greenfield: no rows to migrate, no local writer to retire. Chosen to prove the lineage in production."
+    },
+    {
+      "id": "bind.isp.ticket-lifecycle",
+      "assembly": "asm.isp",
+      "capability": "cap.support.ticket-lifecycle",
+      "installation": "local",
+      "state": "planned"
+    },
+    {
+      "id": "bind.backoffice.ticket-lifecycle",
+      "assembly": "asm.backoffice",
+      "capability": "cap.support.ticket-lifecycle",
+      "installation": "local",
+      "state": "planned"
+    },
+    {
+      "id": "bind.isp.conversation-thread",
+      "assembly": "asm.isp",
+      "capability": "cap.inbound.conversation-thread",
+      "installation": "local",
+      "state": "planned"
+    },
+    {
+      "id": "bind.isp.inbound-observation",
+      "assembly": "asm.isp",
+      "capability": "cap.inbound.observation",
+      "installation": "local",
+      "state": "planned"
+    },
+    {
+      "id": "bind.isp.inbound-routing",
+      "assembly": "asm.isp",
+      "capability": "cap.isp.inbound-routing",
+      "installation": "local",
+      "state": "live"
+    },
+    {
+      "id": "bind.isp.reply-delivery",
+      "assembly": "asm.isp",
+      "capability": "cap.inbound.reply-delivery",
+      "installation": "local",
+      "state": "planned",
+      "transport": [
+        "smtp",
+        "meta-graph",
+        "whatsapp-cloud"
+      ],
+      "note": "Providers are reached over the network. That is TRANSPORT: the send decision is local."
+    },
+    {
+      "id": "bind.isp.subscriber-billing",
+      "assembly": "asm.isp",
+      "capability": "cap.isp.subscriber-billing",
+      "installation": "local",
+      "state": "live",
+      "transport": [
+        "payment-provider"
+      ],
+      "note": "A payment provider being remote is transport, not a remote capability binding. ADR-0003: a request-time access check never calls a payment provider."
+    },
+    {
+      "id": "bind.backoffice.general-ledger",
+      "assembly": "asm.backoffice",
+      "capability": "cap.finance.general-ledger",
+      "installation": "local",
+      "state": "live"
+    },
+    {
+      "id": "bind.isp.template-authoring",
+      "assembly": "asm.isp",
+      "capability": "cap.content.template-authoring",
+      "installation": "local",
+      "state": "planned"
+    },
+    {
+      "id": "bind.backoffice.template-authoring",
+      "assembly": "asm.backoffice",
+      "capability": "cap.content.template-authoring",
+      "installation": "local",
+      "state": "planned"
+    },
+    {
+      "id": "bind.starter.licensing-grant",
+      "assembly": "asm.starter",
+      "capability": "cap.licensing.grant-projection",
+      "installation": "remote",
+      "remote_authority": "asm.vendor-cp",
+      "state": "live",
+      "note": "Genuinely remote: the vendor control plane DECIDES the grant. The local request-time check reads the projected grant and never reaches a network."
+    },
+    {
+      "id": "bind.starter.licensing-verification",
+      "assembly": "asm.starter",
+      "capability": "cap.licensing.envelope-verification",
+      "installation": "local",
+      "state": "live"
+    }
+  ],
+  "cutovers": [
+    {
+      "id": "cut.vendor-cp.ticketing-v1",
+      "source": {
+        "repository": "dotmac_vendor_control_plane",
+        "authority": "(none — greenfield)"
+      },
+      "target_binding": "bind.vendor-cp.ticket-lifecycle",
+      "gates": {
+        "authority_moved": {
+          "state": "not-started"
+        },
+        "source_consuming": {
+          "state": "not-started"
+        },
+        "parity_proven": {
+          "state": "not-started",
+          "note": "Greenfield: parity is against the module's own suite, not a source."
+        },
+        "old_writer_retired": {
+          "state": "not-started",
+          "note": "No prior writer exists."
+        }
+      }
+    },
+    {
+      "id": "cut.sub.ticketing-v1",
+      "source": {
+        "repository": "dotmac_sub",
+        "authority": "support.ticket_lifecycle"
+      },
+      "target_binding": "bind.isp.ticket-lifecycle",
+      "gates": {
+        "authority_moved": {
+          "state": "not-started"
+        },
+        "source_consuming": {
+          "state": "not-started"
+        },
+        "parity_proven": {
+          "state": "not-started",
+          "note": "29 ticket test files to port; one KNOWN divergence — the module pauses the SLA clock while WAITING, Sub does not."
+        },
+        "old_writer_retired": {
+          "state": "not-started",
+          "note": "Sub retires TicketStatus and six hand-written status membership sets."
+        }
+      }
+    },
+    {
+      "id": "cut.crm.ticketing-v1",
+      "source": {
+        "repository": "dotmac_crm",
+        "authority": "app/services/tickets.py"
+      },
+      "target_binding": "bind.isp.ticket-lifecycle",
+      "gates": {
+        "authority_moved": {
+          "state": "in-progress",
+          "note": "CRM->Sub cutover already in flight."
+        },
+        "source_consuming": {
+          "state": "not-started"
+        },
+        "parity_proven": {
+          "state": "not-started"
+        },
+        "old_writer_retired": {
+          "state": "not-started"
+        }
+      },
+      "note": "One module, several source cutovers, different states. CRM's must land INTO the module rather than into Sub's local owner, or the fleet gains a third implementation while removing a second."
+    },
+    {
+      "id": "cut.sub.conversations-v1",
+      "source": {
+        "repository": "dotmac_sub",
+        "authority": "communications.team_inbox_threads"
+      },
+      "target_binding": "bind.isp.conversation-thread",
+      "gates": {
+        "authority_moved": {
+          "state": "not-started"
+        },
+        "source_consuming": {
+          "state": "not-started"
+        },
+        "parity_proven": {
+          "state": "not-started",
+          "note": "Three channel-receive suites are the proofs. One KNOWN divergence: per-channel dedup scope will ADMIT messages Sub currently rejects — measure in shadow."
+        },
+        "old_writer_retired": {
+          "state": "not-started"
+        }
+      },
+      "blocked_by": [
+        "dec.inbound.connected-account-boundary",
+        "dec.comms.channel-vocabulary-owner"
+      ]
+    },
+    {
+      "id": "cut.sub.template-studio-v1",
+      "source": {
+        "repository": "dotmac_sub",
+        "authority": "notification templates"
+      },
+      "target_binding": "bind.isp.template-authoring",
+      "gates": {
+        "authority_moved": {
+          "state": "not-started"
+        },
+        "source_consuming": {
+          "state": "not-started"
+        },
+        "parity_proven": {
+          "state": "not-started"
+        },
+        "old_writer_retired": {
+          "state": "not-started"
+        }
+      }
+    },
+    {
+      "id": "cut.erp.template-studio-v1",
+      "source": {
+        "repository": "dotmac_erp",
+        "authority": "document templates"
+      },
+      "target_binding": "bind.backoffice.template-authoring",
+      "gates": {
+        "authority_moved": {
+          "state": "not-started"
+        },
+        "source_consuming": {
+          "state": "not-started"
+        },
+        "parity_proven": {
+          "state": "not-started"
+        },
+        "old_writer_retired": {
+          "state": "not-started"
+        }
+      },
+      "blocked_by": [
+        "dec.adoption.erp-kernel-prerequisite"
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "dec.identity.principal-mapping",
+      "display_code": "A2",
+      "title": "Principal mapping: kernel Party vs ERP employee vs Sub subscriber vs CRM person",
+      "state": "open",
+      "order": 1,
+      "remaining": "Fix the mapping between the four models. A subscriber is not a Party, it HAS one; an employee is not a Party, it HAS one; a CRM person is an engagement record. Sub already carries the discipline (party.registry is its canonical Person Party owner, party_contact_points binds observed endpoints with evidence) and the extraction must preserve it rather than flatten it. CONCRETE BLOCKER measured 2026-08-12: Sub's `user_credentials` cannot converge with the kernel's. The kernel links a credential to one `party_id`; Sub links to THREE principal kinds under an exactly-one CHECK (subscriber_id, system_user_id, reseller_user_id); radius_server_id sits outside the CHECK and is a provider reference, not a principal. That is an identity-model difference, not extra columns, and it is the table that stalls Sub's 0.1.0a40 lineage adoption — the programme's first proof. ADJUDICATION IN PROGRESS: ADR-0019 (Accepted, fleet-wide, kernel 0.1.0a41) owns the four-way Party / PartyRole / Account / Principal separation and the rule that authentication binds to a Party while authorization binds to a PartyRole. Record its disposition here once the party worktree lands.",
+      "blocks": [
+        "cap.platform.party-registry",
+        "cap.workforce.service-team",
+        "cut.sub.conversations-v1"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/inbox-sources.md",
+        "dotmac_sub:app/services/sot_registry/domains/party_identity.py",
+        "dotmac_starter_mt:docs/inventories/sub-lineage-dispositions.md",
+        "dotmac_starter_mt:docs/adr/0019-party-identity-follows-the-archetype.md"
+      ],
+      "note": "FIRST. Blocks Sub's atomic revision 0001 lineage adoption and the Party principal cutover — nothing downstream can be sequenced until principals map."
+    },
+    {
+      "id": "dec.finance.posting-contract",
+      "display_code": "A1",
+      "title": "The invoice / AR / posting contract between accounting and ISP billing",
+      "state": "open",
+      "order": 2,
+      "disposition": "High-level disposition SETTLED: accounting (cap.finance.general-ledger) and ISP billing (cap.isp.subscriber-billing) are separate authorities on separate data planes (ADR-0003). Neither reads the other's tables.",
+      "remaining": "The precise contract: what subscriber billing posts to the ledger, in what form, at what granularity, and how reconciliation and correction flow back.",
+      "blocks": [
+        "cap.isp.subscriber-billing"
+      ],
+      "evidence": [
+        "dotmac_erp:app/models/finance",
+        "dotmac_sub:app/services/sot_registry/domains/financial_access"
+      ]
+    },
+    {
+      "id": "dec.inbound.connected-account-boundary",
+      "display_code": "I2",
+      "title": "Connected accounts: integration module or product-owned configuration",
+      "state": "open",
+      "order": 3,
+      "remaining": "Decide the boundary. account_scope has no source without it, so every thread key and dedup key downstream depends on this answer. A kernel home was prototyped and withdrawn.",
+      "blocks": [
+        "cap.inbound.connected-account",
+        "cap.inbound.provider-verification",
+        "cut.sub.conversations-v1"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/inbox-sources.md"
+      ]
+    },
+    {
+      "id": "dec.inbound.shared-ingress",
+      "display_code": "I4",
+      "title": "Is normalized observation a shared ingress module",
+      "state": "open",
+      "order": 4,
+      "remaining": "Product-first proof required. ONE implementation (Sub) and ZERO other consumers today, so the capability is characterizable but not yet extractable. Revisit when a second consumer exists.",
+      "blocks": [
+        "cap.inbound.observation"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/inbox-sources.md"
+      ]
+    },
+    {
+      "id": "dec.comms.channel-vocabulary-owner",
+      "title": "Who owns the channel vocabulary",
+      "state": "open",
+      "order": 5,
+      "remaining": "Known in three kernel places and validated in none. Modules may not import each other, so no module can be the source for consent, channel policy and delivery alike. A kernel registry was prototyped and withdrawn pending this decision.",
+      "blocks": [
+        "cap.comms.channel-vocabulary",
+        "cut.sub.conversations-v1"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/inbox-sources.md"
+      ]
+    },
+    {
+      "id": "dec.workforce.service-team-destination",
+      "display_code": "A3",
+      "title": "Where service teams land",
+      "state": "blocked",
+      "order": 6,
+      "blocked_by": [],
+      "remaining": "Finish and retire the CURRENT Sub service-team cutover before selecting another destination. Choosing now would make a third destination while two are still moving.",
+      "blocks": [
+        "cap.workforce.service-team"
+      ],
+      "evidence": [
+        "dotmac_sub:docs/designs/SERVICE_TEAM_LIFECYCLE_SOT.md"
+      ],
+      "note": "BLOCKED, not open. Must not be worked."
+    },
+    {
+      "id": "dec.acquisition.lead-scope",
+      "display_code": "A4",
+      "title": "Generic acquisition versus ISP qualification",
+      "state": "resolved",
+      "order": 7,
+      "disposition": "RESOLVED: they are DISTINCT capabilities, not one contested claim. cap.engagement.lead-pipeline takes the generic contract (CRM-sourced); cap.isp.service-qualification stays in the ISP vertical (Sub-sourced, wired to conversation lead links and network serviceability). Neither is a claim on the other.",
+      "blocks": [],
+      "evidence": [
+        "dotmac_crm:app/models/crm/sales.py",
+        "dotmac_sub:app/services/sot_registry/domains/sales_referrals"
+      ]
+    },
+    {
+      "id": "dec.comms.sub-notification-queue-retirement",
+      "title": "Retiring Sub's notification queue in favour of the kernel outbox",
+      "state": "open",
+      "order": 8,
+      "disposition": "Disposition settled by inventory: Sub's Notification queue and the kernel's OutboxEvent are the same engine built twice.",
+      "remaining": "Sequence the retirement; Sub's predates the kernel's and could not have used it.",
+      "blocks": [
+        "cap.platform.transactional-outbox"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/delivery-outbox-sources.md"
+      ]
+    },
+    {
+      "id": "dec.content.template-cutover-owner",
+      "title": "Template Studio cutover ordering across ERP and Sub",
+      "state": "open",
+      "order": 9,
+      "blocks": [
+        "cap.content.template-authoring"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/template-studio-source-audit.md"
+      ]
+    },
+    {
+      "id": "dec.adoption.erp-kernel-prerequisite",
+      "display_code": "D1",
+      "title": "Does ERP adopt the kernel before or during its first module extraction",
+      "state": "open",
+      "order": 10,
+      "remaining": "ERP has no kernel, no import boundary and no measurable RLS coverage. Extracting a module into a product that cannot compose it is a plan with no adopter.",
+      "blocks": [
+        "cut.erp.template-studio-v1"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:docs/inventories/tenancy-characterization.md"
+      ]
+    },
+    {
+      "id": "dec.programme.first-vertical",
+      "display_code": "D6",
+      "title": "Which single complete vertical is step 4 of the programme sequence",
+      "state": "open",
+      "order": 11,
+      "remaining": "Step 4 requires ONE complete vertical extraction, not a horizontal collection of packages. Candidates: ISP subscriber+catalog+provisioning, or Backoffice inventory+procurement+assets. The whole sequence waits on this.",
+      "blocks": [],
+      "evidence": [
+        "dotmac_starter_mt:docs/superpowers/plans/2026-08-12-fleet-decomposition-matrix.md"
+      ]
+    },
+    {
+      "id": "dec.kernel.job-composition",
+      "title": "A module cannot declare background work",
+      "state": "open",
+      "order": 12,
+      "remaining": "ModuleManifest declares api_routers, web_routers, nav, permissions, capabilities, feature_flags, setting_domains, audit_actions and seed — but NOT jobs. There is no task seam in the kernel at all (no celery/scheduler/register_job). The kernel runs its OWN outbox relay and worker, so the capability exists but is not composable. Every product wires background work by hand (Sub and CRM each carry celery_app.py + tasks/). Declaring a job is COMPOSITION and is in scope; building a generic scheduling facility is not — that is explicitly deferred until an extraction is blocked by it.",
+      "blocks": [
+        "cap.support.ticket-lifecycle",
+        "cap.inbound.conversation-thread"
+      ],
+      "evidence": [
+        "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "note": "Readiness gap in composition-spine criterion 6 (router, job, permission and UI composition). Will block ticket SLA clocks and conversation reply reminders."
+    },
+    {
+      "id": "dec.kernel.consumer-compatibility-ci",
+      "title": "Compatibility CI proves an EMPTY consumer boots, not that real consumers still work",
+      "state": "open",
+      "order": 13,
+      "disposition": "Exact-version upgrade discipline is SOLID: protected-main SHA assertion, version/metadata match, wheel build, dist inspection, publish to the Forgejo private index, then install from the registry and verify.",
+      "remaining": "consumer_boot_check.sh proves the wheel boots an EMPTY external consumer importing only the public surface. It does not test a kernel candidate against Sub or ERP before release. Decide whether pre-release compatibility runs against real consumer revisions.",
+      "blocks": [],
+      "evidence": [
+        "dotmac_starter_mt:scripts/consumer_boot_check.sh",
+        "dotmac_starter_mt:.github/workflows/release-kernel.yml"
+      ],
+      "note": "Readiness gap in composition-spine criterion 7."
+    }
+  ]
+}

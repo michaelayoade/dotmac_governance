@@ -12,6 +12,7 @@ AuthorityId = NewType("AuthorityId", str)
 ResourceId = NewType("ResourceId", str)
 SurfaceId = NewType("SurfaceId", str)
 VocabularyId = NewType("VocabularyId", str)
+DeploymentArtefactSurfaceId = NewType("DeploymentArtefactSurfaceId", str)
 CanonicalRepository = NewType("CanonicalRepository", str)
 BranchName = NewType("BranchName", str)
 PythonSymbol = NewType("PythonSymbol", str)
@@ -133,6 +134,13 @@ class DiagnosticCode(str, Enum):
     CONNECTOR_DEPENDENCY_LOCK_UNAVAILABLE = "connector.dependency-lock.unavailable"
     CONNECTOR_RUNTIME_DEPENDENCY_FORBIDDEN = "connector.runtime-dependency.forbidden"
     CONNECTOR_SOURCE_DISTRIBUTION_EXCLUDED = "connector.source-distribution.excluded"
+    DEPLOYMENT_SURFACE_MISSING = "deployment.surface.missing"
+    DEPLOYMENT_SURFACE_UNREADABLE = "deployment.surface.unreadable"
+    DEPLOYMENT_IMAGE_NOT_PINNED = "deployment.image.not-pinned"
+    DEPLOYMENT_ENVIRONMENT_LITERAL = "deployment.environment.literal"
+    DEPLOYMENT_CREDENTIAL_FILENAME = "deployment.credential.filename"
+    DEPLOYMENT_RENDER_CHECK_ABSENT = "deployment.render-check.absent"
+    DEPLOYMENT_SURFACE_UNDECLARED = "deployment.surface.undeclared"
 
 
 @dataclass(frozen=True)
@@ -218,6 +226,25 @@ class TestingKitBoundary:
     test_roots: tuple[PurePosixPath, ...]
     kit_source_roots: tuple[PurePosixPath, ...]
     conformance_probes: tuple[ConformanceProbe, ...]
+
+
+@dataclass(frozen=True)
+class DeploymentArtefactSurface:
+    """One deployable a repository ships, and the assets rendered from it.
+
+    ADR 0014. The DECLARATION is the artefact that must carry no environment
+    fact; the RENDER is that declaration plus one environment, compared
+    byte-for-byte by a named workflow. Both are named here because the two
+    halves fail differently: a declaration that grew an address is a standard
+    violation, and a render nobody compares is a deployment nobody approved.
+    """
+
+    surface_id: DeploymentArtefactSurfaceId
+    subject: str
+    declaration_paths: tuple[PurePosixPath, ...]
+    rendered_paths: tuple[PurePosixPath, ...]
+    render_check_workflow: PurePosixPath
+    render_check_command: str
 
 
 @dataclass(frozen=True)
@@ -343,6 +370,7 @@ class StandardsProfile:
     module_declared_vocabularies: tuple[ModuleDeclaredVocabulary, ...]
     testing_kit_boundary: TestingKitBoundary
     external_connector_surface: ExternalConnectorSurface
+    deployment_artefact_surfaces: tuple[DeploymentArtefactSurface, ...]
 
 
 @dataclass(frozen=True)

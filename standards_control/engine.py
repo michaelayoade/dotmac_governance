@@ -7,6 +7,7 @@ import copy
 import functools
 import hashlib
 import importlib
+import ipaddress
 import json
 import re
 import subprocess
@@ -23,6 +24,7 @@ from .contracts import (
     ConnectorCategory,
     ConnectorScope,
     ConservedFinding,
+    DeploymentArtefactSurface,
     Diagnostic,
     DiagnosticCode,
     ExcludedSource,
@@ -4466,6 +4468,301 @@ def _external_connector(
     return findings
 
 
+# --- ADR 0014: build once, bind the environment late -------------------------
+#
+# The standard's four properties, minus the two a repository may not assert
+# about itself. Whether a pipeline produced all four digests, and whether an
+# authorization named them, are facts about workflow runs and about another
+# repository's records; ADR 0013 § 1 puts those outside repository-local
+# derivation and § 5 permits automation only where a contract carries a
+# declared oracle kind. This family checks what IS decidable from repository
+# content, and ADR 0014's drift-prevention section states the rest as
+# review discipline rather than implying coverage.
+#
+# The DECLARATION and the RENDER are checked differently on purpose. A
+# declaration must carry no environment fact at all. A render is that
+# declaration plus one environment, so a derived loopback literal is expected
+# there and an address check over rendered output would refuse the correct
+# result. What both must hold is an immutable image digest.
+
+#: Filenames that name credential material. A basename is a BINDING, and
+#: ADR 0014 § 4 excludes it alongside the value precisely because a redaction
+#: sweep shaped for values passes straight over it.
+_CREDENTIAL_FILENAMES = frozenset(
+    {".env", ".netrc", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
+)
+_CREDENTIAL_SUFFIXES = (
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".jks",
+    ".keytab",
+    ".kdbx",
+    ".ppk",
+)
+
+#: A token is read as an image reference only in these positions. Scanning
+#: every string for something image-shaped would flag a module path; reading
+#: the KEY keeps the check narrow enough to be believed.
+_IMAGE_ASSIGNMENT = re.compile(
+    r"""(?:^|[\s,{[])(?:image|reference)\s*[:=]\s*["']?([^"'\s,}\]]+)""",
+    re.IGNORECASE,
+)
+_IMAGE_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+#: Anything that could be an image reference at all: a registry path, or a
+#: name carrying a tag. A bare word is not one, so `image = true` is ignored
+#: rather than reported as an unpinned image.
+_IMAGE_SHAPED = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9._-]+)?(?:@[A-Za-z0-9:._-]+)?$"
+)
+_ADDRESS_TOKEN = re.compile(r"[0-9A-Fa-f:.]+(?:/[0-9]{1,3})?")
+
+
+def _reads(root: Path, relative: PurePosixPath) -> tuple[str | None, Diagnostic | None]:
+    """Read one declared file, turning every failure into a diagnostic.
+
+    Fails closed. A surface the engine cannot read is reported, never skipped:
+    a skip is indistinguishable from a pass in a report a human scans.
+    """
+    target = root / Path(relative)
+    if not target.exists():
+        return None, _finding(
+            DiagnosticCode.DEPLOYMENT_SURFACE_MISSING,
+            "the profile declares this deployment surface and the repository "
+            "does not contain it; a surface that names nothing passes every "
+            "content check for the wrong reason",
+            path=relative,
+        )
+    try:
+        return target.read_text(encoding="utf-8"), None
+    except (OSError, UnicodeError) as error:
+        return None, _finding(
+            DiagnosticCode.DEPLOYMENT_SURFACE_UNREADABLE,
+            f"cannot read the declared deployment surface: {type(error).__name__}",
+            path=relative,
+        )
+
+
+def _unpinned_images(body: str, relative: PurePosixPath) -> list[Diagnostic]:
+    findings: list[Diagnostic] = []
+    for number, line in enumerate(body.splitlines(), start=1):
+        for value in _IMAGE_ASSIGNMENT.findall(line):
+            if not _IMAGE_SHAPED.match(value) and "${" not in value:
+                continue
+            if _IMAGE_DIGEST.search(value):
+                continue
+            if "${" in value:
+                # A deploy-time substitution is not an artefact-carried digest.
+                # ADR 0014 § 3 says the artefact holds exact digests, and a
+                # variable is exactly the escape that would let a repository
+                # replace every digest and stay green.
+                findings.append(
+                    _finding(
+                        DiagnosticCode.DEPLOYMENT_IMAGE_NOT_PINNED,
+                        f"{value} defers the image to a deploy-time "
+                        "substitution; ADR 0014 requires the artefact to carry "
+                        "the exact digest, because a value resolved later "
+                        "cannot be the value that was approved",
+                        path=relative,
+                        line=number,
+                    )
+                )
+                continue
+            if "/" not in value and ":" not in value:
+                continue
+            findings.append(
+                _finding(
+                    DiagnosticCode.DEPLOYMENT_IMAGE_NOT_PINNED,
+                    f"{value} is a mutable reference; ADR 0014 requires an "
+                    "immutable @sha256: digest, because a tag makes what ran "
+                    "yesterday and what runs after the next restart two "
+                    "deployments with one description",
+                    path=relative,
+                    line=number,
+                )
+            )
+    return findings
+
+
+def _environment_literals(body: str, relative: PurePosixPath) -> list[Diagnostic]:
+    """Addresses and CIDRs, PARSED rather than pattern-matched.
+
+    A regex for something address-shaped reports a version string and a port
+    range. `ipaddress` decides, so `1.2.3` and `8000-8080` are not findings and
+    `10.0.0.0/8` is.
+    """
+    findings: list[Diagnostic] = []
+    for number, line in enumerate(body.splitlines(), start=1):
+        for token in _ADDRESS_TOKEN.findall(line):
+            candidate = token.strip(".:")
+            if (
+                not candidate
+                or "sha256" in line
+                and candidate in line.split("sha256")[-1]
+            ):
+                continue
+            if len(candidate) == 64 and all(c in "0123456789abcdef" for c in candidate):
+                continue
+            try:
+                ipaddress.ip_address(candidate)
+            except ValueError:
+                try:
+                    ipaddress.ip_network(candidate, strict=False)
+                except ValueError:
+                    continue
+            findings.append(
+                _finding(
+                    DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+                    f"{candidate} is an environment address; ADR 0014 § 4 "
+                    "excludes it from the artefact and § 5 binds it late, "
+                    "because an address committed here differs per environment "
+                    "and goes stale with nothing failing",
+                    path=relative,
+                    line=number,
+                )
+            )
+    return findings
+
+
+def _credential_filenames(body: str, relative: PurePosixPath) -> list[Diagnostic]:
+    findings: list[Diagnostic] = []
+    for number, line in enumerate(body.splitlines(), start=1):
+        for raw in re.findall(r"[A-Za-z0-9_.\-/]+", line):
+            name = raw.rsplit("/", 1)[-1]
+            if name in _CREDENTIAL_FILENAMES or name.endswith(_CREDENTIAL_SUFFIXES):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.DEPLOYMENT_CREDENTIAL_FILENAME,
+                        f"{name} names credential material; ADR 0014 § 4 "
+                        "excludes a credential FILENAME alongside the value, "
+                        "because a basename is a binding and a sweep shaped "
+                        "for values passes straight over it",
+                        path=relative,
+                        line=number,
+                    )
+                )
+    return findings
+
+
+#: Filenames that ARE a deployment declaration in this fleet. Used only to
+#: decide whether declaring NO surface is credible — never to guess what a
+#: surface contains.
+_DEPLOYMENT_ARTEFACT_NAMES = frozenset(
+    {
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+        "product.toml",
+    }
+)
+
+
+def _undeclared_deployment_artefacts(root: Path) -> list[PurePosixPath]:
+    """Deployment declarations the repository ships and the profile does not name.
+
+    Without this, an empty `deployment_artefact_surfaces` is a way to ship a
+    deployment and stay green by declining to mention it — the exact vacuous
+    pass ADR 0018 refuses. The detector is narrow on purpose: it recognises the
+    file NAMES this fleet actually deploys from, and never inspects content, so
+    it cannot drift into guessing.
+    """
+    found: list[PurePosixPath] = []
+    for candidate in sorted(root.rglob("*")):
+        if not candidate.is_file() or candidate.name not in _DEPLOYMENT_ARTEFACT_NAMES:
+            continue
+        relative = PurePosixPath(candidate.relative_to(root).as_posix())
+        if any(part in {".git", "node_modules", ".venv"} for part in relative.parts):
+            continue
+        found.append(relative)
+    return found
+
+
+def _deployment_artefact(
+    root: Path, surfaces: tuple[DeploymentArtefactSurface, ...]
+) -> list[Diagnostic]:
+    """ADR 0014, over every declared deployment surface."""
+    findings: list[Diagnostic] = []
+    declared = {path for surface in surfaces for path in surface.declaration_paths} | {
+        path for surface in surfaces for path in surface.rendered_paths
+    }
+    for shipped in _undeclared_deployment_artefacts(root):
+        if shipped in declared:
+            continue
+        if any(
+            shipped.is_relative_to(rendered)
+            for surface in surfaces
+            for rendered in surface.rendered_paths
+        ):
+            continue
+        findings.append(
+            _finding(
+                DiagnosticCode.DEPLOYMENT_SURFACE_UNDECLARED,
+                "the repository ships this deployment declaration and the "
+                "profile does not name it; a pin that does not say what is "
+                "enforced cannot fail when the enforcement stops covering "
+                "something",
+                path=shipped,
+            )
+        )
+    for surface in surfaces:
+        for relative in surface.declaration_paths:
+            body, problem = _reads(root, relative)
+            if problem is not None:
+                findings.append(problem)
+                continue
+            assert body is not None
+            findings.extend(_unpinned_images(body, relative))
+            findings.extend(_environment_literals(body, relative))
+            findings.extend(_credential_filenames(body, relative))
+        for relative in surface.rendered_paths:
+            target = root / Path(relative)
+            if target.is_dir():
+                members = sorted(item for item in target.rglob("*") if item.is_file())
+                if not members:
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.DEPLOYMENT_SURFACE_MISSING,
+                            "the profile declares rendered output here and the "
+                            "directory holds none",
+                            path=relative,
+                        )
+                    )
+                for member in members:
+                    child = PurePosixPath(member.relative_to(root).as_posix())
+                    body, problem = _reads(root, child)
+                    if problem is not None:
+                        findings.append(problem)
+                        continue
+                    assert body is not None
+                    findings.extend(_unpinned_images(body, child))
+                continue
+            body, problem = _reads(root, relative)
+            if problem is not None:
+                findings.append(problem)
+                continue
+            assert body is not None
+            findings.extend(_unpinned_images(body, relative))
+        workflow, problem = _reads(root, surface.render_check_workflow)
+        if problem is not None:
+            findings.append(problem)
+            continue
+        assert workflow is not None
+        if surface.render_check_command not in workflow:
+            findings.append(
+                _finding(
+                    DiagnosticCode.DEPLOYMENT_RENDER_CHECK_ABSENT,
+                    f"this workflow does not run {surface.render_check_command!r}; "
+                    "ADR 0014 requires rendered assets to be compared "
+                    "byte-for-byte rather than produced on the target host, and "
+                    "a render nobody compares is a deployment nobody approved",
+                    path=surface.render_check_workflow,
+                )
+            )
+    return findings
+
+
 def verify_repository(
     root: Path,
     profile_path: Path,
@@ -4613,6 +4910,7 @@ def verify_repository(
         )
     findings.extend(_testing_kit(root, profile.testing_kit_boundary, inventory or ()))
     findings.extend(_external_connector(root, profile, scope))
+    findings.extend(_deployment_artefact(root, profile.deployment_artefact_surfaces))
     return ConformanceReport(
         profile.profile_id,
         profile.enforcement_mode,

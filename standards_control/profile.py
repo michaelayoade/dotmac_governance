@@ -17,6 +17,8 @@ from .contracts import (
     ConformanceProbe,
     ConnectorCategory,
     ConservedFinding,
+    DeploymentArtefactSurface,
+    DeploymentArtefactSurfaceId,
     EnforcementMode,
     ExternalConnectorSurface,
     GitRevision,
@@ -498,6 +500,55 @@ def _external_connector_surface(value: object) -> ExternalConnectorSurface:
     return ExternalConnectorSurface(baselines=baselines, conserved_exclusions=conserved)
 
 
+def _deployment_artefact_surface(
+    value: object, index: int
+) -> DeploymentArtefactSurface:
+    location = f"deployment_artefact_surfaces[{index}]"
+    data = _object(value, location)
+    _keys(
+        data,
+        frozenset(
+            {
+                "surface_id",
+                "subject",
+                "declaration_paths",
+                "rendered_paths",
+                "render_check_workflow",
+                "render_check_command",
+            }
+        ),
+        location,
+    )
+    declarations = _paths(data["declaration_paths"], f"{location}.declaration_paths")
+    if not declarations:
+        # A surface naming no declaration passes every content check for the
+        # wrong reason. ADR 0014's drift-prevention section says the
+        # declaration is checked before its content, and this is where.
+        raise ProfileError(f"{location}.declaration_paths must not be empty")
+    rendered = _paths(data["rendered_paths"], f"{location}.rendered_paths")
+    overlap = sorted(set(declarations) & set(rendered))
+    if overlap:
+        # The declaration is the input and the render is its output. A path
+        # that is both makes the byte comparison compare a file with itself.
+        raise ProfileError(
+            f"{location} lists {overlap[0]} as both a declaration and a rendered path"
+        )
+    return DeploymentArtefactSurface(
+        surface_id=DeploymentArtefactSurfaceId(
+            _slug(data["surface_id"], f"{location}.surface_id")
+        ),
+        subject=_string(data["subject"], f"{location}.subject"),
+        declaration_paths=declarations,
+        rendered_paths=rendered,
+        render_check_workflow=_path(
+            data["render_check_workflow"], f"{location}.render_check_workflow"
+        ),
+        render_check_command=_string(
+            data["render_check_command"], f"{location}.render_check_command"
+        ),
+    )
+
+
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
@@ -515,13 +566,14 @@ def parse_profile(value: object) -> StandardsProfile:
                 "module_declared_vocabularies",
                 "testing_kit_boundary",
                 "external_connector_surface",
+                "deployment_artefact_surfaces",
             }
         ),
         "profile",
     )
     version = data["schema_version"]
     if isinstance(version, bool) or not isinstance(version, int):
-        raise ProfileError("schema_version must be integer 9")
+        raise ProfileError("schema_version must be integer 10")
     if version == 7:
         # Version 7 shipped an exclusion that was a SILENT subtraction: nothing
         # recorded what left the measured universe. It is withdrawn rather than
@@ -558,8 +610,31 @@ def parse_profile(value: object) -> StandardsProfile:
             "profile to schema_version 9, rename the baseline key to "
             "outbound_transport, and RE-MEASURE it with the engine"
         )
-    if version != 9:
-        raise ProfileError("schema_version must be integer 9")
+    if version == 9:
+        # Version 9 is SUPERSEDED, not withdrawn, and the difference is the
+        # whole point of this branch. Versions 7 and 8 refused to load because
+        # a number measured under the old rule would have been wrong under the
+        # new one; nothing measured changes here. ADR 0014 adds a surface a
+        # version-9 profile simply does not declare, so the migration is one
+        # mechanical edit, and the loader says so rather than emitting a bare
+        # version mismatch a reader has to go and decode.
+        #
+        # It still refuses to load. Defaulting the new key to an empty array on
+        # a product's behalf would enrol every repository in a standard nobody
+        # declared, and would report a repository holding real deployment
+        # artefacts as conforming because it named none of them — the vacuous
+        # green this family exists to prevent.
+        raise ProfileError(
+            "schema_version 9 is superseded by 10: ADR 0014 requires a profile "
+            "to declare deployment_artefact_surfaces, naming the deployment "
+            "declarations the repository ships and the workflow that compares "
+            "their rendered output byte-for-byte. The loader will not supply "
+            "that key on your behalf, because an undeclared surface is "
+            "indistinguishable from a repository that ships none. Add the key "
+            "and set schema_version to 10"
+        )
+    if version != 10:
+        raise ProfileError("schema_version must be integer 10")
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -598,8 +673,20 @@ def parse_profile(value: object) -> StandardsProfile:
     if len({item.vocabulary_id for item in vocabularies}) != len(vocabularies):
         raise ProfileError("vocabulary_id values must be unique")
     connector_surface = _external_connector_surface(data["external_connector_surface"])
+    deployments = tuple(
+        _deployment_artefact_surface(item, index)
+        for index, item in enumerate(
+            _sequence(
+                data["deployment_artefact_surfaces"], "deployment_artefact_surfaces"
+            )
+        )
+    )
+    if len({item.surface_id for item in deployments}) != len(deployments):
+        raise ProfileError(
+            "deployment_artefact_surfaces surface_id values must be unique"
+        )
     return StandardsProfile(
-        schema_version=9,
+        schema_version=10,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,
@@ -609,6 +696,7 @@ def parse_profile(value: object) -> StandardsProfile:
         module_declared_vocabularies=vocabularies,
         testing_kit_boundary=_testing_kit_boundary(data["testing_kit_boundary"]),
         external_connector_surface=connector_surface,
+        deployment_artefact_surfaces=deployments,
     )
 
 

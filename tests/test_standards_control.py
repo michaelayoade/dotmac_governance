@@ -1767,9 +1767,71 @@ def connector_surface() -> dict[str, object]:
     }
 
 
+#: A conforming deployment declaration: an image pinned by digest, no address,
+#: no credential filename. Every planted proof below mutates exactly one line
+#: of this, so the thing under test is the mutation and not the fixture.
+_EXAMPLE_DIGEST = "b" * 64
+
+DEPLOYMENT_DECLARATION = (
+    'schema = "ProductDeploymentSpec.v1"\n'
+    'product = "example"\n'
+    "\n"
+    "[image]\n"
+    f'reference = "registry.example.com/example/app@sha256:{_EXAMPLE_DIGEST}"\n'
+    "\n"
+    "[[roles]]\n"
+    'code = "app"\n'
+)
+
+DEPLOYMENT_RENDERED = (
+    "services:\n"
+    "  app:\n"
+    f'    image: "registry.example.com/example/app@sha256:{_EXAMPLE_DIGEST}"\n'
+)
+
+RENDER_CHECK_COMMAND = "dotmac-deploy render --check"
+
+DEPLOYMENT_WORKFLOW = (
+    "name: Deployment conformance\n"
+    "jobs:\n"
+    "  render:\n"
+    "    steps:\n"
+    f"      - run: {RENDER_CHECK_COMMAND} -o deploy/rendered\n"
+)
+
+
+def deployment_surface() -> dict[str, object]:
+    """What a repository declares under ADR 0014.
+
+    The declaration and the render are named separately because they fail
+    differently: a declaration that grew an address is a standard violation,
+    and a render nobody compares is a deployment nobody approved.
+    """
+    return {
+        "surface_id": "example-deployment",
+        "subject": "The example product's deployment declaration.",
+        "declaration_paths": ["deploy/product.toml"],
+        "rendered_paths": ["deploy/rendered/docker-compose.yml"],
+        "render_check_workflow": ".github/workflows/deployment.yml",
+        "render_check_command": RENDER_CHECK_COMMAND,
+    }
+
+
+def deployment_files(
+    declaration: str = DEPLOYMENT_DECLARATION,
+    rendered: str = DEPLOYMENT_RENDERED,
+    workflow: str = DEPLOYMENT_WORKFLOW,
+) -> dict[str, str]:
+    return {
+        "deploy/product.toml": declaration,
+        "deploy/rendered/docker-compose.yml": rendered,
+        ".github/workflows/deployment.yml": workflow,
+    }
+
+
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 9,
+        "schema_version": 10,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
         "governance_model": {
@@ -1807,6 +1869,7 @@ def profile() -> dict[str, object]:
             "conformance_probes": [],
         },
         "external_connector_surface": connector_surface(),
+        "deployment_artefact_surfaces": [deployment_surface()],
     }
 
 
@@ -1829,6 +1892,7 @@ class Fixture:
         test_source: str = "def test_drift() -> None:\n    assert True\n",
         probe_source: str | None = None,
         kit_source: str | None = None,
+        deployment: Mapping[str, str] | None = None,
         extra: Mapping[str, str] | None = None,
         untracked: Mapping[str, str] | None = None,
     ) -> Path:
@@ -1860,6 +1924,14 @@ class Fixture:
                 self.root
                 / "packages/dotmac-kernel/src/dotmac_kernel/testing/__init__.py"
             ] = kit_source
+        # ADR 0014's surface is written by default so that every OTHER proof
+        # in this file measures what it is about. A fixture missing it would
+        # fail on a deployment diagnostic, and a reader would learn nothing
+        # about the check the test is named for.
+        for relative, body in (
+            deployment_files() if deployment is None else deployment
+        ).items():
+            files[self.root / relative] = body
         for relative, body in (extra or {}).items():
             files[self.root / relative] = body
         for path, body in files.items():
@@ -1903,6 +1975,7 @@ class StandardsTests(unittest.TestCase):
         test_source: str = "def test_drift() -> None:\n    assert True\n",
         probe_source: str | None = None,
         kit_source: str | None = None,
+        deployment: Mapping[str, str] | None = None,
         extra: Mapping[str, str] | None = None,
         untracked: Mapping[str, str] | None = None,
     ) -> ConformanceReport:
@@ -1921,6 +1994,7 @@ class StandardsTests(unittest.TestCase):
                 test_source=test_source,
                 probe_source=probe_source,
                 kit_source=kit_source,
+                deployment=deployment,
                 extra=extra,
                 untracked=untracked,
             )
@@ -1930,6 +2004,190 @@ class StandardsTests(unittest.TestCase):
                 observed_repository=REPOSITORY,
                 observed_default_branch=BranchName(branch),
             )
+
+    # ── ADR 0014: build once, bind the environment late ───────────────────
+    #
+    # One sabotage proof per diagnostic code, each planting exactly one
+    # violation into an otherwise-conformant fixture. The conforming control
+    # comes first: a family that refuses everything would pass every planted
+    # case below and be worthless.
+
+    def test_a_conforming_deployment_surface_passes(self) -> None:
+        """The negative control, and it must come first.
+
+        Every proof after this one plants a defect. If the conforming fixture
+        did not pass, each of them would be green for a reason that has
+        nothing to do with what it is named for.
+        """
+        report = self.evaluate()
+        codes = {item.code for item in report.diagnostics}
+        self.assertNotIn(DiagnosticCode.DEPLOYMENT_IMAGE_NOT_PINNED, codes)
+        self.assertNotIn(DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL, codes)
+        self.assertNotIn(DiagnosticCode.DEPLOYMENT_CREDENTIAL_FILENAME, codes)
+        self.assertNotIn(DiagnosticCode.DEPLOYMENT_SURFACE_MISSING, codes)
+        self.assertNotIn(DiagnosticCode.DEPLOYMENT_SURFACE_UNDECLARED, codes)
+        self.assertNotIn(DiagnosticCode.DEPLOYMENT_RENDER_CHECK_ABSENT, codes)
+
+    def test_a_tagged_image_in_the_declaration_fails(self) -> None:
+        """A tag makes what ran yesterday and what runs after the next restart
+        two deployments with one description — seven observability images were
+        floating on `:latest` when ADR 0014 was written."""
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION.replace(
+                "@sha256:" + _EXAMPLE_DIGEST, ":latest"
+            )
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_IMAGE_NOT_PINNED,
+        )
+
+    def test_a_tagged_image_in_the_RENDERED_output_also_fails(self) -> None:
+        """The render is checked for pinning too. A declaration can be correct
+        and the committed render still name a tag, and the render is what a
+        host runs."""
+        files = deployment_files(
+            rendered=DEPLOYMENT_RENDERED.replace(
+                "@sha256:" + _EXAMPLE_DIGEST, ":latest"
+            )
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_IMAGE_NOT_PINNED,
+        )
+
+    def test_an_image_deferred_to_a_substitution_fails(self) -> None:
+        """Otherwise every digest could be replaced by a variable and the
+        repository would stay green. A value resolved later cannot be the
+        value that was approved."""
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION.replace(
+                "registry.example.com/example/app@sha256:" + _EXAMPLE_DIGEST,
+                "${IMAGE_REFERENCE}",
+            )
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_IMAGE_NOT_PINNED,
+        )
+
+    def test_an_address_literal_in_the_declaration_fails(self) -> None:
+        """An address here differs per environment and goes stale with nothing
+        failing — a product descriptor carried CIDRs in `trusted_proxies`, and
+        that list decides whose forwarded-for header is believed."""
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION + '\ntrusted = ["10.0.0.0/8"]\n'
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+        )
+
+    def test_an_ipv6_address_literal_also_fails(self) -> None:
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION + '\nupstream = "2001:db8::1"\n'
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+        )
+
+    def test_a_version_string_is_not_read_as_an_address(self) -> None:
+        """The sensitivity proof for the address check, in the other direction.
+
+        `ipaddress` DECIDES rather than a regex matching something
+        address-shaped, so a version and a port range are not findings. A
+        checker that flagged them would be turned off within a week.
+        """
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION
+            + '\nversion = "1.2.3"\nports = "8000-8080"\nwindow = "10:30"\n'
+        )
+        report = self.evaluate(deployment=files)
+        self.assertNotIn(
+            DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+            {item.code for item in report.diagnostics},
+        )
+
+    def test_a_credential_filename_in_the_declaration_fails(self) -> None:
+        """A basename is a BINDING, and a redaction sweep shaped for values
+        passes straight over it."""
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION + '\ntls_key = "server.key"\n'
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_CREDENTIAL_FILENAME,
+        )
+
+    def test_a_declared_surface_that_does_not_exist_fails(self) -> None:
+        """Checked before content: a surface that names nothing passes every
+        other check for the wrong reason."""
+        files = deployment_files()
+        del files["deploy/product.toml"]
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_SURFACE_MISSING,
+        )
+
+    def test_a_render_check_the_workflow_does_not_run_fails(self) -> None:
+        """A render nobody compares is a deployment nobody approved."""
+        files = deployment_files(
+            workflow="name: Deployment conformance\njobs:\n  render:\n    steps:\n"
+            "      - run: echo skipped\n"
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_RENDER_CHECK_ABSENT,
+        )
+
+    def test_shipping_a_deployment_the_profile_does_not_name_fails(self) -> None:
+        """The loophole this closes: declare no surface, ship a deployment, go
+        green by declining to mention it. A pin that does not say what is
+        enforced cannot fail when enforcement stops covering something.
+        """
+        value = profile()
+        value["deployment_artefact_surfaces"] = []
+        report = self.evaluate(
+            value,
+            deployment={"docker-compose.yml": DEPLOYMENT_RENDERED},
+        )
+        self.assert_code(report, DiagnosticCode.DEPLOYMENT_SURFACE_UNDECLARED)
+
+    def test_declaring_no_surface_is_fine_when_none_is_shipped(self) -> None:
+        """The negative control for the check above. Governance itself ships no
+        deployable, and a family that refused an empty declaration outright
+        would make its own repository non-conformant.
+        """
+        value = profile()
+        value["deployment_artefact_surfaces"] = []
+        report = self.evaluate(value, deployment={})
+        self.assertNotIn(
+            DiagnosticCode.DEPLOYMENT_SURFACE_UNDECLARED,
+            {item.code for item in report.diagnostics},
+        )
+
+    def test_a_schema_9_profile_is_refused_with_its_migration(self) -> None:
+        """Superseded, not withdrawn — and the loader says which.
+
+        Versions 7 and 8 refused because a measured number would have been
+        wrong under the new rule. Nothing measured changes here, so the error
+        names the one mechanical edit instead of leaving a reader to decode a
+        bare version mismatch.
+        """
+        value = profile()
+        value["schema_version"] = 9
+        del value["deployment_artefact_surfaces"]
+        report = self.evaluate(value)
+        self.assert_code(report, DiagnosticCode.PROFILE_INVALID)
+
+    def test_the_loader_will_not_default_the_new_surface(self) -> None:
+        """Defaulting it to an empty array would enrol every repository in a
+        standard nobody declared, and would report a repository holding real
+        deployment artefacts as conforming because it named none."""
+        value = profile()
+        del value["deployment_artefact_surfaces"]
+        self.assert_code(self.evaluate(value), DiagnosticCode.PROFILE_INVALID)
 
     def assert_code(self, report: ConformanceReport, code: DiagnosticCode) -> None:
         self.assertIn(code, {item.code for item in report.diagnostics})
@@ -2422,9 +2680,42 @@ class StandardsTests(unittest.TestCase):
             schema["properties"]["enforcement_mode"]["enum"],
             ["candidate", "required"],
         )
-        self.assertEqual(schema["properties"]["schema_version"]["const"], 9)
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 10)
         self.assertIn("testing_kit_boundary", schema["required"])
         self.assertIn("external_connector_surface", schema["required"])
+        # ADR 0014's surface is REQUIRED, not optional. An optional key would
+        # let a repository ship a deployment and decline to name it, which is
+        # the vacuous pass the family exists to prevent.
+        self.assertIn("deployment_artefact_surfaces", schema["required"])
+        deployment_schema = schema["$defs"]["deployment_artefact_surface"]
+        self.assertIs(deployment_schema["additionalProperties"], False)
+        self.assertEqual(
+            sorted(deployment_schema["required"]),
+            sorted(deployment_schema["properties"]),
+        )
+        self.assertEqual(
+            sorted(deployment_schema["properties"]),
+            [
+                "declaration_paths",
+                "render_check_command",
+                "render_check_workflow",
+                "rendered_paths",
+                "subject",
+                "surface_id",
+            ],
+        )
+        # The schema and the parser must agree on the key set, or the schema
+        # documents a contract the loader does not enforce.
+        self.assertEqual(
+            sorted(deployment_schema["properties"]),
+            sorted(deployment_surface()),
+        )
+        # A declaration is mandatory; a render is not, because a repository may
+        # ship a descriptor whose assets another repository renders.
+        self.assertEqual(
+            deployment_schema["properties"]["declaration_paths"]["minItems"], 1
+        )
+        self.assertNotIn("minItems", deployment_schema["properties"]["rendered_paths"])
         self.assertEqual(
             schema["$defs"]["connector_category"]["enum"],
             list(CONNECTOR_CATEGORIES),

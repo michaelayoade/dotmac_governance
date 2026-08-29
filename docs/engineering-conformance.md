@@ -4,14 +4,82 @@
 checked-in Governance profile is `required`; a green run is conformance
 evidence for the evaluated revision, not a certification or compliance claim.
 
-Each strict schema-version-9 profile names repository URL/default branch, its
+Each strict schema-version-10 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
 tests, exact Python contract surfaces, its module-declared vocabularies, the
-kernel testing-kit import boundary, and its external-connector surface. The
-typed gate rejects `Any`, missing or bare public annotations, unannotated record
-fields, and mutable boundary records. Schema version 9 has no waiver mechanism
-and no exemption mechanism. Schema versions 7 and 8 are withdrawn and never
-accepted: both fail to load rather than upgrading.
+kernel testing-kit import boundary, its external-connector surface, and its
+deployment-artefact surfaces. The typed gate rejects `Any`, missing or bare
+public annotations, unannotated record fields, and mutable boundary records.
+Schema version 10 has no waiver mechanism and no exemption mechanism. Schema
+versions 7 and 8 are withdrawn and never accepted: both fail to load rather
+than upgrading.
+
+Schema version 9 is **superseded rather than withdrawn**, and the loader
+distinguishes them. Versions 7 and 8 refused because a number measured under
+the old rule would have been wrong under the new one. Nothing measured changes
+at 10: ADR 0014 adds a surface a version-9 profile simply does not declare, so
+the error names the single mechanical edit instead of leaving a reader to
+decode a bare version mismatch. It still refuses to load, because defaulting
+the new key on a product's behalf would enrol every repository in a standard
+nobody declared.
+
+## Deployment artefact surface (ADR 0014, PROPOSED)
+
+ADR 0014 is `Proposed`. Its carrying revision must merge to canonical `main`
+before a product may pin its exact commit, exactly as ADR 0011 requires. What
+follows is the adoption instruction; each product still migrates its profile
+and proves the pinned revision independently.
+
+A profile declares `deployment_artefact_surfaces`, one entry per deployable the
+repository ships:
+
+| Key | Meaning |
+| --- | --- |
+| `surface_id` | stable slug, unique within the profile |
+| `subject` | what this deployable is |
+| `declaration_paths` | the artefact that must carry NO environment fact |
+| `rendered_paths` | the deterministic output of that declaration |
+| `render_check_workflow` | the workflow that compares the render byte-for-byte |
+| `render_check_command` | the exact command that workflow must run |
+
+**The declaration and the render are checked differently, on purpose.** A
+declaration must carry no environment fact at all. A render is that declaration
+plus one environment, so a derived loopback literal is expected there and an
+address check over rendered output would refuse the correct result. What both
+must hold is an immutable image digest.
+
+Six diagnostics, each with a planted-violation proof and a conforming control:
+
+- `deployment.surface.missing` — a declared path the repository does not
+  contain. Checked before content: a surface naming nothing passes every other
+  check for the wrong reason.
+- `deployment.surface.unreadable` — fails closed. A surface the engine cannot
+  read is reported, never skipped.
+- `deployment.image.not-pinned` — a mutable tag, or an image deferred to a
+  deploy-time substitution. The substitution arm is not pedantry: without it,
+  every digest could be replaced by a variable and the repository would stay
+  green.
+- `deployment.environment.literal` — an address or CIDR in a DECLARATION,
+  decided by `ipaddress` rather than matched by a regex, so a version string
+  and a port range are not findings.
+- `deployment.credential.filename` — a credential-shaped basename, which
+  ADR 0014 § 4 excludes alongside the value because a redaction sweep shaped
+  for values passes straight over it.
+- `deployment.render-check.absent` — the declared workflow does not run the
+  declared comparison. A render nobody compares is a deployment nobody
+  approved.
+- `deployment.surface.undeclared` — the repository ships a recognised
+  deployment declaration the profile does not name. This closes the loophole an
+  empty array would otherwise open: declare nothing, ship a deployment, go
+  green by declining to mention it. The detector reads file NAMES only and
+  never inspects content, so it cannot drift into guessing.
+
+**What it does not check, stated rather than implied.** Whether a pipeline
+produced all four digests, and whether an authorization named them, are facts
+about workflow runs and about another repository's records. ADR 0013 § 1 puts
+those outside repository-local derivation and § 5 permits automation only where
+a machine-readable contract carries a declared oracle kind. They remain review
+discipline.
 
 ## External connector surface (ADR 0011, ACCEPTED)
 

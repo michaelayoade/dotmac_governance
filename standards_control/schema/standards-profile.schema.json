@@ -518,7 +518,8 @@
         "declaration_paths",
         "rendered_paths",
         "render_check_workflow",
-        "render_check_command"
+        "render_check_command",
+        "acknowledged_non_deployments"
       ],
       "properties": {
         "surface_id": {
@@ -547,6 +548,30 @@
           "$ref": "#/$defs/path"
         },
         "render_check_command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acknowledged_non_deployments": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/acknowledged_non_deployment"
+          }
+        }
+      }
+    },
+    "acknowledged_non_deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "reason": {
           "type": "string",
           "minLength": 1
         }

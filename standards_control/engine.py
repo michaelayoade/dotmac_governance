@@ -4605,12 +4605,28 @@ def _environment_literals(body: str, relative: PurePosixPath) -> list[Diagnostic
             if len(candidate) == 64 and all(c in "0123456789abcdef" for c in candidate):
                 continue
             try:
-                ipaddress.ip_address(candidate)
+                parsed = ipaddress.ip_address(candidate)
             except ValueError:
                 try:
-                    ipaddress.ip_network(candidate, strict=False)
+                    network = ipaddress.ip_network(candidate, strict=False)
                 except ValueError:
                     continue
+                parsed = network.network_address
+                if network.prefixlen == network.max_prefixlen:
+                    # `10.0.0.1/32` is an address wearing a prefix; treat it as
+                    # the address it is rather than as a range.
+                    pass
+            # A WILDCARD and a LOOPBACK identify no environment. `0.0.0.0` in a
+            # container command is the correct in-container listen address —
+            # the process must bind its own netns, and host-side containment is
+            # the published host_ip, which is a different property owned by a
+            # different check. Flagging it here would force every product to
+            # obfuscate a correct value, and a rule that punishes the right
+            # answer gets disabled. `127.0.0.1` and `::1` are constants for the
+            # same reason: they name the same place on every host, so they
+            # cannot go stale, which is what this check is about.
+            if parsed.is_unspecified or parsed.is_loopback:
+                continue
             findings.append(
                 _finding(
                     DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
@@ -4687,8 +4703,13 @@ def _deployment_artefact(
     declared = {path for surface in surfaces for path in surface.declaration_paths} | {
         path for surface in surfaces for path in surface.rendered_paths
     }
+    acknowledged = {
+        entry.path
+        for surface in surfaces
+        for entry in surface.acknowledged_non_deployments
+    }
     for shipped in _undeclared_deployment_artefacts(root):
-        if shipped in declared:
+        if shipped in declared or shipped in acknowledged:
             continue
         if any(
             shipped.is_relative_to(rendered)
@@ -4744,6 +4765,17 @@ def _deployment_artefact(
                 continue
             assert body is not None
             findings.extend(_unpinned_images(body, relative))
+        for entry in surface.acknowledged_non_deployments:
+            if not (root / Path(entry.path)).is_file():
+                findings.append(
+                    _finding(
+                        DiagnosticCode.DEPLOYMENT_ACKNOWLEDGEMENT_STALE,
+                        "this file was acknowledged as not a deployment and no "
+                        "longer exists; an acknowledgement list that only grows "
+                        "stops describing anything",
+                        path=entry.path,
+                    )
+                )
         workflow, problem = _reads(root, surface.render_check_workflow)
         if problem is not None:
             findings.append(problem)

@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 
 from .contracts import (
     CONSERVED_MODULE_SYMBOL,
+    AcknowledgedNonDeployment,
     AuthorityContract,
     AuthorityId,
     BranchName,
@@ -500,6 +501,17 @@ def _external_connector_surface(value: object) -> ExternalConnectorSurface:
     return ExternalConnectorSurface(baselines=baselines, conserved_exclusions=conserved)
 
 
+def _acknowledged_non_deployment(
+    value: object, location: str
+) -> AcknowledgedNonDeployment:
+    data = _object(value, location)
+    _keys(data, frozenset({"path", "reason"}), location)
+    return AcknowledgedNonDeployment(
+        path=_path(data["path"], f"{location}.path"),
+        reason=_string(data["reason"], f"{location}.reason"),
+    )
+
+
 def _deployment_artefact_surface(
     value: object, index: int
 ) -> DeploymentArtefactSurface:
@@ -515,6 +527,7 @@ def _deployment_artefact_surface(
                 "rendered_paths",
                 "render_check_workflow",
                 "render_check_command",
+                "acknowledged_non_deployments",
             }
         ),
         location,
@@ -545,6 +558,17 @@ def _deployment_artefact_surface(
         ),
         render_check_command=_string(
             data["render_check_command"], f"{location}.render_check_command"
+        ),
+        acknowledged_non_deployments=tuple(
+            _acknowledged_non_deployment(
+                item, f"{location}.acknowledged_non_deployments[{index}]"
+            )
+            for index, item in enumerate(
+                _sequence(
+                    data["acknowledged_non_deployments"],
+                    f"{location}.acknowledged_non_deployments",
+                )
+            )
         ),
     )
 

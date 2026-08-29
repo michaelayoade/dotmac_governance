@@ -1814,6 +1814,7 @@ def deployment_surface() -> dict[str, object]:
         "rendered_paths": ["deploy/rendered/docker-compose.yml"],
         "render_check_workflow": ".github/workflows/deployment.yml",
         "render_check_command": RENDER_CHECK_COMMAND,
+        "acknowledged_non_deployments": [],
     }
 
 
@@ -2107,6 +2108,84 @@ class StandardsTests(unittest.TestCase):
         self.assertNotIn(
             DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
             {item.code for item in report.diagnostics},
+        )
+
+    def test_an_in_container_wildcard_bind_is_not_an_environment_address(self) -> None:
+        """The false positive that would have broken every real descriptor.
+
+        `--host 0.0.0.0` in a container command is the CORRECT in-container
+        listen address: the process must bind its own network namespace, and
+        host-side containment is the published host_ip, which is a different
+        property owned by a different check. A wildcard identifies no
+        environment, so it cannot go stale, which is what this check is about.
+        A rule that punishes the right answer gets disabled.
+        """
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION
+            + '\ncommand = ["uvicorn", "--host", "0.0.0.0", "--port", "8000"]\n'
+        )
+        report = self.evaluate(deployment=files)
+        self.assertNotIn(
+            DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+            {item.code for item in report.diagnostics},
+        )
+
+    def test_a_loopback_literal_is_not_an_environment_address(self) -> None:
+        """`127.0.0.1` and `::1` name the same place on every host."""
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION
+            + '\nprobe = "http://127.0.0.1:8000/health"\nv6 = "::1"\n'
+        )
+        report = self.evaluate(deployment=files)
+        self.assertNotIn(
+            DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+            {item.code for item in report.diagnostics},
+        )
+
+    def test_a_routable_address_is_still_caught_after_those_exemptions(self) -> None:
+        """The sensitivity proof for the two exemptions above. Narrowing a
+        check is how it stops firing at all, so the narrowing gets its own
+        counter-example."""
+        files = deployment_files(
+            declaration=DEPLOYMENT_DECLARATION + '\nupstream = "10.20.0.7"\n'
+        )
+        self.assert_code(
+            self.evaluate(deployment=files),
+            DiagnosticCode.DEPLOYMENT_ENVIRONMENT_LITERAL,
+        )
+
+    def test_an_acknowledged_non_deployment_is_not_reported(self) -> None:
+        """An acknowledgement, never a waiver: it records that a reader already
+        decided this path is a development convenience, so the next reader
+        inherits the decision instead of rediscovering it."""
+        value = profile()
+        surface = deployment_surface()
+        surface["acknowledged_non_deployments"] = [
+            {
+                "path": "docker-compose.yml",
+                "reason": "local development only; deployed by nothing.",
+            }
+        ]
+        value["deployment_artefact_surfaces"] = [surface]
+        files = dict(deployment_files())
+        files["docker-compose.yml"] = DEPLOYMENT_RENDERED
+        report = self.evaluate(value, deployment=files)
+        self.assertNotIn(
+            DiagnosticCode.DEPLOYMENT_SURFACE_UNDECLARED,
+            {item.code for item in report.diagnostics},
+        )
+
+    def test_a_stale_acknowledgement_is_reported(self) -> None:
+        """A list that only grows stops describing anything (ADR 0018)."""
+        value = profile()
+        surface = deployment_surface()
+        surface["acknowledged_non_deployments"] = [
+            {"path": "docker-compose.yml", "reason": "deleted since."}
+        ]
+        value["deployment_artefact_surfaces"] = [surface]
+        self.assert_code(
+            self.evaluate(value),
+            DiagnosticCode.DEPLOYMENT_ACKNOWLEDGEMENT_STALE,
         )
 
     def test_a_credential_filename_in_the_declaration_fails(self) -> None:
@@ -2696,6 +2775,7 @@ class StandardsTests(unittest.TestCase):
         self.assertEqual(
             sorted(deployment_schema["properties"]),
             [
+                "acknowledged_non_deployments",
                 "declaration_paths",
                 "render_check_command",
                 "render_check_workflow",

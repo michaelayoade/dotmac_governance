@@ -141,6 +141,7 @@ class DiagnosticCode(str, Enum):
     DEPLOYMENT_CREDENTIAL_FILENAME = "deployment.credential.filename"
     DEPLOYMENT_RENDER_CHECK_ABSENT = "deployment.render-check.absent"
     DEPLOYMENT_SURFACE_UNDECLARED = "deployment.surface.undeclared"
+    DEPLOYMENT_ACKNOWLEDGEMENT_STALE = "deployment.acknowledgement.stale"
 
 
 @dataclass(frozen=True)
@@ -229,6 +230,22 @@ class TestingKitBoundary:
 
 
 @dataclass(frozen=True)
+class AcknowledgedNonDeployment:
+    """A file that LOOKS like a deployment declaration and is not one.
+
+    An acknowledgement, never a waiver — the same shape the connector family
+    uses for a conserved exclusion, and for the same reason. It removes nothing
+    from what is checked; it records that a reader has already decided this
+    path is a development convenience or a test fixture, so the next reader
+    inherits the decision instead of rediscovering it. A stale entry is a
+    finding, because a list that only grows stops describing anything.
+    """
+
+    path: PurePosixPath
+    reason: str
+
+
+@dataclass(frozen=True)
 class DeploymentArtefactSurface:
     """One deployable a repository ships, and the assets rendered from it.
 
@@ -245,6 +262,7 @@ class DeploymentArtefactSurface:
     rendered_paths: tuple[PurePosixPath, ...]
     render_check_workflow: PurePosixPath
     render_check_command: str
+    acknowledged_non_deployments: tuple[AcknowledgedNonDeployment, ...]
 
 
 @dataclass(frozen=True)

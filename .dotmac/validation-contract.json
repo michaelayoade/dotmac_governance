@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "statement": "Static parsing, formatting, typing and record validation may run on a workstation. Acceptance tests are owned by CI and are not run locally.",
+    "reason": "A local run proves what one machine did. Acceptance evidence has to be attributable and re-readable by someone who was not present, which is a property of the CI run and not of the command.",
+    "owner": "Michael Ayoade"
+  },
+  "commands": [
+    {
+      "key": "ruff check",
+      "aliases": [],
+      "class": "local",
+      "reason": "Static lint. Reads source, changes nothing, needs no service."
+    },
+    {
+      "key": "ruff format",
+      "aliases": [],
+      "class": "local",
+      "reason": "Formatting check. Static."
+    },
+    {
+      "key": "mypy",
+      "aliases": [],
+      "class": "local",
+      "reason": "Static typing of the control-plane boundaries."
+    },
+    {
+      "key": "check_adrs.py",
+      "aliases": [],
+      "class": "local",
+      "reason": "Record validation. Parses checked-in files only."
+    },
+    {
+      "key": "check_validation_contract.py",
+      "aliases": [],
+      "class": "local",
+      "reason": "This contract's own guard. Parses checked-in files only."
+    },
+    {
+      "key": "agent_control verify",
+      "aliases": [],
+      "class": "local",
+      "reason": "Profile and instruction validation. Reads the repository."
+    },
+    {
+      "key": "programme_control",
+      "aliases": [],
+      "class": "local",
+      "reason": "Programme matrix validation. Reads the repository; the pinned-dossier arm additionally reads a checkout CI supplies."
+    },
+    {
+      "key": "standards_control verify",
+      "aliases": ["dotmac-standards verify"],
+      "class": "local",
+      "reason": "Conformance profile validation. CI reaches it through the composite action's launcher, which is the alias."
+    },
+    {
+      "key": "unittest discover",
+      "aliases": [],
+      "class": "ci-owned",
+      "reason": "The acceptance suite, including every known-bad control. CI is the acceptance owner; a local pass is not evidence and must not be reported as any."
+    }
+  ],
+  "setup_commands": [
+    {
+      "key": "pip install",
+      "reason": "Installs the pinned validators from requirements-dev.txt. Provisioning, not validation."
+    },
+    {
+      "key": "-",
+      "reason": "The inline extractor that reads the pinned dossier revision out of programmes/*.json so the next step can fetch it. Data extraction for a later step, not a check of its own."
+    }
+  ]
+}

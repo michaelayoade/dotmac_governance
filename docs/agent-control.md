@@ -69,13 +69,17 @@ the pinned validators in `requirements-dev.txt`:
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
-python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control tests/test_agent_control.py tools/dotmac-agent
-python3 -m ruff format --check agent_control tests/test_agent_control.py tools/dotmac-agent
-python3 -m mypy --strict agent_control tools/dotmac-agent
-python3 -m unittest discover --start-directory tests --verbose
-python3 tools/check_adrs.py
-python3 -m agent_control verify
 ```
+
+**The command list is not repeated here.** It lives in `AGENTS.md` step 4, is
+declared in `.dotmac/validation-contract.json`, and is enforced by
+`.github/workflows/governance-checks.yml`. This page once carried a fourth,
+staler copy; a list duplicated into prose is a list that drifts, and the
+duplication was itself the defect.
+
+Note the split those files declare: static parsing, formatting, typing and
+record validation run locally; the acceptance suite is owned by CI. A local
+acceptance run is not evidence.
 
 ## Profile ownership
 

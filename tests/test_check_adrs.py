@@ -146,6 +146,81 @@ class AdrValidationTests(unittest.TestCase):
         )
         self.assertFails(errors, "unknown controlled metadata field '- Ammends:'")
 
+    def test_unknown_metadata_field_with_a_hyphen_fails(self):
+        """The regression this test exists for.
+
+        The key class used to be `[A-Za-z][A-Za-z ]*?`, which admitted no
+        hyphen, so this line never matched `METADATA_LINE`, never entered
+        `_fields()`, and was silently accepted with exit 0 — while the
+        alphabetic `Ammends` above was correctly rejected. The control was not
+        narrow, it was blind, and the only known-bad case guarding it happened
+        to use a spelling the regex could see.
+        """
+        errors = self.validate(
+            {
+                "0001-example.md": VALID_ADR.replace(
+                    "- Classification: Internal",
+                    "- Classification: Internal"
+                    "\n- Supersedes-Knowledge: some-memory-slug",
+                )
+            }
+        )
+        self.assertFails(
+            errors,
+            "unknown controlled metadata field '- Supersedes-Knowledge:'",
+        )
+
+    def test_unknown_metadata_field_with_a_digit_fails(self):
+        """A near-miss on a REQUIRED field is the dangerous shape.
+
+        `Status2` reads like `Status` to a human skimming the block. Under the
+        old key class it was invisible, so a record could carry a second
+        status-shaped line that no control ever looked at.
+        """
+        errors = self.validate(
+            {
+                "0001-example.md": VALID_ADR.replace(
+                    "- Classification: Internal",
+                    "- Classification: Internal\n- Status2: Accepted",
+                )
+            }
+        )
+        self.assertFails(
+            errors, "unknown controlled metadata field '- Status2:'"
+        )
+
+    def test_unknown_metadata_field_with_an_underscore_fails(self):
+        errors = self.validate(
+            {
+                "0001-example.md": VALID_ADR.replace(
+                    "- Classification: Internal",
+                    "- Classification: Internal\n- Amends_note: 0002",
+                )
+            }
+        )
+        self.assertFails(
+            errors, "unknown controlled metadata field '- Amends_note:'"
+        )
+
+    def test_the_widened_key_class_still_accepts_every_legal_field(self):
+        """The other half: widening what the scanner SEES must not change what
+        it ALLOWS. A fix that made the detector fire on a legal record would be
+        a worse defect than the one it repaired."""
+        self.assertEqual(
+            self.validate(
+                {
+                    "0001-example.md": record(
+                        "0001",
+                        "Example",
+                        effective="2026-07-25",
+                        amends="0002 — the part it narrows",
+                    ),
+                    "0002-other.md": record("0002", "Other"),
+                }
+            ),
+            [],
+        )
+
     def test_duplicate_optional_field_fails(self):
         errors = self.validate(
             {

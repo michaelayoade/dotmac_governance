@@ -46,7 +46,16 @@ SECTIONS = (
 AMENDS = re.compile(r"^(\d{4})\s*[—–-]\s*(\S.*)$")
 SUPERSEDES = re.compile(r"^(\d{4})$")
 
-METADATA_LINE = re.compile(r"^- ([A-Za-z][A-Za-z ]*?):\s*(.*?)\s*$", re.MULTILINE)
+# The key class is deliberately WIDER than the set of legal field names. The
+# unknown-field check below can only reject a key it can SEE, so a class that
+# admitted only letters and spaces did not narrow what was legal — it decided
+# what was invisible. `- Supersedes-Knowledge:` and `- Status2:` never matched,
+# never entered `_fields()`, and were silently accepted, while the alphabetic
+# `- Ammends:` was correctly rejected. Digits, underscores and hyphens are
+# admitted here so that the closed set, and not the regex, is what refuses them.
+METADATA_LINE = re.compile(
+    r"^- ([A-Za-z][A-Za-z0-9 _-]*?):\s*(.*?)\s*$", re.MULTILINE
+)
 SECTION_START = re.compile(r"^## ", re.MULTILINE)
 
 

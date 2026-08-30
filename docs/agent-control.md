@@ -72,10 +72,12 @@ python3 -m pip install -r requirements-dev.txt
 ```
 
 **The command list is not repeated here.** It lives in `AGENTS.md` step 4, is
-declared in `.dotmac/validation-contract.json`, and is enforced by
-`.github/workflows/governance-checks.yml`. This page once carried a fourth,
-staler copy; a list duplicated into prose is a list that drifts, and the
-duplication was itself the defect.
+declared in `.dotmac/validation-contract.json`, is handed to a client through
+this profile's `validation_commands`, and is enforced by
+`.github/workflows/governance-checks.yml`. All four are held in agreement by
+`tools/check_validation_contract.py`. This page once carried a fourth, staler
+copy; a list duplicated into prose is a list that drifts, and the duplication
+was itself the defect.
 
 Note the split those files declare: static parsing, formatting, typing and
 record validation run locally; the acceptance suite is owned by CI. A local

@@ -2,10 +2,11 @@
 """Prove that the documented validation commands and CI's cannot diverge.
 
 `AGENTS.md` tells a contributor what to run before pushing.
-`.github/workflows/` decides what is actually enforced. Nothing connected the
-two, so they drifted: the instructions listed an acceptance suite that Michael
-owns in CI, and they omitted lint paths CI had gained. Each half looked correct
-on its own, which is why neither reader noticed.
+`.github/workflows/` decides what is actually enforced.
+`.dotmac/agent-profile.json` is the list an agent client is handed. Nothing
+connected them, so they drifted: the instructions listed an acceptance suite
+that Michael owns in CI, and they omitted lint paths CI had gained. Each part
+looked correct on its own, which is why no reader noticed.
 
 This validator makes the two halves answer to one declaration,
 `.dotmac/validation-contract.json`, and fails when either side moves without
@@ -38,6 +39,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 CONTRACT_PATH = Path(".dotmac/validation-contract.json")
 INSTRUCTIONS_PATH = Path("AGENTS.md")
+#: The SIXTH copy of the command list, and the one this guard originally
+#: missed. `agent_control` checks that the paths a command names exist; nothing
+#: checked that the list itself still matched the instructions, so a command
+#: could be dropped from the profile — the list an agent is told to run —
+#: while remaining in `AGENTS.md` and in CI. Reconciling five of six places
+#: leaves the sixth free to disagree, which is the original defect standing in
+#: a file nobody re-read.
+PROFILE_PATH = Path(".dotmac/agent-profile.json")
 WORKFLOW_GLOB = ".github/workflows/*.yml"
 ACTION_GLOB = ".github/actions/*/action.yml"
 DOC_GLOB = "**/*.md"
@@ -238,6 +247,41 @@ def _instructions_block(root: Path) -> str:
     )
 
 
+def _profile_keys(root: Path) -> set[str]:
+    """Every invocation key in the agent profile's `validation_commands`.
+
+    The profile is what an agent client is handed as "the commands to run", so
+    a profile that has fallen behind the instructions does not produce a
+    disagreement anyone sees — it produces an agent quietly running a smaller
+    set than the repository requires.
+    """
+    path = root / PROFILE_PATH
+    if not path.is_file():
+        raise ContractError(f"{PROFILE_PATH} does not exist")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ContractError(f"{PROFILE_PATH} is not valid JSON: {error}") from error
+    if not isinstance(data, dict):
+        raise ContractError(f"{PROFILE_PATH} must contain an object")
+    commands = data.get("validation_commands")
+    if not isinstance(commands, list) or not commands:
+        raise ContractError(
+            f"{PROFILE_PATH}: validation_commands must be a non-empty list; a profile "
+            "listing no command would make this comparison pass over an empty set"
+        )
+    keys: set[str] = set()
+    for command in commands:
+        if not isinstance(command, str):
+            raise ContractError(
+                f"{PROFILE_PATH}: each validation command must be a string"
+            )
+        key = _invocation_key(command)
+        if key is not None:
+            keys.add(key)
+    return keys
+
+
 def _ci_text(root: Path) -> str:
     """Every workflow and composite action, concatenated.
 
@@ -357,12 +401,14 @@ def validate_validation_contract(root: Path) -> list[str]:
         resolve, classes, setup = _load_contract(root)
         documented_raw = _keys_in_text(_instructions_block(root))
         enforced_raw = _keys_in_text(_ci_text(root))
+        profile_raw = _profile_keys(root)
     except ContractError as error:
         return [str(error)]
 
     errors: list[str] = []
     documented = {resolve.get(key, key) for key in documented_raw}
     enforced = {resolve.get(key, key) for key in enforced_raw}
+    profiled = {resolve.get(key, key) for key in profile_raw}
     local_keys = {key for key, value in classes.items() if value == LOCAL}
 
     # Instructions -> contract. An undeclared command in the instructions is a
@@ -405,6 +451,29 @@ def validate_validation_contract(root: Path) -> list[str]:
             f"{classes[key]!r} command"
         )
 
+    # Profile <-> instructions, both directions. The profile is the list an
+    # agent client is handed, so a divergence here is an agent running a
+    # different set from the one the repository documents -- silently, because
+    # both files look correct on their own. That is the original defect, and
+    # reconciling five of six copies would have left it in the sixth.
+    for key in sorted(profiled - documented):
+        errors.append(
+            f"{PROFILE_PATH}: lists {key!r}, which {INSTRUCTIONS_PATH} does not "
+            "document as a local step"
+        )
+    for key in sorted(documented - profiled):
+        errors.append(
+            f"{PROFILE_PATH}: does not list {key!r}, which {INSTRUCTIONS_PATH} "
+            "documents as a local step"
+        )
+    for key in sorted(profiled & set(classes)):
+        if classes[key] != LOCAL:
+            errors.append(
+                f"{PROFILE_PATH}: lists {key!r}, but {CONTRACT_PATH} classes it "
+                f"{classes[key]!r}; the profile must never hand an agent a CI-owned "
+                "command to run"
+            )
+
     # Every other document. See the function's docstring for why one
     # reconciled file is not enough.
     errors.extend(_stray_acceptance_instructions(root, classes))
@@ -419,8 +488,8 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 1
     print(
-        "ok: the documented validation commands, the declared contract and the "
-        "commands CI enforces agree in both directions"
+        "ok: the documented validation commands, the declared contract, the agent "
+        "profile and the commands CI enforces agree in both directions"
     )
     return 0
 

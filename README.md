@@ -157,8 +157,9 @@ enforced by
 [`.github/workflows/governance-checks.yml`](.github/workflows/governance-checks.yml).
 This section used to carry its own copy, which had gone stale in both content
 and policy; `tools/check_validation_contract.py` now fails the build when those
-files disagree, and when any document offers a CI-owned command as a runnable
-step.
+files disagree, when `.dotmac/agent-profile.json`'s `validation_commands` — the
+list an agent client is handed — disagrees with either, and when any document
+offers a CI-owned command as a runnable step.
 
 What runs where is a policy, not a convenience: static parsing, formatting,
 typing and record validation run locally; the acceptance suite is owned by CI.

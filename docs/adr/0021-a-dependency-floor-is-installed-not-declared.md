@@ -50,9 +50,21 @@ literals disagreed in two files that nothing compared. A checkout on
 answers questions about the working copy while appearing to answer them about
 the release.
 
+**The instance was closed the same day, and that changes what this record is
+for.** `dotmac-deployment-control` `0.1.0a6` declares `dotmac-kernel >=0.1.0a98`
+and proves the floor falsifiable in both directions inside a required merge
+context: pinned at exactly a98 the canaries pass; the resolver refuses a97 beside
+the artefact with a real dependency conflict; a97 forced in with `--no-deps
+--force-reinstall` makes the same canaries fail naming the missing symbol. So
+this record does not propose an unbuilt idea. It generalises a mechanism that
+already exists, in the direction ADR 0006's product-first rule requires: name
+the qualifying production implementation and port it, rather than reinventing a
+fleet version beside it.
+
 This record belongs here rather than in a publishing product. A floor is a
 contract between two repositories, and a rule defined inside one of them cannot
-bind the other or be pinned by it.
+bind the other or be pinned by it. One product having the mechanism is not a
+standard — it is one product having the mechanism.
 
 ## Decision
 
@@ -75,6 +87,13 @@ the exception is RECORDED with the constraint that forced it, never dropped:
 an unpinned dependency inside a floor canary is an unmeasured floor, and
 silence about it reproduces this defect one layer down.
 
+**The minimum is DERIVED, never written down twice.** It is read from the
+published artefact's own dependency metadata — not from `pyproject.toml`, which
+lives in the source tree the canary exists to exclude, and not from a literal in
+the workflow. A literal is a second authority for one fact, and two authorities
+for one fact drift the moment somebody bumps the one they happen to be looking
+at.
+
 ### 3. A real code path, not an import sweep
 
 The canary imports the distribution's public surface AND executes at least one
@@ -85,6 +104,9 @@ not sufficient. The next floor error will be a signature that changed, an
 argument that became required, or a behaviour that moved — none of which an
 import observes. A canary calibrated to the last failure catches the last
 failure.
+
+Import success and correct behaviour are **two facts**, and two facts that can
+only fail together are one fact wearing two names.
 
 ### 4. The mutation, which is the half that fails in practice
 
@@ -101,6 +123,25 @@ distinct defects hide in that gap, and the mutation separates them:
 Both are findings, and both are reported. A green canary with no paired red is
 not evidence that the floor holds; it is evidence that nobody has learned
 whether the canary can fail.
+
+Three details decide whether the mutation is real, and each is here because
+omitting it produces a lane that proves nothing while looking identical to one
+that passed:
+
+- **The target is asked of the INDEX, not hard-coded.** "The version below" written
+  as a literal can name something never published, and the lane then fails on a
+  resolver error while reporting the floor proven.
+- **Versions are ordered NUMERICALLY.** `0.1.0a97` sorts above `0.1.0a100` as
+  text, so a string comparison picks the wrong near-miss.
+- **An empty answer FAILS LOUDLY.** A mutation lane is the most exposed surface
+  in this arrangement, because it EXPECTS a failure: a lane that never ran and a
+  lane that passed are the same colour.
+
+Two independent observations are required of the mutation, not one. The resolver
+must REFUSE the excluded version with a real dependency conflict — any non-zero
+exit would also be satisfied by a network error or a mistyped index URL — and
+forcing it in anyway must make the canaries fail **naming the missing symbol**,
+because accepting any failure lets an unrelated breakage stand in for the proof.
 
 ### 5. Installed artefacts only, asserted FIRST
 
@@ -137,6 +178,8 @@ than about the working copy.
    continue.
 5. A post-publication run against the registry-served artefact, distinct from
    the pre-merge run.
+6. Both versions DERIVED — the floor from the artefact's own metadata, the
+   mutation target from the index — with no version literal in the workflow.
 
 ## Consequences
 
@@ -153,14 +196,32 @@ than about the working copy.
 - Where a dependency's floor cannot be pinned because a transitive constraint
   forbids it, the repository must say so. The recorded exception is uncomfortable
   by design; it is the honest form of a gap that is otherwise invisible.
+- A release record naming bytes and a commit answers "which artefact". The
+  question a consumer loses on is "against which floor", so the floor becomes its
+  own release coordinate — checked against the declaration rather than
+  transcribed beside it. A floor RAISE also creates an obligation the publisher
+  does not discharge: the upgrade the consumer now owes is recorded with the
+  release, or it is owed by nobody.
 
 ## Drift prevention
 
-**Enforcement status: none yet, stated rather than implied.** No check in this
-repository evaluates this record today, and no enrolled repository's standards
-profile declares a surface for it. An ADR that describes a control it does not
-have is the failure mode this section exists to prevent, so the position is
-recorded here rather than in a footnote.
+**Enforcement status: none FLEET-WIDE, and one reference implementation.** The
+distinction matters, because the two are routinely conflated and only one of
+them is a control.
+
+No check in this repository evaluates this record, and no enrolled repository's
+standards profile declares a surface for it. What exists is
+`dotmac-deployment-control` `0.1.0a6`: `scripts/kernel_floor.py`,
+`scripts/artifact_canaries.py` (canaries `declared_kernel_floor` and
+`conflict_savepoint_executes`), the floor and mutation steps in the `behavioural
+canaries (installed wheel)` job, and `tests/architecture/test_kernel_floor.py`,
+which asserts the shape rather than trusting it. Under ADR 0006's product-first
+rule that is the implementation to PORT, and this record names it so that a
+future family is an extraction rather than a second writer.
+
+One product holding the mechanism is not coverage of the fleet, and an ADR that
+describes a control it does not have is the failure mode this section exists to
+prevent.
 
 The properties divide cleanly, and the division is the reason enforcement is not
 a single family:
@@ -185,3 +246,12 @@ Acceptance of this record is therefore conditioned on a named decision about
 which half is automated, recorded as open decision 24. Until that decision is
 made, an enrolled repository without a floor canary is an UNMONITORED REGION,
 not a covered one — and this record may not be cited as though it were a gate.
+
+The planted-violation requirement is stated in advance so the family cannot be
+built without it, and the shapes are already known from measurement: a
+distribution whose declared floor predates a module it imports; a canary lane
+carrying a version literal instead of a derived one; and a mutation lane whose
+index query returns nothing and reports success. Each needs a synthetic
+repository shown to go RED. A floor check demonstrated only against a conforming
+tree passes for the wrong reason, which is the defect this whole record is
+about.

@@ -28,15 +28,20 @@ asymmetry exactly: **55 ACL entries, 26 POLICY entries, ZERO role objects.**
 Nothing in the fleet captures the role layer at all, and the same shape is
 present in ERP, in `dotmac_sub` (two scripts), and in SON.
 
-**The obvious remedy is also wrong, and this record said so late.** Earlier
-drafts named `pg_dumpall --globals-only` as what carries roles. It does — and it
-emits **SCRAM password verifiers** along with them, which is the exact material
-§ 2 forbids the bundle to contain. A record recommending it would have
-instructed its readers to produce a bundle it prohibits. Where a dump-side tool
-is used at all it carries `--no-role-passwords`; the shipped implementation
-instead derives role attributes from the catalog and **never selects a verifier
-column**, so the material is absent by construction rather than filtered after
-the fact.
+**The remedy is `pg_dumpall --globals-only --no-role-passwords`, and the flag
+is the whole point.** Earlier drafts of this record named the bare form. The
+bare form emits **SCRAM password verifiers** alongside the roles, which is the
+exact material § 2 forbids the bundle to contain — so a record recommending it
+would have instructed its readers to produce a bundle it prohibits.
+`--no-role-passwords` substitutes a null password for every role, which is
+precisely the shape wanted here: the structural role layer travels, and the
+secret does not.
+
+That is not a redaction step bolted on afterwards. The flag excludes the
+material **at the source**, so no filtering pass exists to be forgotten,
+misconfigured or outgrown — and the difference between the two forms is one
+argument, which is why this record names the whole invocation rather than the
+tool.
 
 **Why this is worse than a backup that fails outright.** A failed backup is a
 known gap. This produces a database that LOOKS restored. Under the dual-plane
@@ -149,9 +154,10 @@ Into a fresh instance with no pre-existing roles, the restore proves:
 6. every POLICY present and attached to a role that exists;
 7. the EXTENSION set;
 8. the MIGRATION HEAD;
-9. that a TENANT role cannot reach a PLATFORM table — asserted by an
-   **EFFECTIVE-privilege** check with `has_table_privilege` semantics, or by
-   attempting the read as that role and requiring the refusal.
+9. that a TENANT role cannot reach a PLATFORM table — asserted by **EFFECTIVE
+   TABLE OR COLUMN privileges**, evaluated across **all seven table privileges**
+   (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER`)
+   with `has_table_privilege` / `has_column_privilege` semantics.
 
 Property 9 is the one the vendor control-plane restore silently lost, and it is
 the one no catalogue LISTING can answer. The method is part of the property
@@ -166,10 +172,21 @@ is not hypothetical and not a beginner's error: **Workspace's own isolation
 tests carry this bug**, and the recovery lane's first draft inherited it before
 catching it. Two independent implementations reached for the listing first.
 
-`has_table_privilege` resolves membership, inheritance and `PUBLIC` the way the
-executor does. Where a check has a listing form and an effective form, this
-record requires the effective one — a privilege question must be answered by
-the same machinery that will answer it at runtime.
+`has_table_privilege` and `has_column_privilege` resolve membership,
+inheritance and `PUBLIC` the way the executor does. Where a check has a listing
+form and an effective form, this record requires the effective one — a privilege
+question must be answered by the same machinery that will answer it at runtime.
+
+Two narrowings are refused, because each leaves a real reach unmeasured:
+
+- **`SELECT` alone is not the property.** A tenant role holding `INSERT`,
+  `UPDATE`, `DELETE` or `TRUNCATE` on a platform table has crossed the plane
+  without ever reading a row, and `REFERENCES` and `TRIGGER` are reach as well.
+  All seven are evaluated, and the failing privilege is named.
+- **Table granularity alone is not the property.** A column-level grant leaves
+  `has_table_privilege` false while the column is readable, so a check stopping
+  at the table reports isolation over a live path. Where a column grant can
+  exist, `has_column_privilege` is the question asked.
 
 ### 4. The verdict IS the enumerated set, never a summary of it
 
@@ -191,7 +208,56 @@ Two consequences:
   version that answers fewer properties than its predecessor is a narrowing of
   the claim and must be recorded as one, never absorbed as a refactor.
 
-### 5. A validator may never create a role it is checking for
+### 5. Credentials are post-restore bindings, never backup contents
+
+A restore is five ordered steps, and the fifth is deliberately not a bundle
+part:
+
+1. provision a **fresh instance** with no pre-existing roles;
+2. apply the **role and membership layer** — structural roles arrive with
+   **null passwords**, per § 2 part 3 and the `--no-role-passwords` invocation;
+3. restore the **dump**;
+4. reconcile **ownership, privileges and row security** from the bundle's
+   remaining parts;
+5. **install credentials** from the environment's approved secret source.
+
+Step 5 is the clause: **credentials are post-restore bindings, never backup
+contents.** A restored role is a structural fact; the secret that authenticates
+as it is an environment fact with its own lifetime and its own owner, and
+binding the two into one artefact makes every copy of a backup a copy of a
+credential.
+
+Three rules follow, and the third is the one that gets negotiated away:
+
+- **Production installs CURRENT credentials**, from that product's approved
+  secret source — not the credentials that were live when the backup was taken.
+  A restore is not a reason to resurrect a rotated secret.
+- **An isolated rehearsal uses FRESH EPHEMERAL credentials, never production
+  secrets.** A rehearsal that needs a production secret to pass has turned the
+  rehearsal into a reason to hold one, which is the opposite of what a
+  disposable instance is for.
+- **A secret-source failure leaves the application STOPPED, never degraded.**
+  No fallback, no cached last-known value, no reduced-function start. An
+  application that starts without its credentials has either found another way
+  in or is about to fail somewhere less observable, and both are worse than not
+  starting.
+
+Before the application starts, four things are proven, in this order:
+
+1. **authentication** — each role can actually log in with the credential just
+   installed;
+2. **effective privileges** — the § 3 property 4 checks, now against the
+   authenticating identity;
+3. **RLS isolation** — § 3 properties 5, 6 and 9;
+4. **wrong-credential REFUSAL** — a deliberately incorrect credential is
+   rejected.
+
+The fourth is not ceremony. The first three are all satisfied by an instance
+that accepts anything — `trust` authentication in `pg_hba.conf` passes every one
+of them — so without a negative case the suite proves the credentials work
+without proving they are required.
+
+### 6. A validator may never create a role it is checking for
 
 The rehearsal harness is forbidden from creating, altering or granting anything
 from its own configuration in order to make its checks pass. A validator that
@@ -201,7 +267,7 @@ measures is its own configuration file rather than the bundle.
 A missing role is a FAILED REHEARSAL. The repair belongs in the backup that
 omitted it.
 
-### 6. Exit status is insufficient in BOTH directions
+### 7. Exit status is insufficient in BOTH directions
 
 The measured restore exited non-zero **and** produced a usable-looking
 database. The Workspace drill shows the converse: a restore can exit zero and
@@ -213,7 +279,7 @@ per property, and § 4 forbids collapsing it into a summary. Reading the
 process's exit code is not the check; it is one input to it, and on its own it
 has been wrong in both directions on measured evidence.
 
-### 7. Ownership
+### 8. Ownership
 
 | Owner | Owns |
 | --- | --- |
@@ -225,7 +291,7 @@ has been wrong in both directions on measured evidence.
 A product may not implement its own rehearsal harness. Five per-product scripts
 is how five estates arrived at the same defect independently.
 
-### 8. A rehearsal EXPIRES
+### 9. A rehearsal EXPIRES
 
 A recovery claim cites the last rehearsal by immutable reference — a run
 identifier and the bundle digest it read. A rehearsal older than the declared
@@ -254,10 +320,12 @@ own.
   wrong in that specific way while every other part is right. Default
   privileges and per-membership `INHERIT` are the two that look redundant on a
   reading and are not.
-- Passwords are deliberately excluded from the bundle — absent by construction,
-  never filtered — so a recovery is not complete until credentials are
-  re-supplied from their approved store. This record does not decide that path,
-  and states the gap rather than implying the bundle closes it.
+- Passwords are excluded from the bundle at source by `--no-role-passwords`, so
+  a recovery is not complete until § 5 step 5 installs credentials from the
+  environment's approved secret source. That path is now DECIDED rather than
+  left open, and it costs something: a rehearsal environment must be able to
+  mint ephemeral credentials, and an application whose secret source is
+  unreachable stays down instead of starting degraded.
 
 ## Drift prevention
 
@@ -279,14 +347,19 @@ What is decidable from repository content, and could become a
 - a declared backup surface that names nothing, which passes every content
   check for the wrong reason and must be a diagnostic rather than a skip;
 - a rehearsal harness that issues `CREATE ROLE`, `ALTER ROLE` or `GRANT`
-  against the instance it is validating, which is § 5 violated in a way a
+  against the instance it is validating, which is § 6 violated in a way a
   reader can see in the source;
 - an isolation assertion reading `information_schema.table_privileges` or
   another DIRECT-grant listing where § 3 property 9 requires effective-privilege
   semantics — the defect that passes while the system is broken, and which two
   independent implementations reached for first;
-- a role or attribute export carrying password material, including a bare
-  `pg_dumpall --globals-only`, which emits SCRAM verifiers.
+- a role or attribute export carrying password material — specifically a
+  `pg_dumpall --globals-only` invocation WITHOUT `--no-role-passwords`, which is
+  a one-argument difference and therefore exactly the drift a reviewer's eye
+  slides over;
+- a rehearsal harness naming a production secret path, which § 5 forbids: an
+  isolated rehearsal mints ephemeral credentials, and a reference to the
+  production source is visible in the source before it is visible in a run.
 
 What CANNOT be derived here: whether a rehearsal actually ran, what it proved,
 and when. Those are facts about runs and about production artefacts. ADR 0013
@@ -300,5 +373,5 @@ RED — alongside a conforming one shown to go green. A restore check demonstrat
 only against a clean tree passes for the wrong reason, which is the same defect
 this record is about.
 
-The ownership assignment in § 7 and the rehearsal interval in § 8 are named
+The ownership assignment in § 8 and the rehearsal interval in § 9 are named
 decisions Michael has not made, recorded as open decision 25.

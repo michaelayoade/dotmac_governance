@@ -47,17 +47,33 @@ jobs:
 
       - name: Check control-plane lint and formatting
         run: |
-          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-          python3 -m ruff format --check agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_commit_identity.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_commit_identity.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff format --check agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_commit_identity.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_commit_identity.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
 
       - name: Check typed control-plane boundaries
-        run: python3 -m mypy --strict --scripts-are-modules agent_control gate_control programme_control standards_control tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+        run: python3 -m mypy --strict --scripts-are-modules agent_control gate_control programme_control standards_control tools/check_commit_identity.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
 
       - name: Exercise known-good and known-bad controls
         run: python3 -m unittest discover --start-directory tests --verbose
 
       - name: Validate governance records
         run: python3 tools/check_adrs.py
+
+      # Author, committer and attribution trailers on the commits this branch
+      # ADDS. Not on history: a guard over history would be permanently red on
+      # a repository that already has the problem, and a permanently red guard
+      # is switched off. Both endpoints are passed explicitly, and an
+      # unestablishable range FAILS — a guard that goes green when it cannot
+      # determine what to inspect does so exactly when something is unusual.
+      #
+      # One line, deliberately. A folded (`>-`) scalar does NOT fold a
+      # more-indented line, so an expression wrapped for readability became a
+      # second shell command -- and the step still reported the first half's
+      # success. That is this guard's own failure mode arriving in its own
+      # wiring, which is why `main` now refuses an argument it does not
+      # recognise instead of quietly falling back to a default.
+      - name: Check commit author, committer and attribution trailers
+        run: python3 tools/check_commit_identity.py --base ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }} --head ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       # The base is passed EXPLICITLY rather than inferred. On a pull request
       # the checkout is the merge commit, so "HEAD's parent" is ambiguous, and

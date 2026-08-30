@@ -31,6 +31,12 @@
       "reason": "Record validation. Parses checked-in files only."
     },
     {
+      "key": "check_commit_identity.py",
+      "aliases": [],
+      "class": "local",
+      "reason": "Commit author, committer and attribution-trailer validation over the branch's own commits. Reads Git history only; fails closed when the range cannot be established."
+    },
+    {
       "key": "check_receipts.py",
       "aliases": [],
       "class": "local",

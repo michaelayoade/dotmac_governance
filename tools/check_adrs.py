@@ -15,6 +15,13 @@ from pathlib import Path
 
 ADR_DIR = Path(__file__).resolve().parent.parent / "docs" / "adr"
 FILENAME = re.compile(r"^(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+# A record's number comes from its FILENAME. The `# NNNN. Title` heading is the
+# copy a human actually reads, and nothing compared the two — so a renumber that
+# moved the file and left the heading behind produced a record asserting one
+# number in its name and another in its title, silently. That is not a
+# hypothetical: ADR 0017 reached this repository as a renumber of a record whose
+# heading said 0014.
+HEADING = re.compile(r"^# (\d{4})\. \S", re.MULTILINE)
 VALID_STATUS = re.compile(r"^(Proposed|Accepted|Rejected|Superseded by (\d{4}))$")
 SUPERSEDED_STATUS = re.compile(r"^Superseded by (\d{4})$")
 
@@ -46,7 +53,16 @@ SECTIONS = (
 AMENDS = re.compile(r"^(\d{4})\s*[—–-]\s*(\S.*)$")
 SUPERSEDES = re.compile(r"^(\d{4})$")
 
-METADATA_LINE = re.compile(r"^- ([A-Za-z][A-Za-z ]*?):\s*(.*?)\s*$", re.MULTILINE)
+# The key class is deliberately WIDER than the set of legal field names. The
+# unknown-field check below can only reject a key it can SEE, so a class that
+# admitted only letters and spaces did not narrow what was legal — it decided
+# what was invisible. `- Supersedes-Knowledge:` and `- Status2:` never matched,
+# never entered `_fields()`, and were silently accepted, while the alphabetic
+# `- Ammends:` was correctly rejected. Digits, underscores and hyphens are
+# admitted here so that the closed set, and not the regex, is what refuses them.
+METADATA_LINE = re.compile(
+    r"^- ([A-Za-z][A-Za-z0-9 _-]*?):\s*(.*?)\s*$", re.MULTILINE
+)
 SECTION_START = re.compile(r"^## ", re.MULTILINE)
 
 
@@ -233,6 +249,18 @@ def validate_adrs(adr_dir: Path) -> list[str]:
         by_number[number].append(path.name)
 
         body = path.read_text(encoding="utf-8")
+
+        heading = HEADING.search(body)
+        if heading is None:
+            errors.append(
+                f"{path.name}: missing a '# NNNN. Title' heading"
+            )
+        elif heading.group(1) != number:
+            errors.append(
+                f"{path.name}: heading says ADR {heading.group(1)} but the "
+                f"filename says {number}; a renumber must move both"
+            )
+
         fields = _fields(body)
         parsed.append((path.name, number, fields, body))
         errors.extend(_record_errors(path.name, fields, body))

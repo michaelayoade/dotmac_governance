@@ -1,7 +1,8 @@
 # 0014. Build once and bind the environment late
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-29
+- Accepted: 2026-08-30 by Michael Ayoade
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards and every enrolled Dotmac repository

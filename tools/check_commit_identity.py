@@ -316,19 +316,63 @@ def validate_commits(root: Path, base: str, head: str) -> tuple[GateVerdict, lis
     return GateVerdict.EXECUTED_PASSED, []
 
 
-def _argument(args: list[str], flag: str, fallback: str) -> str:
-    if flag in args:
-        position = args.index(flag) + 1
-        if position < len(args):
-            return args[position]
-        return ""
-    return fallback
+#: The only flags this tool accepts. Anything else is refused rather than
+#: ignored -- see `parse_arguments`.
+_FLAGS = ("--base", "--head")
+
+
+class ArgumentError(Exception):
+    """The invocation could not be understood, so its scope is unknown."""
+
+
+def parse_arguments(args: list[str]) -> tuple[str, str]:
+    """Return (base, head), or raise on anything unrecognised.
+
+    Refusing an unknown argument is not pedantry; it is the same fail-closed
+    rule as the range itself, applied one level up. The first CI wiring of this
+    guard wrapped its arguments across lines in a YAML folded scalar, which
+    does not fold a more-indented line -- so `--head` became a separate shell
+    command and never reached the tool. The step went GREEN on the half that
+    ran, against a default head, over the wrong range.
+
+    A tolerant parser is what let a broken invocation report success. An
+    invocation this tool cannot fully account for is an invocation whose scope
+    nobody can state, and it must fail rather than fall back.
+    """
+    base = os.environ.get("COMMIT_IDENTITY_BASE", "")
+    head = os.environ.get("COMMIT_IDENTITY_HEAD", "HEAD")
+    position = 0
+    while position < len(args):
+        flag = args[position]
+        if flag not in _FLAGS:
+            raise ArgumentError(
+                f"unrecognised argument {flag!r}; expected only "
+                f"{' and '.join(_FLAGS)}. Refusing to run against a default range: "
+                "an invocation this tool cannot fully account for is an invocation "
+                "whose scope nobody can state."
+            )
+        if position + 1 >= len(args):
+            raise ArgumentError(f"{flag} needs a ref")
+        value = args[position + 1]
+        if value.startswith("--"):
+            raise ArgumentError(
+                f"{flag} was given {value!r}, which is another flag rather than a ref"
+            )
+        if flag == "--base":
+            base = value
+        else:
+            head = value
+        position += 2
+    return base, head
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    base = _argument(args, "--base", os.environ.get("COMMIT_IDENTITY_BASE", ""))
-    head = _argument(args, "--head", os.environ.get("COMMIT_IDENTITY_HEAD", "HEAD"))
+    try:
+        base, head = parse_arguments(args)
+    except ArgumentError as argument_error:
+        print(f"error: {argument_error}", file=sys.stderr)
+        return 1
 
     verdict, errors = validate_commits(REPO_ROOT, base, head)
     if verdict is GateVerdict.EXECUTED_FAILED:

@@ -119,13 +119,27 @@ rather than inferred. On a pull request the checkout is the merge commit, so
 guard whose baseline nobody reviewed. The workflow also checks out full history,
 because a shallow clone is the ordinary way the base becomes unreachable.
 
-### 5. An established but empty range is `not_applicable`
+### 5. An unrecognised argument is refused, not ignored
+
+The gate accepts `--base` and `--head` and nothing else. A stray token, a flag
+with no value, or a flag given another flag as its value is an error.
+
+This is the same fail-closed rule as § 4 applied one level up, and it is in this
+record because the first CI wiring of the gate demonstrated why. The arguments
+were wrapped across lines in a YAML **folded** scalar, which does not fold a
+more-indented line; `--head` became a separate shell command and never reached
+the tool. The step reported `executed_passed` for the half that ran, against a
+default head, over the wrong range. A tolerant parser is what let a broken
+invocation report success — the guard's own failure mode arriving in the guard's
+own wiring.
+
+### 6. An established but empty range is `not_applicable`
 
 Distinct from § 4 and distinct from a pass. "There were no commits to check" and
 "the commits checked were clean" are different facts, and reporting the first as
 the second is the same defect as reporting an unestablishable range as green.
 
-### 6. What this record does not do
+### 7. What this record does not do
 
 It adds **no typed representation** to `standards-profile.schema.json` and no
 `standards_control` rule, so the Governance engine reports no conformance result
@@ -156,7 +170,7 @@ that this gate can land without waiting for it.
 
 ## Drift prevention
 
-`tools/check_commit_identity.py` enforces §§ 1–5 in
+`tools/check_commit_identity.py` enforces §§ 1–6 in
 `.github/workflows/governance-checks.yml`, on both `pull_request` and `push`.
 
 `tests/test_check_commit_identity.py` **constructs** each prohibited shape as a
@@ -175,7 +189,10 @@ rather than asserting that this repository's own commits are currently clean:
   unresolvable head, the all-zero SHA, a directory that is not a repository, and
   the library call raising rather than returning an empty list;
 - an established-but-empty range reporting `not_applicable` and **not**
-  `executed_passed`.
+  `executed_passed`;
+- **an unrecognised argument, a stray shell fragment, a flag with no value and a
+  flag given another flag** — the § 5 cases, which exist because the gate's own
+  first CI wiring went green on a half-delivered invocation.
 
 Two sensitivity proofs guard against the guard being too eager, which is the
 failure that gets a control switched off: `GitHub <noreply@github.com>` — the

@@ -28,9 +28,11 @@ if str(REPO_ROOT) not in sys.path:
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from check_commit_identity import (  # noqa: E402
+    ArgumentError,
     GateVerdict,
     RangeError,
     commit_range,
+    parse_arguments,
     validate_commits,
 )
 
@@ -329,6 +331,41 @@ class CommitIdentityTestCase(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIs(result, GateVerdict.NOT_APPLICABLE)
         self.assertIsNot(result, GateVerdict.EXECUTED_PASSED)
+
+
+class ArgumentParsingTests(unittest.TestCase):
+    """A tolerant parser is what lets a broken invocation report success.
+
+    This is not a hypothetical. The first CI wiring of this guard wrapped its
+    arguments across lines in a YAML folded scalar, which does NOT fold a
+    more-indented line. `--head` became a separate shell command, never reached
+    the tool, and the step reported `executed_passed` for the half that ran --
+    against a default head, over the wrong range. The guard's own failure mode,
+    in the guard's own wiring.
+    """
+
+    def test_both_flags_are_read(self) -> None:
+        self.assertEqual(
+            parse_arguments(["--base", "abc", "--head", "def"]), ("abc", "def")
+        )
+
+    def test_an_unrecognised_argument_is_refused(self) -> None:
+        """The repair for the wiring bug. A stray token means the invocation
+        cannot be fully accounted for, so its scope cannot be stated."""
+        with self.assertRaises(ArgumentError):
+            parse_arguments(["--base", "abc", "--head=def"])
+
+    def test_a_stray_shell_fragment_is_refused_rather_than_ignored(self) -> None:
+        with self.assertRaises(ArgumentError):
+            parse_arguments(["--base", "abc", "origin/main"])
+
+    def test_a_flag_with_no_value_is_refused(self) -> None:
+        with self.assertRaises(ArgumentError):
+            parse_arguments(["--base"])
+
+    def test_a_flag_given_another_flag_as_its_value_is_refused(self) -> None:
+        with self.assertRaises(ArgumentError):
+            parse_arguments(["--base", "--head", "abc"])
 
 
 if __name__ == "__main__":

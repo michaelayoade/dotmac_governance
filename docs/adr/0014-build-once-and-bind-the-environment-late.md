@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-29
-- Accepted: 2026-08-30 by Michael Ayoade
+- Effective: 2026-08-30
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards and every enrolled Dotmac repository

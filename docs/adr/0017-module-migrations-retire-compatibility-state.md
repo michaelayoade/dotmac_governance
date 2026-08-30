@@ -1,4 +1,4 @@
-# 0014. Module migrations retire compatibility state
+# 0017. Module migrations retire compatibility state
 
 - Status: Proposed
 - Date: 2026-08-29

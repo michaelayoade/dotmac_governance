@@ -15,6 +15,13 @@ from pathlib import Path
 
 ADR_DIR = Path(__file__).resolve().parent.parent / "docs" / "adr"
 FILENAME = re.compile(r"^(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+# A record's number comes from its FILENAME. The `# NNNN. Title` heading is the
+# copy a human actually reads, and nothing compared the two — so a renumber that
+# moved the file and left the heading behind produced a record asserting one
+# number in its name and another in its title, silently. That is not a
+# hypothetical: ADR 0017 reached this repository as a renumber of a record whose
+# heading said 0014.
+HEADING = re.compile(r"^# (\d{4})\. \S", re.MULTILINE)
 VALID_STATUS = re.compile(r"^(Proposed|Accepted|Rejected|Superseded by (\d{4}))$")
 SUPERSEDED_STATUS = re.compile(r"^Superseded by (\d{4})$")
 
@@ -242,6 +249,18 @@ def validate_adrs(adr_dir: Path) -> list[str]:
         by_number[number].append(path.name)
 
         body = path.read_text(encoding="utf-8")
+
+        heading = HEADING.search(body)
+        if heading is None:
+            errors.append(
+                f"{path.name}: missing a '# NNNN. Title' heading"
+            )
+        elif heading.group(1) != number:
+            errors.append(
+                f"{path.name}: heading says ADR {heading.group(1)} but the "
+                f"filename says {number}; a renumber must move both"
+            )
+
         fields = _fields(body)
         parsed.append((path.name, number, fields, body))
         errors.extend(_record_errors(path.name, fields, body))

@@ -79,6 +79,62 @@ class AdrValidationTests(unittest.TestCase):
             self.validate({}),
         )
 
+    def test_heading_number_must_match_the_filename_number(self):
+        """The renumber hazard, and the reason this check exists.
+
+        A record's number is taken from its FILENAME alone. The `# NNNN.`
+        heading is the copy a human reads, and nothing compared them — so
+        moving the file and leaving the heading behind produced a record
+        asserting one number in its name and another in its title, with the
+        validator reporting `ok:` and exit 0.
+
+        ADR 0017 arrived in this repository as exactly that renumber.
+        """
+        errors = self.validate(
+            {
+                "0017-example.md": VALID_ADR.replace(
+                    "# 0001. Example decision", "# 0014. Example decision"
+                )
+            }
+        )
+        self.assertFails(
+            errors, "heading says ADR 0014 but the filename says 0017"
+        )
+
+    def test_missing_heading_fails(self):
+        """A record with no `# NNNN. Title` line at all.
+
+        Without this the heading check would be satisfiable by deleting the
+        heading, which is a cheaper way to pass than fixing it.
+        """
+        errors = self.validate(
+            {
+                "0001-example.md": VALID_ADR.replace(
+                    "# 0001. Example decision\n", ""
+                )
+            }
+        )
+        self.assertFails(errors, "missing a '# NNNN. Title' heading")
+
+    def test_malformed_filename_fails(self):
+        """The filename control existed and nothing proved it fired.
+
+        An unguarded control is indistinguishable from an absent one the day
+        somebody edits the pattern, so each rejected shape is named here rather
+        than left to the regex to imply.
+        """
+        for name in (
+            "014-short-number.md",
+            "0017_underscores.md",
+            "0017-Has-Caps.md",
+            "no-number.md",
+        ):
+            with self.subTest(name=name):
+                self.assertFails(
+                    self.validate({name: VALID_ADR}),
+                    "filename must be NNNN-kebab-case-title.md",
+                )
+
     def test_duplicate_number_fails(self):
         errors = self.validate(
             {

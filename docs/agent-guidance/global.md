@@ -10,8 +10,10 @@ Michael runs Dotmac, an ISP operating AS328160 in Abuja and Lagos.
 - Keep changes and pull requests small, focused, and reviewable.
 - When a repository requires it, add the appropriate `version:patch`,
   `version:minor`, or `version:major` label.
-- Before pushing, run the repository's prescribed formatters, linters, tests,
-  and other validation.
+- Before pushing, run the repository's prescribed formatters, linters, type
+  checks and record validators. Acceptance tests are owned by CI: do not run
+  them locally, and never start a service, container or daemon to make one
+  runnable. A local pass is diagnostic context, never evidence.
 - Use immutable, fully typed contracts at every changed implementation and
   process boundary.
 - Be direct: make a recommendation instead of presenting an unranked survey of

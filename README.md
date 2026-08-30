@@ -144,17 +144,24 @@ not reproduce standard text and does not itself establish conformity.
 
 ## Validation
 
+Install the pinned validators, then run the local set:
+
 ```bash
 python3 -m pip install -r requirements-dev.txt
-python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control programme_control standards_control tests/test_agent_control.py tests/test_programme_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
-python3 -m ruff format --check agent_control programme_control standards_control tests/test_agent_control.py tests/test_programme_control.py tests/test_standards_control.py tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
-python3 -m mypy --strict --scripts-are-modules agent_control programme_control standards_control tools/dotmac-agent tools/dotmac-programme tools/dotmac-standards
-python3 -m unittest discover --start-directory tests --verbose
-python3 tools/check_adrs.py
-python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
-python3 -m programme_control --root .
-python3 -m standards_control verify --root . --profile .dotmac/standards-profile.json --default-branch main
 ```
+
+**The command list is deliberately not repeated here.** It lives in `AGENTS.md`
+step 4, is declared in
+[`.dotmac/validation-contract.json`](.dotmac/validation-contract.json), and is
+enforced by
+[`.github/workflows/governance-checks.yml`](.github/workflows/governance-checks.yml).
+This section used to carry its own copy, which had gone stale in both content
+and policy; `tools/check_validation_contract.py` now fails the build when those
+files disagree, and when any document offers a CI-owned command as a runnable
+step.
+
+What runs where is a policy, not a convenience: static parsing, formatting,
+typing and record validation run locally; the acceptance suite is owned by CI.
 
 CI records the authoritative result. A local or agent-reported pass is useful
 diagnostic context, not governance evidence.

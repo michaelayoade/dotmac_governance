@@ -143,7 +143,8 @@ complete by being explained in prose.
 **Immutable** means the receipt is written by the cutover rather than composed
 afterwards, is append-only in a controlled system, and stays addressable after
 the counterparty is gone. A receipt that lives only in the system losing
-authority is not a receipt; it is a hostage.
+authority is not a receipt; it is a hostage. Where it lives instead, and who
+owns that store, is § 3.
 
 #### `runtime_observation` is the field that would have caught the CRM cutover
 
@@ -241,13 +242,165 @@ it exists and is disabled. The cheapest discriminator is a search for the
 authority switch itself — the setting, the flag, the broker indirection — not a
 search for the capability.
 
-### 3. What these rules do not do
+### 3. Governance owns the cross-repository receipt registry
 
-Neither rule adds a conformance claim. The standards profile has no typed
-representation for a cutover receipt or a decommission inventory, and the
-Governance engine has no oracle that could evaluate either. If accepted, both
-rules are review discipline; describing them as a Governance engine control
-would be the same defect ADR 0013 exists to prevent.
+Michael resolved this on 2026-08-30, in these words:
+
+> Governance will own the cross-repository authority-cutover receipt registry.
+>
+> Use an append-only, versioned registry containing only non-sensitive
+> envelopes:
+>
+> - Old and new authority
+> - Exact immutable repository coordinates
+> - Effective time
+> - Runtime-evidence digest
+> - Approved private evidence pointer where necessary
+> - Old-writer retirement status
+> - Superseded receipt reference for corrections
+>
+> Knowledge remains discovery support, not the authority. Products retain their
+> local evidence; Governance holds the durable cross-repository receipt that
+> outlives both parties.
+
+#### Three tiers, and only one of them is the durable cross-repository record
+
+| Tier | Holds | Sensitivity | Lifetime | Standing |
+| --- | --- | --- | --- | --- |
+| **Product** | Local evidence: audit rows, engagement records, provenance columns, digests, migration records. | Private, rich, unconstrained. | As long as the product's own database. | Authoritative for its own domain. It does not move. |
+| **Governance registry** | The receipt **envelope** only. | Non-sensitive by construction. | Outlives both parties. | The durable cross-repository receipt. |
+| **Knowledge** | Index entries and pointers. | Non-sensitive. | Best effort. | Discovery support. **Never** the authority, and never cited in place of the registry. |
+
+The product tier is where the evidence stays. The registry does not absorb it;
+it **commits** to it. That distinction is the whole design, and § "Envelopes
+only" below is why.
+
+#### The envelope
+
+| Field | Content | Constraint |
+| --- | --- | --- |
+| `old_authority` | The system and the exact resource whose authority moved (rule 1 field 1). | Named, not a repository or host alone. |
+| `new_authority` | The same pair for the acquirer (rule 1 field 2). | As above. |
+| `coordinates` | Exact immutable repository coordinates on both sides (rule 1 field 3). | ADR 0013 § 3. No branch, no "latest", no unpeeled tag, no image tag. |
+| `effective_time` | The instant authority moved (rule 1 field 4). | Recorded by the transaction that moved it. |
+| `runtime_evidence_digest` | A digest over the product-side `runtime_observation` artefact (rule 1 field 5). | A digest, never the artefact. Reproducible by the product that holds it. |
+| `private_evidence_pointer` | Where the digested evidence lives, when the digest alone is not enough to find it. | Optional. An approved pointer only — an OpenBao path or a named controlled system's addressable reference. **Never a value, never a credential.** |
+| `old_writer_retirement_status` | The displaced writers' status (rule 1 field 7). | A status, not a boolean — see below. |
+| `supersedes_receipt` | The receipt this one corrects or updates. | Optional. The only mechanism for changing what a receipt says. |
+| `schema_version` | The envelope's version. | So a change to the envelope's shape is a visible change, not a silent reinterpretation of stored receipts — the same reason ADR-0031 § 3 requires an explicit `encoding_version`. |
+
+`rollback_boundary` (rule 1 field 6) stays in the product's own record. It is
+operational detail about a window that has usually closed by the time the
+receipt is durable, and it is the field most likely to carry host and
+maintenance specifics — exactly what an envelope must not accumulate.
+
+#### Envelopes only, and why the constraint is load-bearing
+
+A registry that holds the evidence **cannot** be shared across repositories. It
+inherits the union of every contributor's confidentiality constraints, and one
+contributor's private artefact makes the whole registry unpublishable. This
+repository is published — the fork guard in `.github/workflows/governance-checks.yml`
+exists for precisely that reason, and ADR 0003 records the decision — so a
+registry that accumulates operational detail is a registry that must eventually
+be split, redacted, or moved, and a receipt that moves is a receipt that stops
+being durable.
+
+A registry that holds only a **digest** can be shared. The digest is a
+commitment: it proves that the evidence the product holds is the evidence this
+receipt described, without the evidence ever leaving the product. That is the
+entire trade, and it is what makes a cross-repository receipt possible at all.
+
+The pressure this constraint will face is specific and worth naming, because it
+will not arrive as "let us put secrets in the registry". It will arrive as *"it
+would be so much more useful with just this one field inlined"* — a hostname, a
+row count, an error message, a subscriber identifier. The answer is always the
+same: a digest plus, if the reader genuinely cannot find the artefact,
+an approved pointer. A field that cannot be expressed as one of those two does
+not go in.
+
+#### Append-only and versioned; corrections by supersession
+
+**A receipt is never edited.** Mutating one in place defeats the entire purpose:
+a receipt exists to be trustworthy after both parties are gone, at which point
+it cannot be re-derived and nothing can contradict it. An edited receipt is
+byte-for-byte indistinguishable from an accurate one, so a registry that permits
+editing has the *appearance* of durable evidence and none of the property.
+
+A wrong receipt is corrected by writing a **new** receipt carrying
+`supersedes_receipt`. The superseded receipt stays readable, and the correction
+is legible as a correction.
+
+This is the same disposition the fleet already applies to a published release
+manifest, whose digest is frozen because an installation adopts by digest: the
+repair is a new version preserving the published one, and two contents sharing
+one identity is the worse shape rather than the safe one. A receipt is the same
+kind of object.
+
+#### `old_writer_retirement_status` is a status, not a boolean
+
+A receipt is written when authority moves, and at that moment the old writer is
+usually still live. A boolean field pressures the author into recording a false
+`retired` in order to produce a complete-looking receipt, which is the failure
+this record exists to prevent, reintroduced by the schema.
+
+The vocabulary is rule 2's: **`retired`** (naming the revision that removed it),
+**`transferred`** (naming the new owner and that move's own receipt), or
+**`still_live`** (naming an owner and a retirement condition). Absence is not a
+status.
+
+A receipt whose old writer later retires is updated the only way a receipt can
+be updated — a new receipt superseding it. Supersession is therefore the normal
+lifecycle rather than an exception, and the registry ends up showing that the
+retirement actually happened, on a date, instead of a promise made at cutover
+time. That is a better record than the boolean would have produced.
+
+#### Files in this repository, not a service
+
+**Decision: the registry is a directory of reviewed files here, one file per
+receipt.** Stated as a decision with reasons, because "files" is also the lazy
+default and the two must not be confused:
+
+- Governance already holds cross-repository records this way. `programmes/*.json`
+  has a typed strict parser and a CI validator, so the receipt registry reuses a
+  shape this repository has already proven rather than inventing one.
+- Git supplies content addressing, review-gated writes, and durability with **no
+  runtime to keep alive**. The rule is about outliving both parties; a service
+  is one more party that can die, and a receipt store that requires an
+  operational service to be readable in five years is not the artefact this rule
+  asked for.
+- A service would need availability, authentication, retention and backup
+  decisions before the first receipt could be written. The rule would then be
+  blocked on infrastructure, which is how a standard becomes aspirational.
+- Volume does not argue for a service. Cutovers are rare by construction, and
+  the envelope is small.
+
+What files give up, stated rather than discovered later: there is no write-time
+enforcement, so a receipt enters by pull request and the control is review plus
+a validator rather than an API; and there is no cross-organization query
+surface. Both are acceptable at this volume. If either becomes binding, the file
+format is already the service's schema.
+
+**Append-only is not a property Git supplies** — history can be rewritten, and a
+file can be edited like any other. It is enforced by review and by a validator
+that compares an existing receipt's bytes against the merge base and fails when
+they differ. Trusting the diff's *shape* is not that check: a rename plus a
+rewrite reads as an addition.
+
+The registry directory, its envelope schema, its strict parser and its
+append-only validator are a **separate reviewed change**. This record decides
+the owner, the contents and the discipline; it does not create the store, and
+nothing may be written to a registry that does not yet exist. That
+implementation, and whether the envelope is represented in the standards
+profile, is open decision 21.
+
+### 4. What these rules do not do
+
+Nothing here adds a conformance claim. The standards profile has no typed
+representation for a cutover receipt, a decommission inventory or a registry
+envelope, and the Governance engine has no oracle that could evaluate any of
+them. The registry directory does not exist yet. If accepted, all three
+sections are review discipline; describing any of them as a Governance engine
+control would be the same defect ADR 0013 exists to prevent.
 
 ## Consequences
 
@@ -268,6 +421,21 @@ would be the same defect ADR 0013 exists to prevent.
   authority switches are the only remaining index — which is why rule 1's
   receipt and rule 2's inventory reinforce each other and were approved
   together.
+- Governance acquires a durable artefact class it did not hold, and with it a
+  standing obligation to keep the registry publishable. The envelope constraint
+  is what makes that obligation cheap to meet; relaxing it once makes it
+  permanent.
+- Products give up nothing. Their evidence does not move, and the registry's
+  digest gives it a cross-repository meaning it did not have while it sat in one
+  product's database.
+- Most receipts will be superseded at least once, when the old writer finally
+  retires. That is the intended lifecycle, not churn, and it is why supersession
+  is a first-class field rather than an error path.
+- A cutover performed before the registry directory exists produces a
+  product-side receipt with no cross-repository counterpart. Backfilling one is
+  legitimate — the coordinates and the digest are still derivable — and the
+  backfilled receipt records its own later `effective_time` of entry rather than
+  pretending to be contemporaneous.
 - This `Proposed` record changes no current policy and no conformance result.
 
 ## Drift prevention
@@ -297,6 +465,26 @@ Any future control implementing these rules must fail on at least:
   delegation that the baseline does not carry, and a removed delegation whose
   baseline was not lowered.
 
+A control implementing the § 3 registry must additionally fail on at least:
+
+- an existing receipt whose bytes differ from the merge base, including when the
+  change arrives as a delete plus an add or as a rename plus a rewrite — the
+  check compares content against the base, never the diff's shape;
+- a correction applied by editing a receipt rather than by adding one carrying
+  `supersedes_receipt`;
+- a `supersedes_receipt` naming a receipt that does not exist, naming itself, or
+  producing a supersession chain with two live heads;
+- an envelope carrying a field outside the declared set, or a
+  `private_evidence_pointer` holding a value rather than a pointer — the
+  secret-like-literal detection in `agent_control verify` is the existing
+  instrument and must cover the registry directory;
+- an `old_writer_retirement_status` that is absent, boolean-shaped, or outside
+  rule 2's three-value vocabulary;
+- a `runtime_evidence_digest` that the product holding the artefact cannot
+  reproduce. This is the registry's non-vacuity case: a digest nobody can check
+  is a decoration, and a registry of decorations passes every structural check
+  it has.
+
 **Non-vacuity.** A checker over zero receipts and zero decommission
 declarations passes for the wrong reason. Neither rule counts as evidenced
 until at least one real cutover has produced a receipt the checker reads, and
@@ -305,7 +493,8 @@ the checker is shown to fail when a field is removed from it.
 Promotion from `Proposed` requires the named human's approval recorded in
 GitHub and the approved change merged to canonical `main`. Only then may an
 implementation cite this record as normative, and only an implemented,
-sabotage-tested control may claim automated conformance. Where the receipt is
-stored and who owns that store is open decision 19; propagating these
-amendments into `dotmac_starter_mt` ADR-0031 through that record's own
-in-document amendment mechanism is open decision 20.
+sabotage-tested control may claim automated conformance. The registry's
+directory, envelope schema, strict parser and append-only validator are open
+decision 21; propagating these amendments into `dotmac_starter_mt` ADR-0031
+through that record's own in-document amendment mechanism is open
+decision 20.

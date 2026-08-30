@@ -1,13 +1,23 @@
 # 0022. A backup is a rehearsed restore, and the role layer is part of it
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
+- Effective: 2026-08-30
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards, and every enrolled Dotmac repository whose deployment owns a PostgreSQL database
 - Classification: Internal
 
 ## Context
+
+This record is `Accepted`. It was drafted by an agent and was therefore
+non-normative until the named human's approval was recorded in the controlled
+workflow — under [ADR 0001](0001-governance-authority-model.md) and `AGENTS.md`
+an agent may not occupy the approver role or approve its own output. That
+approval was given in advance, on a stated condition which is now met. The
+condition, its exact wording, and the coordinates satisfying it are in
+§ "Acceptance — 2026-08-30" at the end, so a reader can VERIFY the promotion
+rather than take this section's word for it.
 
 On 2026-08-30 the newest production backup of the vendor control plane was
 restored into a disposable, network-isolated PostgreSQL 16 container. This was
@@ -374,4 +384,85 @@ only against a clean tree passes for the wrong reason, which is the same defect
 this record is about.
 
 The ownership assignment in § 8 and the rehearsal interval in § 9 are named
-decisions Michael has not made, recorded as open decision 25.
+decisions Michael has not made, recorded as open decision 25. Acceptance of this
+record does not make them, and does not create the check family described above:
+a standard being normative is not evidence that a control enforces it.
+
+## Acceptance — 2026-08-30
+
+Michael Ayoade approved this record on 2026-08-30. The approval is his; this
+section records it as an attributable event and is written by the agent that
+drafted the record. Under `AGENTS.md` an agent may not occupy the approver role
+or approve its own output, and neither happened here — the decision was made by
+the named human and is transcribed, not made, below.
+
+### The approval, and the condition it carried
+
+The approval was given in advance of the correction, on a stated condition. His
+exact wording:
+
+> Once that exact correction is green, promote ADR 0022 to Accepted in a
+> separate human-attributed commit. No further decision is required.
+
+"That exact correction" is the five-item specification below. Each item is
+recorded with the section that carries it, so the condition is checkable against
+the record rather than against a claim about it.
+
+| # | Required correction | Where it landed |
+| --- | --- | --- |
+| 1 | all thirteen bundle components named | § 2, normative table |
+| 2 | `pg_dumpall --globals-only --no-role-passwords` | `## Context`; § 2 part 3; drift detector |
+| 3 | property 9 as effective TABLE or COLUMN privileges across all seven table privileges | § 3 property 9 |
+| 4 | credential installation recorded as restore step 5 | § 5 |
+| 5 | Workspace did not supply the closure algorithm | `## Context` |
+
+Michael separately approved the credential model item 4 records —
+*"Credentials are post-restore bindings, never backup contents"* — including
+that isolated rehearsals use fresh ephemeral credentials rather than production
+secrets, and that a secret-source failure leaves the application stopped rather
+than degraded. That approval closes the credential half of open decision 25.
+
+### The evidence that the condition is met
+
+| Coordinate | Value |
+| --- | --- |
+| Repository | `michaelayoade/dotmac_governance` |
+| Correction pull request | [#46](https://github.com/michaelayoade/dotmac_governance/pull/46) |
+| Head commit evaluated | `113b7cd4921a2e49385a5a59c61a91b23b569bac` |
+| CI run | [33327273856](https://github.com/michaelayoade/dotmac_governance/actions/runs/33327273856) |
+| Run `headSha` | `113b7cd4921a2e49385a5a59c61a91b23b569bac` |
+| Check | `Governance record validation` |
+| Conclusion | `success` |
+| Merge commit | `6f68ef1` |
+
+The run's `headSha` is recorded because a green check listed against a pull
+request is not by itself proof that the check evaluated the commit under review.
+The condition is therefore independently verifiable from the run rather than
+from this section's assertion — the standard ADR 0013 § 3 sets, which this
+record is obliged to meet about itself.
+
+The promotion is a **separate commit** from the correction it depends on. A
+single commit carrying both would make the approved text and the approval one
+indivisible change, and a reader could not then tell which bytes Michael's
+condition was evaluated against.
+
+### What acceptance covers, and what it does not
+
+Michael accepted **ADR 0022 as corrected** — the standard in § 1, the thirteen
+part bundle, the nine rehearsal properties and their stated methods, the verdict
+rule in § 4, and the credential model in § 5.
+
+Acceptance specifically does **not**:
+
+- assign the bundle format, closure computation or rehearsal harness to
+  `dotmac-deployment-foundation`. § 7 PROPOSES that owner; neither that
+  repository nor deployment control has accepted it, and it remains the open
+  half of decision **25** along with the rehearsal interval;
+- create any check family, standards-profile surface, engine rule or CI gate.
+  The `Drift prevention` section says there is none, and acceptance does not
+  change that. `PostgresRecoveryBundleV1` is a reference implementation in one
+  repository, which is not fleet coverage;
+- certify any existing backup or restore. Every fleet backup remains a data copy
+  until its estate ships a bundle and passes a rehearsal, and every recovery
+  previously recorded `PROVED` under the schema/row-count/heads definition is
+  reclassified UNPROVEN rather than failed — a re-run settles each case.

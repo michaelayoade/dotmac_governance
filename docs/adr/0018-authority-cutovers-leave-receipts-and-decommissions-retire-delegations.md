@@ -1,9 +1,10 @@
 # 0018. Authority cutovers leave receipts and decommissions retire delegations
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
+- Effective: 2026-08-30
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (intended while Proposed)
+- Approver: Michael Ayoade
 - Scope: Governance-enrolled Dotmac repositories, and any Dotmac system whose authority moves or which is decommissioned
 - Classification: Internal
 
@@ -110,17 +111,21 @@ rule 1: the receipt is the artefact that no individual choice produces.
 
 ### Authority status
 
-Michael's direction above is not this repository's required GitHub approval
-record. Under [ADR 0001](0001-governance-authority-model.md) and `AGENTS.md`,
-an agent-drafted record remains `Proposed` and non-normative until the named
-human approval is recorded in the controlled workflow and the approved change
-merges to canonical `main`. This record is therefore `Proposed`, on the same
-footing as ADR 0017, and must not be cited as policy before then.
+This record was drafted `Proposed`, because Michael's direction above is not by
+itself this repository's required approval record: under
+[ADR 0001](0001-governance-authority-model.md) and `AGENTS.md` an agent-drafted
+record remains non-normative until the named human's approval is recorded in
+the controlled workflow. That approval was subsequently given on a stated
+condition which is now met, and the status moved to `Accepted`. The condition,
+its exact wording, and the evidence satisfying it are recorded in
+§ "Acceptance — 2026-08-30" below, so a reader can verify the promotion rather
+than take it on trust.
 
 ## Decision
 
-If this proposal is accepted, the following two rules extend the fleet
-authority-migration standard.
+The following rules extend the fleet authority-migration standard. Rules 1 and
+2 are the two amendments Michael approved on 2026-08-30; § 3 records the
+registry owner he assigned the same day, resolving open decision 19.
 
 ### 1. Every authority cutover leaves an immutable receipt
 
@@ -398,9 +403,11 @@ profile, is open decision 21.
 Nothing here adds a conformance claim. The standards profile has no typed
 representation for a cutover receipt, a decommission inventory or a registry
 envelope, and the Governance engine has no oracle that could evaluate any of
-them. The registry directory does not exist yet. If accepted, all three
-sections are review discipline; describing any of them as a Governance engine
-control would be the same defect ADR 0013 exists to prevent.
+them. The registry directory does not exist yet. All three sections are review
+discipline; describing any of them as a Governance engine control would be the
+same defect ADR 0013 exists to prevent. Acceptance does not change this, and
+acceptance does not authorize standing the registry up — that is open
+decision 21.
 
 ## Consequences
 
@@ -436,7 +443,10 @@ control would be the same defect ADR 0013 exists to prevent.
   legitimate — the coordinates and the digest are still derivable — and the
   backfilled receipt records its own later `effective_time` of entry rather than
   pretending to be contemporaneous.
-- This `Proposed` record changes no current policy and no conformance result.
+- Acceptance changes nothing operational. No standards profile, engine rule, CI
+  gate or conformance result changes, and no enrolled repository's checks move.
+  What changes is that these rules may now be cited as normative review
+  discipline rather than as a draft.
 
 ## Drift prevention
 
@@ -490,11 +500,66 @@ declarations passes for the wrong reason. Neither rule counts as evidenced
 until at least one real cutover has produced a receipt the checker reads, and
 the checker is shown to fail when a field is removed from it.
 
-Promotion from `Proposed` requires the named human's approval recorded in
-GitHub and the approved change merged to canonical `main`. Only then may an
-implementation cite this record as normative, and only an implemented,
-sabotage-tested control may claim automated conformance. The registry's
+This record is `Accepted`, so an implementation may cite it as normative. Only
+an implemented, sabotage-tested control may claim automated conformance, and
+none exists — acceptance of a standard is not evidence of a control. The
+registry's
 directory, envelope schema, strict parser and append-only validator are open
 decision 21; propagating these amendments into `dotmac_starter_mt` ADR-0031
 through that record's own in-document amendment mechanism is open
 decision 20.
+
+## Acceptance — 2026-08-30
+
+Michael Ayoade approved this record on 2026-08-30. The approval is his; this
+section records it as an attributable event and is written by the agent that
+drafted the record. Under `AGENTS.md` an agent may not occupy the approver role
+or approve its own output, and neither happened here — the decision was made by
+the named human and is transcribed, not made, below.
+
+### The approval, and the condition it carried
+
+The approval was given in advance of the final amendment, on a stated
+condition. His exact wording:
+
+> Update PR #39 with this owner and rerun CI. After that amendment is green, I
+> accept ADR 0018.
+
+"This owner" is the cross-repository receipt registry assignment now recorded
+as § 3.
+
+### The evidence that the condition is met
+
+| Coordinate | Value |
+| --- | --- |
+| Repository | `michaelayoade/dotmac_governance` |
+| Pull request | [#39](https://github.com/michaelayoade/dotmac_governance/pull/39) |
+| Head commit evaluated | `918e53bf0ad408068dc8007d82605151cffb6bdb` |
+| CI run | [33310758889](https://github.com/michaelayoade/dotmac_governance/actions/runs/33310758889) |
+| Run `headSha` | `918e53bf0ad408068dc8007d82605151cffb6bdb` |
+| Check | `Governance record validation` |
+| Conclusion | `success` |
+
+The run's `headSha` is recorded because a green check listed against a pull
+request is not by itself proof that the check evaluated the commit under
+review. The condition is therefore independently verifiable from the run rather
+than from this section's assertion, which is the standard ADR 0013 § 3 sets and
+this record is obliged to meet about itself.
+
+### What acceptance covers, and what it does not
+
+Michael accepted **ADR 0018 as amended** — rules 1 and 2, and the § 3 registry
+owner. Nothing broader was approved, and nothing here should be read as
+approving a general policy beyond this record's stated scope.
+
+Acceptance specifically does **not**:
+
+- create the receipt registry, its directory, its envelope schema, its parser
+  or its validator. § 4 says the directory does not exist and nothing may be
+  written to it. That work is open decision **21** and remains Michael's
+  decision;
+- add any conformance claim, engine rule or CI gate — see § 4;
+- amend `dotmac_starter_mt` ADR-0031. That propagation is open decision **20**,
+  sequenced after this acceptance and after the current release train, and is
+  to be a dated amendment on that record pinning this accepted revision — not a
+  cross-repository `Amends:` value, and not a copy of this standard.

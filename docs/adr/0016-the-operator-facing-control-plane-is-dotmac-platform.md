@@ -1,7 +1,8 @@
 # 0016. The operator-facing control plane is Dotmac Platform
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
+- Effective: 2026-08-30
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: `michaelayoade/dotmac_vendor_control_plane` and every repository that cites its coordinate — `dotmac_starter_mt`, `dotmac_erp`, `dotmac_sub`, `dotmac_observability`, `dotmac_governance`

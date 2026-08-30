@@ -261,9 +261,7 @@ class AdrValidationTests(unittest.TestCase):
         """A record cannot be retired by a successor that never claims it."""
         errors = self.validate(
             {
-                "0001-first.md": record(
-                    "0001", "First", status="Superseded by 0002"
-                ),
+                "0001-first.md": record("0001", "First", status="Superseded by 0002"),
                 "0002-second.md": record("0002", "Second"),
             }
         )
@@ -271,20 +269,14 @@ class AdrValidationTests(unittest.TestCase):
 
     def test_superseded_by_a_missing_record_fails(self):
         errors = self.validate(
-            {
-                "0001-first.md": record(
-                    "0001", "First", status="Superseded by 0009"
-                )
-            }
+            {"0001-first.md": record("0001", "First", status="Superseded by 0009")}
         )
         self.assertFails(errors, "superseded by ADR 0009, which does not exist")
 
     def test_mismatched_supersession_pair_fails(self):
         errors = self.validate(
             {
-                "0001-first.md": record(
-                    "0001", "First", status="Superseded by 0003"
-                ),
+                "0001-first.md": record("0001", "First", status="Superseded by 0003"),
                 "0002-second.md": record("0002", "Second", supersedes="0001"),
                 "0003-third.md": record("0003", "Third"),
             }
@@ -311,9 +303,7 @@ class AdrValidationTests(unittest.TestCase):
                 "0002-second.md": record("0002", "Second", supersedes="ADR 0001"),
             }
         )
-        self.assertFails(
-            errors, "'- Supersedes:' must be a four-digit ADR number"
-        )
+        self.assertFails(errors, "'- Supersedes:' must be a four-digit ADR number")
 
 
 if __name__ == "__main__":

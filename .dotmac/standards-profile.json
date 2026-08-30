@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "profile_id": "dotmac-governance-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
@@ -34,13 +34,17 @@
         "standards_control/profile.py",
         "tools/dotmac-standards"
       ],
-      "drift_test_paths": ["tests/test_standards_control.py"]
+      "drift_test_paths": [
+        "tests/test_standards_control.py"
+      ]
     }
   ],
   "typed_contract_surfaces": [
     {
       "surface_id": "standards-control-contracts",
-      "paths": ["standards_control/contracts.py"],
+      "paths": [
+        "standards_control/contracts.py"
+      ],
       "require_public_annotations": true,
       "forbid_any": true,
       "require_immutable_records": true
@@ -48,7 +52,9 @@
   ],
   "module_declared_vocabularies": [],
   "testing_kit_boundary": {
-    "test_roots": ["tests"],
+    "test_roots": [
+      "tests"
+    ],
     "kit_source_roots": [],
     "conformance_probes": []
   },
@@ -62,5 +68,6 @@
       "delivery_retry": 0
     },
     "conserved_exclusions": []
-  }
+  },
+  "deployment_artefact_surfaces": []
 }

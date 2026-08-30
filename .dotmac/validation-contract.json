@@ -31,6 +31,12 @@
       "reason": "Record validation. Parses checked-in files only."
     },
     {
+      "key": "check_receipts.py",
+      "aliases": [],
+      "class": "local",
+      "reason": "Authority-cutover receipt registry validation. Parses checked-in receipts and compares pre-existing ones against the merge base; reads Git history only, never a network."
+    },
+    {
       "key": "check_validation_contract.py",
       "aliases": [],
       "class": "local",

@@ -49,16 +49,18 @@ on this repository or producing governance material for Dotmac.
    static parsing, formatting, typing and record validation. The acceptance
    suite (`unittest`) is deliberately absent: it is owned by CI, and a local
    pass is not evidence and must not be reported as any. The split is declared
-   in `.dotmac/validation-contract.json`, and step 4's block, that file and
+   in `.dotmac/validation-contract.json`, and step 4's block, that file,
+   `.dotmac/agent-profile.json`'s `validation_commands` and
    `.github/workflows/` are held in agreement by
    `tools/check_validation_contract.py`, which fails when any of them moves
    without the others.
 
    ```bash
-   python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-   python3 -m ruff format --check agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-   python3 -m mypy --strict --scripts-are-modules agent_control gate_control programme_control standards_control tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+   python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+   python3 -m ruff format --check agent_control gate_control programme_control standards_control tests/test_agent_control.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+   python3 -m mypy --strict --scripts-are-modules agent_control gate_control programme_control standards_control tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
    python3 tools/check_adrs.py
+   python3 tools/check_receipts.py --base origin/main
    python3 tools/check_validation_contract.py
    python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json
    python3 -m programme_control --root .

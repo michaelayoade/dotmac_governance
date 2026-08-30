@@ -409,6 +409,24 @@ same defect ADR 0013 exists to prevent. Acceptance does not change this, and
 acceptance does not authorize standing the registry up — that is open
 decision 21.
 
+> **Amended 2026-08-30 by [ADR 0019](0019-the-authority-cutover-receipt-registry-is-a-reviewed-append-only-directory.md).**
+> The sentence *"The registry directory does not exist yet"* was true when this
+> record was written and is no longer. `receipts/` exists, with the envelope
+> schema, strict parser and append-only validator § 3 required
+> (`tools/check_receipts.py`, known-bad controls in
+> `tests/test_check_receipts.py`).
+>
+> The original text is preserved rather than rewritten. A record that quietly
+> edits itself to stay true is the shape this discipline refuses, and a reader
+> of § 4 needs to be able to see both what was decided and what changed.
+>
+> What is **unchanged**: no conformance claim is added, the standards profile
+> still has no typed representation for any of these artefacts, and the engine
+> still has no oracle. The registry ships **empty** — building the store was
+> only the engineering half of open decision 21, and **authorizing the first
+> receipt remains Michael's, so no receipt may be written until he approves
+> one.** ADR 0019 is itself `Proposed` pending that approval.
+
 ## Consequences
 
 - A cutover acquires a durable artefact that outlives both parties. The cost is

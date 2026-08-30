@@ -22,6 +22,20 @@ from tools.check_validation_contract import (
     validate_validation_contract,
 )
 
+#: The agent profile hands a client "the commands to run". It is the sixth copy
+#: of the list, and the one the first reconciliation missed.
+PROFILE: dict[str, Any] = {
+    "schema_version": 1,
+    "profile_id": "fixture",
+    "validation_commands": list(
+        (
+            "python3 -m ruff check --select E4 pkg",
+            "python3 tools/check_adrs.py",
+            "python3 -m standards_control verify --root .",
+        )
+    ),
+}
+
 LOCAL_COMMANDS = (
     "python3 -m ruff check --select E4 pkg",
     "python3 tools/check_adrs.py",
@@ -91,6 +105,7 @@ def build(
     contract: dict[str, Any] | None = None,
     commands: tuple[str, ...] = LOCAL_COMMANDS,
     workflow: str = WORKFLOW,
+    profile: dict[str, Any] | None = None,
 ) -> Path:
     """Write a complete, by-default-consistent repository into `root`."""
     (root / ".dotmac").mkdir(parents=True, exist_ok=True)
@@ -98,6 +113,12 @@ def build(
     (root / ".dotmac" / "validation-contract.json").write_text(
         json.dumps(CONTRACT if contract is None else contract, indent=2),
         encoding="utf-8",
+    )
+    profile_body = dict(PROFILE) if profile is None else profile
+    if profile is None:
+        profile_body["validation_commands"] = list(commands)
+    (root / ".dotmac" / "agent-profile.json").write_text(
+        json.dumps(profile_body, indent=2), encoding="utf-8"
     )
     (root / "AGENTS.md").write_text(instructions(commands), encoding="utf-8")
     (root / ".github" / "workflows" / "checks.yml").write_text(
@@ -402,6 +423,82 @@ class MissingInputTests(unittest.TestCase):
         self.assertTrue(
             any("refusing to report success" in error for error in errors), errors
         )
+
+
+class AgentProfileTests(unittest.TestCase):
+    """The sixth copy of the command list, and the one nothing used to bind.
+
+    `agent_control` checks that the paths a profile command names exist. It
+    never checked that the list still matched the instructions, so the profile
+    -- the list an agent client is actually handed -- could silently fall
+    behind while `AGENTS.md` and the workflow agreed with each other. Five of
+    six reconciled is the original defect standing in a file nobody re-read.
+    """
+
+    def test_a_consistent_profile_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            errors = validate_validation_contract(build(Path(name)))
+        self.assertEqual(errors, [])
+
+    def test_a_profile_missing_a_documented_command_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = build(
+                Path(name),
+                profile={
+                    "validation_commands": [
+                        "python3 -m ruff check --select E4 pkg",
+                        "python3 tools/check_adrs.py",
+                    ]
+                },
+            )
+            errors = validate_validation_contract(root)
+        self.assertTrue(
+            any("does not list 'standards_control verify'" in e for e in errors), errors
+        )
+
+    def test_a_profile_listing_an_undocumented_command_fails(self) -> None:
+        """The other direction. A profile that has GAINED a command is just as
+        much a divergence as one that lost one, and a guard checking only the
+        loss blesses the gain."""
+        with tempfile.TemporaryDirectory() as name:
+            root = build(
+                Path(name),
+                profile={
+                    "validation_commands": list(LOCAL_COMMANDS)
+                    + ["python3 tools/check_receipts.py --base origin/main"]
+                },
+            )
+            errors = validate_validation_contract(root)
+        self.assertTrue(any("lists 'check_receipts.py'" in e for e in errors), errors)
+
+    def test_a_profile_handing_an_agent_a_ci_owned_command_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = build(
+                Path(name),
+                profile={
+                    "validation_commands": list(LOCAL_COMMANDS)
+                    + ["python3 -m unittest discover --start-directory tests"]
+                },
+            )
+            errors = validate_validation_contract(root)
+        self.assertTrue(
+            any("never hand an agent a CI-owned command" in e for e in errors), errors
+        )
+
+    def test_a_profile_with_no_commands_is_refused(self) -> None:
+        """Non-vacuity: an empty list would make the comparison pass over an
+        empty set, which is a pass for the wrong reason."""
+        with tempfile.TemporaryDirectory() as name:
+            root = build(Path(name), profile={"validation_commands": []})
+            errors = validate_validation_contract(root)
+        self.assertTrue(any("non-empty list" in e for e in errors), errors)
+
+    def test_a_missing_profile_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = build(Path(name))
+            (root / ".dotmac" / "agent-profile.json").unlink()
+            errors = validate_validation_contract(root)
+        self.assertTrue(any("does not exist" in e for e in errors), errors)
 
 
 if __name__ == "__main__":

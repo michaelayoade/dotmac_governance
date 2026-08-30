@@ -25,29 +25,66 @@ The cause is one flag. A single-database `pg_dump --dbname` captures
 object-level `GRANT`s and RLS policies but **never role definitions**, because
 roles are cluster-level objects. The dump's table of contents shows the
 asymmetry exactly: **55 ACL entries, 26 POLICY entries, ZERO role objects.**
-Nothing in the fleet runs `pg_dumpall --globals-only`, and the same shape is
+Nothing in the fleet captures the role layer at all, and the same shape is
 present in ERP, in `dotmac_sub` (two scripts), and in SON.
+
+**The obvious remedy is also wrong, and this record said so late.** Earlier
+drafts named `pg_dumpall --globals-only` as what carries roles. It does — and it
+emits **SCRAM password verifiers** along with them, which is the exact material
+§ 2 forbids the bundle to contain. A record recommending it would have
+instructed its readers to produce a bundle it prohibits. Where a dump-side tool
+is used at all it carries `--no-role-passwords`; the shipped implementation
+instead derives role attributes from the catalog and **never selects a verifier
+column**, so the material is absent by construction rather than filtered after
+the fact.
 
 **Why this is worse than a backup that fails outright.** A failed backup is a
 known gap. This produces a database that LOOKS restored. Under the dual-plane
-persistence rule (`dotmac_starter_mt` ADR 0023), the REVOCATION of `platform_api`
-from tenant tables IS the plane isolation — there is no policy to see, because
-the control is a grant. An operator who checks `pg_policies` after a recovery
-sees 23 policies and concludes the isolation model came back. It did not. The
-policies are inert without the roles they name, and the plane whose isolation is
-a revocation has no isolation at all.
+persistence rule (`dotmac_starter_mt` ADR 0023), the REVOCATION of
+`platform_api` from tenant tables IS the plane isolation — there is no policy
+to see, because the control is a grant. An operator who checks `pg_policies`
+after a recovery sees 23 policies and concludes the isolation model came back.
+It did not. The policies are inert without the roles they name, and the plane
+whose isolation is a revocation has no isolation at all.
 
-The repair method already exists and was proven elsewhere. The Workspace
-recovery drill established three PostgreSQL facts that reasoning had not:
-role MEMBERSHIPS are cluster-level and absent from a database dump, so a
-restored database served `permission denied for table tenants` while holding a
-complete copy of its data; PostgreSQL 16 memberships carry their own `INHERIT`
-option, which is a separate fact from the role's; and `pg_dump` under FORCEd
-RLS fails LOUDLY as the owner rather than silently truncating. Workspace's
-backup now emits a role and membership prelude computed from a CLOSURE of what
-that database actually references — deliberately not `pg_dumpall --roles-only`,
-which would copy ERP's and Sub's role inventory into the Workspace's backup —
-and deliberately excludes passwords and superusers.
+**This record does not codify existing practice, and saying otherwise would be
+the more comfortable error.** The Workspace recovery drill is real and
+established three PostgreSQL facts that reasoning had not: role MEMBERSHIPS are
+cluster-level and absent from a database dump, so a restored database served
+`permission denied for table tenants` while holding a complete copy of its data;
+PostgreSQL 16 memberships carry their own `INHERIT` option, which is a separate
+fact from the role's; and `pg_dump` under FORCEd RLS fails LOUDLY as the owner
+rather than silently truncating.
+
+But **nothing in the fleet derives a role closure — Workspace included.** The
+absence WAS the finding. The closure was written for
+`PostgresRecoveryBundleV1`, not ported from a product, which means ADR 0006's
+product-first rule is satisfied by having looked and found nothing rather than
+by an extraction. A record describing this as codified practice would send the
+next implementer looking for a reference that does not exist.
+
+Why a closure at all, rather than a declared list: **every estate documents
+three roles and the cluster has five.** `outbox_dispatcher` and
+`platform_outbox_dispatcher` appear in the failed restore's error tally and in
+no repository's role contract. A list is a statement about what someone
+remembered; a closure derived from the source catalog is a statement about what
+the database actually references, and only the second one survives a role being
+added by an operator.
+
+**The strongest argument for this whole record is what the old verdict would
+have certified.** The pre-existing definition of a `proved` recovery was *schema
+present, row counts within tolerance, migration heads match*. Read those three
+against the database the failed restore actually produced: 45 tables present,
+row counts intact because the data restored fine, heads matching because
+`alembic_version` is an ordinary table. **All three pass.** The verdict would
+have returned `PROVED` for a database with no roles, no grants, superuser
+ownership and no isolation whatsoever.
+
+None of the three checks can see the role layer, so none of them can fail when
+it is missing. That is not a gap in an otherwise sound verdict; it is a verdict
+measuring the half of a restore that was never at risk. Any restatement of that
+definition, anywhere, inherits the defect — which is why § 4 below fixes the
+verdict itself rather than only adding checks beside it.
 
 This record is here rather than in a product because five estates share the
 defect and none of them can bind the others, and because the facility that
@@ -64,21 +101,39 @@ owner of stateless deployment execution and recovery for the fleet.
 
 ### 2. What is backed up is a BUNDLE, not a dump
 
-A recovery bundle is:
+**A record naming four parts invites a bundle with four parts.** An earlier
+draft of this section named the dump, a role prelude, extensions and the
+migration head, and the shipped `PostgresRecoveryBundleV1` has **thirteen**. The
+enumeration is therefore normative and complete, not illustrative:
 
-- the database dump;
-- a **role and membership prelude**, computed from a closure of the roles the
-  database actually references — never a cluster-wide role export, which would
-  carry a neighbouring estate's inventory into this bundle, and never including
-  passwords or superuser attributes;
-- the extension set the database requires;
-- the migration head it was taken at;
-- a manifest binding the digest of each of the above.
+| # | Part | Why it is separate |
+| --- | --- | --- |
+| 1 | `dump` | the data and schema |
+| 2 | `role_closure` | roles the database actually references, derived from the source catalog |
+| 3 | `role_attributes` | per-role attributes, **never a password verifier** |
+| 4 | `memberships` | including PG16 per-membership `INHERIT` and `SET`, which the role's own flags do not carry |
+| 5 | `object_ownership` | ownership is a distinct fact from privilege, and a restore silently reassigns it |
+| 6 | `default_privileges` | governs objects created AFTER the restore; invisible in any snapshot of current objects |
+| 7 | `schema_privileges` | schema `USAGE` gates everything beneath it |
+| 8 | `object_privileges` | table- and routine-level grants |
+| 9 | `fine_grained_acls` | column ACLs, plus the role lists attached to policies |
+| 10 | `row_security` | `ENABLE` **and** `FORCE` recorded separately — a table enabled but not forced exempts its owner |
+| 11 | `extensions` | |
+| 12 | `tablespaces` | an explicit decision: **`none` counts, silence does not** |
+| 13 | `migration_heads` | |
+| — | manifest | binds the digest of every part above |
+
+Two of these carry a rule inside them. **Part 3 never includes a verifier** —
+password material is absent by construction, not redacted afterwards, and a
+bundle that filters is one bug away from a bundle that leaks. **Part 12 refuses
+silence**: an absent tablespace section is indistinguishable from a bundle taken
+before anyone thought about tablespaces, so `none` is a recorded answer and the
+field's absence is a malformed bundle.
 
 The manifest is not bookkeeping. A bundle is assembled from independently
-produced parts, and any three of them agreeing proves nothing about the fourth
-— the same argument ADR 0014 § 6 makes for a deployment authorization, applied
-to the artefact a recovery reads.
+produced parts, and any twelve of them agreeing proves nothing about the
+thirteenth — the same argument ADR 0014 § 6 makes for a deployment
+authorization, applied to the artefact a recovery reads.
 
 ### 3. What the rehearsal must PROVE, enumerated
 
@@ -94,14 +149,49 @@ Into a fresh instance with no pre-existing roles, the restore proves:
 6. every POLICY present and attached to a role that exists;
 7. the EXTENSION set;
 8. the MIGRATION HEAD;
-9. that a TENANT role cannot reach a PLATFORM table — asserted by ATTEMPTING
-   the read as that role and requiring the refusal, never by reading a catalogue
-   that would have looked identical before the roles were restored.
+9. that a TENANT role cannot reach a PLATFORM table — asserted by an
+   **EFFECTIVE-privilege** check with `has_table_privilege` semantics, or by
+   attempting the read as that role and requiring the refusal.
 
 Property 9 is the one the vendor control-plane restore silently lost, and it is
-the one no catalogue query can answer.
+the one no catalogue LISTING can answer. The method is part of the property
+rather than an implementation note, because the wrong method **passes when the
+system is broken**:
 
-### 4. A validator may never create a role it is checking for
+`information_schema.table_privileges` and its relatives enumerate **direct**
+grants only. A role that reaches a platform table THROUGH A MEMBERSHIP appears
+in that view as having no access at all, so the isolation assertion returns "no
+privilege found" and goes green over exactly the leak it exists to detect. This
+is not hypothetical and not a beginner's error: **Workspace's own isolation
+tests carry this bug**, and the recovery lane's first draft inherited it before
+catching it. Two independent implementations reached for the listing first.
+
+`has_table_privilege` resolves membership, inheritance and `PUBLIC` the way the
+executor does. Where a check has a listing form and an effective form, this
+record requires the effective one — a privilege question must be answered by
+the same machinery that will answer it at runtime.
+
+### 4. The verdict IS the enumerated set, never a summary of it
+
+A recovery verdict is the property set in § 3, reported per property. It may not
+be redefined as a smaller set of checks that stands in for them.
+
+This is the § 3 enumeration's whole point, and the Context states why: *schema
+present, row counts in tolerance, heads match* returns `PROVED` for the database
+the failed restore produced. A summary verdict is not a convenience over the
+enumeration — it is a different, weaker claim wearing the same word, and the
+three summary checks happen to be exactly the three that a missing role layer
+cannot disturb.
+
+Two consequences:
+
+- **A verdict reports per property, so a reader can see WHICH property carried
+  it.** An aggregate `PROVED` with no breakdown is unfalsifiable by inspection.
+- **Adding a property is not a breaking change; dropping one is.** A bundle
+  version that answers fewer properties than its predecessor is a narrowing of
+  the claim and must be recorded as one, never absorbed as a refactor.
+
+### 5. A validator may never create a role it is checking for
 
 The rehearsal harness is forbidden from creating, altering or granting anything
 from its own configuration in order to make its checks pass. A validator that
@@ -111,7 +201,7 @@ measures is its own configuration file rather than the bundle.
 A missing role is a FAILED REHEARSAL. The repair belongs in the backup that
 omitted it.
 
-### 5. Exit status is insufficient in BOTH directions
+### 6. Exit status is insufficient in BOTH directions
 
 The measured restore exited non-zero **and** produced a usable-looking
 database. The Workspace drill shows the converse: a restore can exit zero and
@@ -119,10 +209,11 @@ leave a database that refuses every query its application makes, because the
 memberships were never in the dump.
 
 A recovery verdict is therefore the enumerated property set in § 3, reported
-per property. Reading the process's exit code is not the check; it is one input
-to it, and on its own it has been wrong in both directions on measured evidence.
+per property, and § 4 forbids collapsing it into a summary. Reading the
+process's exit code is not the check; it is one input to it, and on its own it
+has been wrong in both directions on measured evidence.
 
-### 6. Ownership
+### 7. Ownership
 
 | Owner | Owns |
 | --- | --- |
@@ -134,7 +225,7 @@ to it, and on its own it has been wrong in both directions on measured evidence.
 A product may not implement its own rehearsal harness. Five per-product scripts
 is how five estates arrived at the same defect independently.
 
-### 7. A rehearsal EXPIRES
+### 8. A rehearsal EXPIRES
 
 A recovery claim cites the last rehearsal by immutable reference — a run
 identifier and the bundle digest it read. A rehearsal older than the declared
@@ -154,14 +245,31 @@ own.
 - A restore that today "works" will start failing the rehearsal. That is the
   control functioning: the failure already existed and was being reported as
   success.
-- Passwords are deliberately excluded from the bundle, so a recovery is not
-  complete until credentials are re-supplied from their approved store. This
-  record does not decide that path, and states the gap rather than implying the
-  bundle closes it.
+- Any recovery previously recorded as `PROVED` under the schema/row-count/heads
+  definition is **reclassified as unproven**, not as failed. The old verdict
+  could not see the role layer, so it never established the thing it was read as
+  establishing — and a re-run, not a retraction, is what settles each case.
+- Thirteen bundle parts is a larger artefact and a longer implementation than
+  four. The count is not ambition: each part was added because a restore can be
+  wrong in that specific way while every other part is right. Default
+  privileges and per-membership `INHERIT` are the two that look redundant on a
+  reading and are not.
+- Passwords are deliberately excluded from the bundle — absent by construction,
+  never filtered — so a recovery is not complete until credentials are
+  re-supplied from their approved store. This record does not decide that path,
+  and states the gap rather than implying the bundle closes it.
 
 ## Drift prevention
 
-**Enforcement status: none yet, stated rather than implied.**
+**Enforcement status: none in this repository; one shipped implementation.**
+
+`PostgresRecoveryBundleV1` is implemented in `dotmac_starter_mt` (pull request
+#518, merged `d6b9aae5`) and is what § 2's thirteen parts and § 3's properties
+are drawn from. Building it is what exposed the three defects this record
+carried — the verifier-emitting flag, the four-part bundle and the
+direct-grant isolation check — which is the ordinary and expected direction:
+a specification survives contact with an implementation or it was not specific
+enough to be wrong. It is a reference implementation, not fleet coverage.
 
 What is decidable from repository content, and could become a
 `standards_control` family over a declared backup surface:
@@ -171,8 +279,14 @@ What is decidable from repository content, and could become a
 - a declared backup surface that names nothing, which passes every content
   check for the wrong reason and must be a diagnostic rather than a skip;
 - a rehearsal harness that issues `CREATE ROLE`, `ALTER ROLE` or `GRANT`
-  against the instance it is validating, which is § 4 violated in a way a
-  reader can see in the source.
+  against the instance it is validating, which is § 5 violated in a way a
+  reader can see in the source;
+- an isolation assertion reading `information_schema.table_privileges` or
+  another DIRECT-grant listing where § 3 property 9 requires effective-privilege
+  semantics — the defect that passes while the system is broken, and which two
+  independent implementations reached for first;
+- a role or attribute export carrying password material, including a bare
+  `pg_dumpall --globals-only`, which emits SCRAM verifiers.
 
 What CANNOT be derived here: whether a rehearsal actually ran, what it proved,
 and when. Those are facts about runs and about production artefacts. ADR 0013
@@ -186,5 +300,5 @@ RED — alongside a conforming one shown to go green. A restore check demonstrat
 only against a clean tree passes for the wrong reason, which is the same defect
 this record is about.
 
-The ownership assignment in § 6 and the rehearsal interval in § 7 are named
+The ownership assignment in § 7 and the rehearsal interval in § 8 are named
 decisions Michael has not made, recorded as open decision 25.

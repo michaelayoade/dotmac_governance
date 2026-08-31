@@ -66,7 +66,7 @@ path below was read at that revision.
 
 The verification is not a shallow existence check. For every entry in
 `COMMERCIAL_MODULE_SCHEMA_CONTRACT` it asserts four properties
-(`app/commercial_module_prereqs.py:156-185`): the schema exists; its owner is
+(`app/commercial_module_prereqs.py:166-195`): the schema exists; its owner is
 `dotmac_app`; `PUBLIC` holds neither `USAGE` nor `CREATE`; and `USAGE` is
 granted to all three of `app_admin`, `app_user` and `platform_api`. A parallel
 role check asserts four roles on the exact `(rolcanlogin, rolbypassrls,
@@ -74,7 +74,7 @@ rolsuper)` triple.
 
 **Who supplies the credential decides which half runs.** Three CI workflows
 supply it against a throwaway superuser database
-(`.github/workflows/ci.yml:717-760` — a `postgis/postgis:16-3.4` container as
+(`.github/workflows/ci.yml:717-761` — a `postgis/postgis:16-3.4` container as
 `postgres`, torn down in the same job; likewise `e2e.yml:108` and
 `e2e-gate.yml:163`), and an architecture test
 (`tests/architecture/test_ci_pipeline.py:531-542`) asserts they keep doing so.
@@ -154,7 +154,7 @@ decision rests on.
    gate. That the file is empty today is the entire safety property, and nothing
    enforces it.
 5. **CI does not "always" supply the credential.** The step is conditional
-   (`ci.yml:751`) and is skipped on docs-only changes and on every push to
+   (`ci.yml:751-752`) and is skipped on docs-only changes and on every push to
    `main`. It is a PR-time gate, not something that runs on the merge commit
    that becomes a release candidate.
 
@@ -231,7 +231,7 @@ This sentence is the enforceable core of the record and the one to cite.
 
 A conditional that disables a step when a variable is absent does state a
 premise — in the measured case, *"repair is opt-in so nobody grants
-database-level `CREATE` casually"*, which `docs/runbooks/PRODUCTION_DEPLOYMENT.md:134`
+database-level `CREATE` casually"*, which `docs/runbooks/PRODUCTION_DEPLOYMENT.md:135`
 states as policy and which is entirely sound as a reason. It is still not an
 exemption, because nothing checks it and nothing records what the disabled half
 was supposed to accomplish. The region it leaves — who provisions, when, under

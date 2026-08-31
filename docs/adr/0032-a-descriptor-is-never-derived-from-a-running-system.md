@@ -47,6 +47,16 @@ assert. Its **schema is** repository-derivable, from the heredoc at
 `product_descriptor_sha256`, set from the literal above. **There is no field
 naming a promoted descriptor.**
 
+**A precision about which launcher was read.** The file at `main` is not the file
+that ran: it hashes `sha256:6225d83c…`, while the receipt records
+`sha256:6edc8a80…`, the launcher at `d2bc501` (#92) — `4b82d2e` (#97) changed a
+later step afterwards. A reader diffing `main` against the receipt sees a
+mismatch that is correct. The line numbers above are `main`'s. The two revisions
+were diffed for the two passages this record depends on — the
+`DESCRIPTOR_SHA256` literal and the receipt heredoc — and they are
+**byte-identical**, so the finding holds for the launcher that actually ran and
+not merely for the one on the branch.
+
 A correction worth making, because the looser version of this claim is wrong and
 would be caught: **the receipt is not silent about everything downstream.** It
 records `migration_heads`, and it records `pre_bootstrap_revision`. What it lacks
@@ -121,6 +131,17 @@ is already established by the two checked-in artefacts above.
 
 Nothing compared the accepted descriptor to the live database. The divergence
 surfaced because a relayed claim happened to be checked, which is not a control.
+
+The sharpest form of that: **`database.expected_schemas` has no code consumer.**
+A search of the repository outside `deploy/product.toml` itself finds exactly one
+occurrence, in a dated operations document. The field in which the descriptor
+declares which schemas should exist is read by nothing — so the declaration going
+stale could not have produced a failure anywhere, whatever its contents.
+
+That is worth separating from the omission. § 3's missing promotion is why the
+declaration was wrong; **a declared field with no reader is why being wrong cost
+nothing**, and a rule that fixed only the first would leave a descriptor that is
+accurate and still unchecked.
 
 ### The family this completes: state reachable by omission
 

@@ -40,7 +40,13 @@ from check_adr_references import (  # noqa: E402
     scan_text,
 )
 
-HELD = frozenset({"0015", "0016"})
+#: The records the fixture repository holds. It models
+#: `dotmac_platform_control_plane` at the exhibit's revision: 0003, 0014, 0015
+#: and 0016 exist, 0018 does NOT, and 0004 does not either. That matters more
+#: than it looks -- the exhibit's line cites four numbers, and the guard must
+#: report exactly the one the repository lacks. A smaller held-set made the
+#: test pass a guard that reported all four, which CI caught.
+HELD = frozenset({"0003", "0014", "0015", "0016"})
 
 
 def ref(number: str) -> str:
@@ -87,7 +93,10 @@ class ScanTextControls(unittest.TestCase):
         self.assertEqual(
             [f.number for f in findings],
             ["0018"],
-            "the exhibit must be reported, and nothing else on it",
+            "the exhibit must be reported, and NOTHING ELSE on the same line: "
+            "0003, 0014 and 0015 resolve in that repository and 0018 does not, "
+            "so this asserts the guard discriminates within one line rather "
+            "than objecting to the line",
         )
         self.assertEqual(findings[0].key(), "docs/adr/0016.md:4:ADR-0018")
 

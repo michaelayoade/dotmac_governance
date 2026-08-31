@@ -46,6 +46,11 @@ wholesale and that no vhost mentions a documentation path — asserted in
 `tests/architecture/test_api_documentation_ingress.py` — so nothing in the
 ingress layer stood between the default and a request.
 
+Platform CP's ADR-0016 § 7 does state present-tense outcomes on the production
+host, and no deployment-run record for that host exists in the repository. Under
+ADR 0013 § 1 those are claims this repository may not adopt, and it does not
+adopt them. The rule below does not depend on them.
+
 ### The plane defect, arriving from both directions
 
 Platform CP repaired the same underlying confusion twice in two days, from
@@ -107,6 +112,18 @@ The type also carries a **rationale that cannot be empty**
 (`:196-200`): a published surface is a decision someone must be able to review,
 and a declaration with no stated reason is a value, not a decision.
 
+**Stated exactly, because the difference matters:** the measured repair ships
+the typed policy and four construction-time refusals, but *absence of a
+declaration* refuses only in that product's **CI**, for that **one** assembly —
+an assembly that simply never applies the policy is refused by nothing at
+runtime and serves the framework's defaults. The construction-time form this
+section requires is specified in Platform CP ADR-0016 § 6 item 2, as a kernel
+spec field whose null case "must NOT mean FastAPI's default […] `create_app`
+refuses to build, the way an unbound migration prerequisite refuses" — and it is
+**not implemented anywhere**. So § 2 is, today, a requirement no assembly in the
+fleet fully satisfies. Recording that is the point; a standard written to match
+what already exists would have asked for nothing.
+
 ### 3. The gate reads the LIVE ROUTE INVENTORY, never configuration attributes
 
 The check walks the constructed application's real routes and locates the
@@ -125,6 +142,17 @@ The reference shape is `documentation_routes`
 
 > Derived from the mounted routes, never from the `FastAPI` attributes: the
 > attributes are what an assembly meant, the routes are what it serves.
+
+Two precisions, so the rule is implementable rather than slogan-shaped.
+Attributes may be read to **widen** the candidate path set — the reference shape
+unions the framework's hardcoded defaults with the current attribute values — but
+never to **decide**; the decision is always "is a route mounted at this path".
+And a gate that iterates one router does not descend into a **mounted
+sub-application**: neither the reference implementation nor its CI smoke does, so
+a documentation surface inside a sub-app is invisible to both. No such mount
+exists in the measured assembly today, which makes it an unmonitored region
+rather than a covered one, and it is named here rather than left to be
+discovered.
 
 ### 4. An ingress rule is NEVER the authority
 
@@ -298,6 +326,23 @@ Writing this record surfaced a problem this repository's own numbering rule does
 not cover, and it is recorded here because the cost lands on records that cite
 each other.
 
+The sharpest exhibit is in the exemplar itself. Platform CP ADR-0016's own
+`Relates to:` header (`docs/adr/0016-api-documentation-exposure-policy.md:11-12`)
+reads:
+
+> ADR-0018 in `dotmac_governance` (a guard exemption states an enforceable
+> premise)
+
+**That is the wrong repository.** This repository's ADR 0018 is *Authority
+cutovers leave receipts and decommissions retire delegations*. The rule quoted is
+`dotmac_starter_mt` ADR-0018, *A guard exemption must carry an enforceable
+premise*. Both headings were read to confirm it. This is not a criticism of that
+record's substance — it is the most careful cross-repository citation in the
+document, the one place its author stopped to qualify a reference, and it still
+went to the wrong repository. If qualification by hand is unreliable when
+someone is deliberately being careful, it is not a convention, it is a hope.
+
+The unqualified case is the same defect without the visible tell.
 `src/vendor_cp/commercial_backfill/planner.py:29` reads:
 
 > before the effect (ADR-0014's shape, applied to a planner)
@@ -308,6 +353,20 @@ repository also has its own ADR-0014, *One browser authentication owner for the
 platform console*, and this repository has a third, *Build once and bind the
 environment late*. **Three distinct accepted ADR-0014s exist across the fleet,
 two of them in scope for that one file**, and the reference does not say which.
+
+**It was already three-way before the record that appeared to cause it.**
+`dotmac_starter_mt` and this repository both held an ADR-0014 as of 2026-08-29,
+and that repository already disambiguates by hand in
+`docs/CONTROL_EXCEPTIONS.md` ("Governance ADR 0014") while other references in
+the same tree mean its own. Platform CP's ADR-0014 made it three-way; it did not
+create the problem.
+
+**And the next one is already loaded.** `ADR-0018` occurs bare seven times in
+Platform CP — tests, architecture documentation and its `AGENTS.md` — all meaning
+the starter's. They resolve today only by elimination, because Platform CP's
+numbering stops at 0016. **The day it writes its own ADR-0018, all seven silently
+change meaning**, by the identical mechanism that just fired on 0014. A rule
+written only for 0014 would be stale within two records.
 
 `docs/adr/README.md` § Numbering already handles the collision case it was
 written for — two branches picking the same free number **within one
@@ -324,6 +383,13 @@ plausible cheap detector (a bare reference in a file whose repository has a
 record at that number AND whose imports reach another repository that also does),
 and it is exactly the kind of rule that should not be adopted by inference.
 Recorded as open decision 38.
+
+Two facts should inform whoever decides it. Qualification today is the rare
+exception rather than the convention — a survey of both repositories found the
+overwhelming majority of `ADR-NNNN` references bare. And the qualified minority
+uses no agreed spelling: some write `` `dotmac_governance` ADR 0013`` with a
+space, others `kernel ADR-0003` with a hyphen. There is a pattern; there is no
+rule, and nothing enforces either.
 
 ## Acceptance — 2026-08-31
 

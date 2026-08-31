@@ -13,7 +13,13 @@
 ### The measured instance
 
 `dotmac_platform_control_plane` (Platform CP), read at `main`
-`d9b30ee4a501ce5b59e28c9d9965bcc4b9e211e0`. Every claim below is derived from
+`d9b30ee4a501ce5b59e28c9d9965bcc4b9e211e0`. That repository's `origin/main` has
+since advanced to `0f11387f888946ac7bd24d7f0ad7f91a9121b7a3`; the descriptor has
+been touched three times since the bootstrap and its raw digest has changed
+accordingly, and **none of those commits declares `mod_deploy`.** The divergence
+this record describes therefore persists at the later revision rather than having
+been quietly closed — which is why the read revision is named rather than "the
+current descriptor". Every claim below is derived from
 repository content; where a fact could only come from observing a host, it is
 marked as such and is not asserted here.
 
@@ -21,8 +27,18 @@ A create-only bootstrap ran on 2026-08-31. Its launcher is
 `scripts/bootstrap/bootstrap_once.sh`, hand-run by the authoriser — the receipt
 it writes says so in as many words: `"workflow_revision": "hand-run by the
 authorizer; no workflow performed this bootstrap"`. It created schema
-`mod_deploy`, applied migrations, and landed ADR-0011 § 4's revocation of
-`platform_api`'s DELETE on `public.licence_delivery_targets`.
+`mod_deploy`, applied migrations, and landed the revocation of `platform_api`'s DELETE on
+`public.licence_delivery_targets`.
+
+That revocation is routinely cited as "ADR-0011 § 4", including by
+`deploy/product.toml:26` itself, and the citation is **shorthand for a rule § 4
+no longer states**. § 4 is *Measure the estate before claiming it is empty*, and
+as originally written it required revoking INSERT, UPDATE **and** DELETE. The
+DELETE-only seal is that record's **Amendment — 2026-08-21**: `platform_api`
+keeps INSERT and UPDATE because the reconciler needs them, and "a projection is
+rebuilt from its authority, never deleted". `v017`'s own docstring says the same.
+The correct citation is *Platform CP ADR-0011, Amendment 2026-08-21*, and this
+record uses it.
 
 **It updated no declaration.** The descriptor it bound is a fixed literal in the
 launcher (`:48`):
@@ -129,10 +145,32 @@ is already established by the two checked-in artefacts above.
 
 ### Why it survived: nothing compared the two
 
-Nothing compared the accepted descriptor to the live database. The divergence
-surfaced because a relayed claim happened to be checked, which is not a control.
+The divergence surfaced because a relayed claim happened to be checked, which is
+not a control.
 
-The sharpest form of that: **`database.expected_schemas` has no code consumer.**
+**"Nothing compares a descriptor to a live database" would be too strong, and is
+corrected here rather than repeated.** A comparison does exist: the Foundation
+candidate's `classify_invariant_breaches` evaluates a descriptor's declared
+`[[database.isolation]]` invariants against a restored catalogue *and* against a
+source catalogue captured from live production, and distinguishes `SOURCE DRIFT`
+from `RESTORE DEFECT`. It has even caught real drift of exactly this kind.
+
+Three properties make it structurally unable to catch **this** instance, and
+each is the useful part of the finding:
+
+- it runs only **inside a recovery rehearsal**, not on the deployment path;
+- it compares only invariants the descriptor **declares** — and this descriptor
+  declares no DELETE invariant, which is the very absence at issue, so the thing
+  that went wrong is the thing that removes it from scope;
+- it says nothing about schemas or heads.
+
+**A comparison scoped to what was declared cannot report what was never
+declared.** That is § 6's second direction stated as a measurement rather than a
+principle, and it is why the comparison requirement is written as
+present-but-undeclared rather than as "check the invariants".
+
+The sharpest form of the gap: **`database.expected_schemas` has no code
+consumer.**
 A search of the repository outside `deploy/product.toml` itself finds exactly one
 occurrence, in a dated operations document. The field in which the descriptor
 declares which schemas should exist is read by nothing — so the declaration going
@@ -142,6 +180,14 @@ That is worth separating from the omission. § 3's missing promotion is why the
 declaration was wrong; **a declared field with no reader is why being wrong cost
 nothing**, and a rule that fixed only the first would leave a descriptor that is
 accurate and still unchecked.
+
+A third layer sits under both. That repository's stale-claims ratchet scans
+`AGENTS.md`, `README.md`, `docs`, `src`, `alembic` and `scripts`, and only `.md`
+and `.py`. `deploy/product.toml` is a `.toml` under `deploy/`, so **the
+descriptor's prose — including the "five module schemas" and "three unapplied"
+sentences that went stale — is outside the ratchet entirely.** By that
+repository's own ADR-0018 vocabulary it is an unmonitored region, and it is one
+that nobody labelled as such.
 
 ### The family this completes: state reachable by omission
 
@@ -330,9 +376,23 @@ verified, from Platform CP `docs/adr/0017-…:131`, is the hold and its reason:
 > `0.3.0a2` is held: publishing before rehearsal would recreate the deadlock the
 > candidate lane exists to break.
 
-and that the resulting pin is dated — that record's § 6 states the bound
-artifact **expires 2026-11-28**, making the arrangement "a dated obligation, not
-a permanent arrangement".
+and that the resulting pin is described as dated — that record's § 6 states the
+bound artifact **expires 2026-11-28**, calling the arrangement "a dated
+obligation, not a permanent arrangement".
+
+**That expiry must not be cited as an existing forcing function, and this record
+does not cite it as one.** Measured: the pin exists only in ADR-0017's prose. The
+file § 6 names, `scripts/recovery/build_bundle.py`, had already been deleted when
+that record landed — moved to `src/vendor_cp/recovery/bundle.py` five minutes
+earlier — and the coordinates it gives (the run id, the artifact id, the version
+and the expiry date) appear **nowhere in code**. Platform CP's `pyproject.toml`
+states deliberately that the Foundation is *not* a dependency of that assembly,
+and the import is made inside a function so its absence is a runtime answer. So
+there is no machine-checkable pin to expire.
+
+The honest position is therefore weaker than "a deadline already exists": the
+publication of `0.3` is a **stated condition with no mechanism behind it**, and
+anyone relying on the 2026-11-28 date should first make the pin real.
 That hold is not incidental to this record: it is the same hold that already
 forced Platform CP's conformance gate into a dated gap. So the honest position is
 that this rule can be **ratified and specified now and enforced when 0.3

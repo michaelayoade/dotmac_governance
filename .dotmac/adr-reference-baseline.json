@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "statement": "Known unresolvable ADR citations in this repository, as exact path:line:number keys. The set is two-directional: tools/check_adr_references.py fails when an entry appears that is not listed here, AND when a listed entry stops firing without being removed in the same change.",
+  "not_an_exemption_mechanism": "This file holds KNOWN DEBT only. A reference that is reviewed and correct is excluded structurally instead - a fenced code block is a specimen and a blockquote is a reproduction - so that 'grandfathered' and 'reviewed and correct' cannot be confused (dotmac_starter_mt ADR-0018 rule 4).",
+  "known_unresolvable_references": [
+    "README.md:16:ADR-0010",
+    "docs/adr/0011-external-connector-surface-ratchet.md:1458:ADR-0010",
+    "docs/adr/0011-external-connector-surface-ratchet.md:1459:ADR-0010"
+  ],
+  "why_each_entry_is_here": {
+    "ADR-0010": "This repository holds no ADR 0010. Three passages narrate the numbering history in which the askable-decision contract took 0010 and the connector ratchet was renumbered to 0011, so a reader following the reference finds nothing. Repairing it means deciding what the record at 0010 is - whether it merged, was withdrawn, or is the current 0011 under an earlier name - which is a records question rather than a citation edit, and is not made by this guard."
+  }
+}

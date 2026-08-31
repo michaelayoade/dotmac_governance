@@ -31,6 +31,12 @@
       "reason": "Record validation. Parses checked-in files only."
     },
     {
+      "key": "check_adr_references.py",
+      "aliases": [],
+      "class": "local",
+      "reason": "ADR citation validation (ADR 0031). Parses checked-in and untracked-but-not-ignored files and this repository's own ADR directory; reads no network and no other repository."
+    },
+    {
       "key": "check_commit_identity.py",
       "aliases": [],
       "class": "local",
@@ -62,7 +68,9 @@
     },
     {
       "key": "standards_control verify",
-      "aliases": ["dotmac-standards verify"],
+      "aliases": [
+        "dotmac-standards verify"
+      ],
       "class": "local",
       "reason": "Conformance profile validation. CI reaches it through the composite action's launcher, which is the alias."
     },

@@ -270,8 +270,10 @@ def validate_adrs(adr_dir: Path) -> list[str]:
             errors.append(f"ADR number {number} used by: {', '.join(sorted(names))}")
 
     # Relationships are only checkable against an unambiguous record set. A
-    # duplicate number means "ADR 0004" does not identify one record, so
-    # resolve numbering before reporting relationship failures against it.
+    # duplicate number means `dotmac_sub` ADR 0004 does not identify one
+    # record, so resolve numbering before reporting relationship failures
+    # against it. The reference is qualified because this repository holds no
+    # 0004 and a bare number would assert that it does (ADR 0031).
     if any(len(names) > 1 for names in by_number.values()):
         return errors
 

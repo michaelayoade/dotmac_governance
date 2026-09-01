@@ -1,13 +1,26 @@
 # 0021. A dependency floor is installed, not declared
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-30
+- Effective: 2026-09-01
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: Organization-wide engineering standards, and every enrolled Dotmac repository that publishes a distribution another repository installs, or composes distributions other repositories publish
 - Classification: Internal
 
 ## Context
+
+This record is `Accepted`. It was drafted by an agent and was therefore
+non-normative until the named human's approval was recorded in the controlled
+workflow — under [ADR 0001](0001-governance-authority-model.md) and `AGENTS.md`
+an agent may not occupy the approver role or approve its own output. **Nothing
+in §§ 1 through 10.2 was rewritten for the promotion**, and the amendment
+history those sections carry — the § 10.1 circularity named and then closed, the
+§ 10.2 builder/verifier split, and the retracted claim in § Drift prevention — is
+deliberately preserved, because the record's trajectory is now part of its
+evidence. **Acceptance changed this record's status and nothing about the
+world:** every enforcement statement below still reads `none`, and § "Acceptance
+— 2026-09-01" at the end says what the promotion does and does not authorize.
 
 `dotmac-deployment-control` 0.1.0a5 was published on 2026-08-30 and
 independently verified on seven properties. The bytes were sound. The wheel and
@@ -706,11 +719,27 @@ than a matter of taste:
 distinction matters, because the two are routinely conflated and only one of
 them is a control. **The third derived fact added on 2026-09-01 is enforced by
 nothing here either.** No `standards_control` rule reads it, no
-`standards-profile.schema.json` field represents it, and nothing in
-`tools/check_adrs.py` or `tools/check_adr_references.py` — this repository's
-only readers of the ADR directory — evaluates a floor lane. Stating it as a
+`standards-profile.schema.json` field represents it, and nothing that reads
+this repository's ADR directory evaluates a floor lane. Stating it as a
 requirement is what this record can do; asserting that something checks it
 would be the failure this section names two paragraphs down.
+
+**The reason above was corrected on 2026-09-01, and the verdict was not.** This
+section previously named `tools/check_adrs.py` and `tools/check_adr_references.py`
+as "this repository's only readers of the ADR directory". They are its only
+ENUMERATORS — the only things that can see a record at a new number — but three
+further mechanisms read INDIVIDUAL ADR files at a path something else declares:
+`standards_control` resolves each enrolled profile's `governance_model.source`
+and reads one `- Status:` line from it; `agent_control` reads the authoritative
+sources `.dotmac/agent-profile.json` lists; and
+`programme_control._adr_state_claims` reads every record a programme matrix
+declares with role `governing-decision`, matching control-state sentences against
+that matrix. **None of the five evaluates a floor lane, so the enforcement
+verdict is unchanged.** The correction is recorded because a wrong reason
+supporting a right conclusion is the harder defect to find later, and because a
+future record needs to know that adding an ADR at a path a profile or a matrix
+DECLARES is a different act with different consequences. Measured while drafting
+ADR 0034, whose § Drift prevention carries the same inventory.
 
 **§§ 8, 9 and 10, added on 2026-09-01, are each enforced by NOTHING, here or
 anywhere else, and they are not equally close to being enforceable.** Saying
@@ -855,9 +884,12 @@ a single family:
   another repository. ADR 0013 § 1 puts them outside what this repository may
   assert, and they remain review discipline until an oracle carries them.
 
-Acceptance of this record is therefore conditioned on a named decision about
-which half is automated, recorded as open decision 24. Until that decision is
-made, an enrolled repository without a floor canary is an UNMONITORED REGION,
+Which half is automated is a named decision Michael has not made, recorded as
+open decision 24. **This record was accepted on 2026-09-01 with that decision
+still open**, and acceptance did not make it: an earlier draft of this paragraph
+said acceptance was CONDITIONED on it, and what actually happened is that the
+rule was ratified while its enforcement question stayed open. Until that decision
+is made, an enrolled repository without a floor canary is an UNMONITORED REGION,
 not a covered one — and this record may not be cited as though it were a gate.
 
 The planted-violation requirement is stated in advance so the family cannot be
@@ -881,3 +913,120 @@ the candidate digest it was given. Each
 needs a synthetic repository shown to go RED. A floor check demonstrated only
 against a conforming tree passes for the wrong reason, which is the defect this
 whole record is about.
+
+## Acceptance — 2026-09-01
+
+Michael Ayoade approved the promotion of this record on 2026-09-01. His ruling,
+transcribed:
+
+> ADR 0021: promotion to Accepted is ratified. Use a human-attributed commit,
+> preserve amendment history, and keep "fleet enforcement: none" accurate. This
+> does not authorize kernel a100/a101.
+
+The approval is his. This section records it as an attributable event and is
+written by an agent, which under `AGENTS.md` may not occupy the approver role or
+approve its own output. Neither happened: the decision to promote is his, the
+three constraints are his, and each is discharged below in a way a reader can
+check against the record rather than against this paragraph's word for it.
+
+### 1. Amendment history is preserved, deliberately
+
+**Nothing in §§ 1 through 10.2 was rewritten.** The promotion is the controlled
+metadata, one corrected reason in § Drift prevention, one sentence about
+acceptance itself, and this section.
+
+That is not conservatism. The record's trajectory is now part of its evidence,
+and a clean record would be a worse one:
+
+- § 10.1 records that pull request #58 NAMED the circularity in its first form —
+  an assembly's declared direct constraint on the dependency IS the `==` pin, so
+  a maximum taken over it returns the pin and agrees with itself — and shipped
+  anyway, and that a second ruling the same day closed it by DERIVING the
+  assembly's contribution from its imports instead.
+- § 10.2 records the builder/verifier split that followed, and corrects § 6's
+  stated reasoning while doing so: the exclusion was never about the registry but
+  about a job reporting on the bytes it produced.
+- § Drift prevention carries a RETRACTION in the first person — a claim about
+  another repository's branch contents, made without reading them, inside the
+  record that exists to refuse exactly that, and stale within hours because the
+  head had moved.
+
+A record that states a rule about deriving facts rather than asserting them, and
+then shows itself failing that rule and repairing it, is carrying its own
+known-bad case. Flattening that would destroy the best evidence this record has.
+
+### 2. "Fleet enforcement: none" is unchanged, and stays true
+
+Acceptance changed this record's STATUS and nothing about the world. Every
+enforcement statement in § Drift prevention still reads `none`, and none was
+softened, requalified or moved:
+
+- the fleet-wide verdict, and the distinction between it and the one reference
+  implementation, which is not a control;
+- § 8 — `none`, and furthest from a Governance check of the three;
+- § 9 — `none`, splitting three ways, two of which are not decidable anywhere
+  without an oracle this repository does not declare;
+- § 10, §§ 10.1 and 10.2 — `none`, and not even declaration-checkable from a
+  checked-in tree, with `standards-profile.schema.json` still carrying no field
+  for a pin, a composed distribution set, a `Requires-Dist` reading or a floor
+  lane;
+- the planted-import requirement § 10.1 adds — enforced by nothing here.
+
+**No enrolled repository acquires a failing check from this promotion.** An
+enrolled repository without a floor canary remains an UNMONITORED REGION rather
+than a covered one, and **this record may not be cited as though it were a
+gate**. Which half is automated is open decision 24, and acceptance did not make
+that decision — it ratified the rule while leaving its enforcement question
+exactly where it was.
+
+One statement did change, and only because acceptance falsified it: an earlier
+sentence said acceptance was CONDITIONED on open decision 24. It was not — the
+rule was ratified with that decision open. The sentence now says what happened.
+The clause after it, that an enrolled repository without a floor canary is
+unmonitored and this record is not a gate, is untouched.
+
+A second correction rides with the promotion because a reader meets it here:
+§ Drift prevention previously called `tools/check_adrs.py` and
+`tools/check_adr_references.py` "this repository's only readers of the ADR
+directory". They are its only ENUMERATORS; three further mechanisms read
+individual ADR files at declared paths. **The enforcement verdict is unchanged**
+— none of the five evaluates a floor lane — and the corrected reason is recorded
+in that section. A wrong reason supporting a right conclusion is the harder
+defect to find later.
+
+### 3. This authorizes no kernel pin move
+
+**Acceptance does not authorize adopting `dotmac-kernel` `0.1.0a100` or
+`0.1.0a101` anywhere.** Stated plainly because the record invites the inference:
+§ Context measures `dotmac-deployment-control` `0.1.0a7` moving its floor from
+`>=0.1.0a98` to `>=0.1.0a100`, and § 10 requires an assembly's pin to EQUAL the
+maximum its composition and its own imports derive. A reader could take the two
+together as a standing instruction to move a pin to a100 or a101.
+
+It is not one. This record states how a floor is DERIVED and how a lane PROVES
+it. It does not compute any assembly's maximum, does not assert what any
+assembly's composition currently requires, and does not evaluate whether a
+particular pin move is safe, rehearsed or wanted. § 10 names moving a pin
+UPWARD without deciding to as a defect in its own right — "a dependency upgrade
+taken on nobody's behalf ... it owes whatever migration rehearsal that upgrade
+owes, taken without anyone having decided to take it". A pin move remains a
+separate, named decision by the assembly's owner, and this record's acceptance
+is not that decision.
+
+### 4. What acceptance does not touch
+
+It creates no `standards_control` rule, no `standards-profile.schema.json` field,
+no CI gate and no check family. It changes no enrolled repository's profile. It
+does not resolve open decision 24, does not adopt or endorse the state of the
+reference implementation — `dotmac_platform_control_plane` pull request #111 is
+recorded as OPEN and not merged, and this repository does not observe its
+contents — and it mandates no repair sweep of existing floors or lanes.
+
+Two accepted records cite this one as a draft: ADR 0033 § Context ("ADR 0021 is
+`Proposed` and is cited here as a draft, not as policy") and ADR 0034 § 5 ("ADR
+0021 and ADR 0015 remain `Proposed`"). **Both were correct when written and
+neither is edited**, because amendment in this repository is one-directional and
+because ADR 0034's sentence remains true as written — it says what ITS acceptance
+did not change, and a separate ruling changed this record's status. A reader
+meeting either should read them as dated, and this section as the current
+status.

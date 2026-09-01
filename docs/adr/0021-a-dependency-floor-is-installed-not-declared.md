@@ -313,9 +313,12 @@ than about the working copy.
 8. Every coordinate the lane depends on checked to resolve, checked to name the
    subject the claim is about, and shown to go red when it does not — § 9.
 9. Where the repository is an ASSEMBLY rather than a publisher, a pin equal to
-   the maximum floor derived from its composed distributions' `Requires-Dist`,
-   proven by a lane of its own — § 10. A repository that both publishes and
-   composes owes both.
+   the maximum of the floors derived from its composed distributions'
+   `Requires-Dist` AND the floor its own direct imports require, proven by a lane
+   of its own that runs against its exact resolved lock or image candidate and
+   has been shown RED on a planted assembly import first shipped above that
+   floor — § 10, §§ 10.1 and 10.2. A repository that both publishes and composes
+   owes both.
 
 ### 8. A lane enforces every condition it advertises
 
@@ -405,7 +408,7 @@ a rule about every string a lane records: a human-written rationale is prose and
 is judged as prose. What is in scope is any field whose whole purpose is to be
 followed back to a run, a tag, an artefact, a file or an observation.
 
-### 10. The consumer form — an ASSEMBLY's floor is the maximum its composition declares
+### 10. The consumer form — an ASSEMBLY's floor is the maximum its composition and its own imports require
 
 §§ 1 through 9 are written from the PUBLISHER's side: a distribution declaring a
 lower bound for its own imports, and proving that declaration honest. An
@@ -413,16 +416,22 @@ assembly asks a different question, and porting the publisher form to it answers
 the wrong one — while the assembly is where this record's opening failure
 actually arrived.
 
-> An assembly's dependency floor is the MAXIMUM floor derived from the
-> `Requires-Dist` metadata of its composed distributions, and the assembly's pin
-> must EQUAL that maximum.
+> An assembly's dependency floor is the MAXIMUM of every floor derived from
+> the `Requires-Dist` metadata of its composed distributions AND the floor the
+> assembly's OWN direct imports require, and the assembly's pin must EQUAL that
+> maximum.
+
+The second input was added on 2026-09-01 by the settlement in § 10.1 below,
+which also fixes what makes it more than a declaration. Read § 10.1 before
+reading this quotation as a rule about two numbers.
 
 The word "floor" is doing two jobs across this record and the difference is
 load-bearing here. A library DECLARES a floor, as a `>=` lower bound on its own
 imports. An assembly does not declare one at all: it pins `==`, and its floor is
-a quantity it must DERIVE from what it composes and then compare its pin
-against. Nothing in an assembly's own declaration states this number, which is
-why nothing in an assembly notices when the pin and the number part company.
+a quantity it must DERIVE — from what it composes and from what it itself
+imports — and then compare its pin against. Nothing in an assembly's own
+declaration states this number, which is why nothing in an assembly notices
+when the pin and the number part company.
 
 Both directions are defects, and neither is visible from the pin alone:
 
@@ -474,27 +483,82 @@ see it. A version literal in a canonical document is derived from the
 declaration, or the regions of that document which are not derived are named as
 unmonitored.
 
-**What this section does not settle**, stated so that neither gap is mistaken
-for coverage:
+This section previously carried two edges it deliberately did not settle: whether
+an assembly's own imports join the maximum, and where an assembly's lane runs
+when it publishes no distribution. **Michael Ayoade settled both on 2026-09-01.**
+The rulings in §§ 10.1 and 10.2 are his, transcribed rather than made here.
+Settling what a rule SAYS creates no control that checks it — the enforcement
+statement for this section is unchanged and is in § Drift prevention.
 
-- **An assembly's OWN imports are not an input to the maximum as written
-  above.** The rule takes the maximum over what the assembly COMPOSES. If an
-  assembly's own source imports the dependency more recently than any module it
-  composes, the honest floor is the maximum over both, and the rule as stated
-  does not say so. In the measured instance the equality holds only because no
-  module of the assembly's own out-imports the composed set, and nothing checks
-  that premise — the reference implementation records it in its own test as a
-  condition to be added in the same change that first breaks it. This record
-  states it as a known limit rather than resolving it, because resolving it is
-  a decision about the rule and not a drafting choice.
-- **Where an assembly's lane runs is § 6's question and § 6's answer is written
-  for a publisher.** An assembly that publishes no distribution has no
-  post-publication registry artefact to re-run against, and the measured
-  instance runs its lane pre-merge and again as an admission gate before its
-  image candidate is built. Whether that is § 6's post-publication half in
-  another shape, or a gap, is not decided here.
+#### 10.1 An assembly's own imports join the maximum
 
-Both are carried into open decision 24 rather than left in prose.
+> The effective floor is the MAXIMUM of every composed distribution's INSTALLED
+> `Requires-Dist` and the assembly's own declared direct constraint on that
+> dependency.
+
+Two readers become three, and the third has never been read anywhere. The
+composed SET still comes from the assembly's own dependency declaration, and each
+composed FLOOR still comes from installed artefact metadata. The assembly's own
+contribution comes from ITS OWN SOURCE — § 1's derivation, "what the code IMPORTS
+AND CALLS", turned on the assembly instead of on a library.
+
+The declaration is where that contribution is STATED, and stating is not
+establishing. The temptation to confuse the two is sharper here than anywhere
+else in this record, because an assembly's declared direct constraint on the
+dependency **is the `==` pin**: a maximum that reads the pin as its own third
+input returns the pin, agrees with itself, and proves nothing. So the settlement
+comes with the half that makes it fail:
+
+> **A planted assembly import first shipped ABOVE that floor must turn the lane
+> RED.**
+
+That sentence is the rule. Everything the lane computes about the assembly's own
+side is judged by it, because it is the only part of § 10 that cannot be
+satisfied by a number somebody wrote down. § 8 applies to the plant as it applies
+to every other condition here: it is planted SEPARATELY from the composed-set
+plants, with those left intact, and the finding it produces is DISTINCT — an
+assembly that out-imports its composition must not be reported as a composed
+module having raised its floor, because the two are repaired in different
+repositories by different people.
+
+**The coincidence is now a checked property, and converting it is the whole
+reason this edge needed settling.** In the measured instance —
+`dotmac_platform_control_plane` pull request **#111**, still OPEN — the pin
+equals the maximum over the composed set ONLY because nothing in the assembly's
+own source imports a kernel symbol newer than what its modules already demand.
+That is a true statement about one tree on one day, and it was an UNSTATED
+PREMISE of the equality the lane reported: the lane did not read the assembly's
+imports, so it could not have noticed. The day the assembly adds a direct import
+of a newer symbol, the derived floor is wrong and the lane stays green — no edit
+to the lane, no diff, nothing to review. This is the pin-decay consequence below
+arriving through a second door, and the plant is the door's lock. **A premise
+nothing checks is not a premise. It is a coincidence that has not expired yet.**
+
+#### 10.2 Where an assembly's lane runs when it publishes no distribution
+
+> If the assembly publishes no distribution, the lane runs **in the assembly
+> repository**, against its exact resolved lock or image candidate. It reads
+> installed package metadata plus the assembly's declared constraint.
+
+This answers § 6 for the assembly form rather than leaving § 6 written only for a
+publisher. § 6's second bullet re-runs against the artefact the REGISTRY served,
+because the registry is the thing a consumer will actually receive. An assembly
+has no such artefact, and the subject that plays the same part is the exact
+resolved candidate it is about to run: the lock it resolved, or the image
+candidate about to be built. "Exact" is the load-bearing word and it carries § 5's
+meaning — one named resolution, read as INSTALLED METADATA, not "whatever a fresh
+install produces today". The measured instance's shape, a pre-merge run and an
+admission gate before the image candidate is built, is therefore § 6's answer in
+the assembly's own terms and not a gap.
+
+**One clause of § 6 is not extended by this settlement, and is left open rather
+than inferred.** § 6's third bullet excludes the PUBLISHING job as a witness,
+because a publisher holding the credential with the bytes on its own disk cannot
+testify to what a registry will serve. An assembly has no registry to be an
+independent witness of, so the exclusion has no direct analogue, and whether an
+assembly's lane may run inside the job that builds its image candidate is not
+decided here. That residue stays in open decision 24, which the settlement of the
+two edges otherwise narrows.
 
 ## Consequences
 
@@ -542,6 +606,12 @@ Both are carried into open decision 24 rather than left in prose.
   its own schedule. Nothing in the assembly changes, nothing in its history
   records the moment, and the pin is simply wrong from then on. Deriving the
   maximum is what makes that a red lane rather than a silent state.
+- Since § 10.1, an assembly's floor also depends on a fact about the assembly's
+  OWN source, so the equality can now be broken by a change that touches no
+  dependency declaration at all. Adding one import line is enough, and that is
+  the cheapest edit in the repository. It is why the assembly's own contribution
+  is judged on a plant rather than on its declaration: the declaration is the
+  `==` pin, and a maximum taken over the pin agrees with the pin.
 
 ## Drift prevention
 
@@ -591,19 +661,38 @@ future decision has to work from:
   point of § 10 is that reading it from a source tree instead is the defect.
   `standards-profile.schema.json` carries no field for a pin, a composed
   distribution set, a `Requires-Dist` reading or a floor lane — checked at this
-  repository's `main` `d2066bcb` by enumerating the schema's property names.
+  repository's `main` `d2066bcb` by enumerating the schema's property names,
+  and re-checked at `79817a16` when §§ 10.1 and 10.2 were added — the schema's
+  61 distinct property names still contain no pin, composed-set, `Requires-Dist`
+  or floor-lane field, and its one name matching an import
+  (`expected_import_count`) belongs to the testing-kit conformance probe and has
+  nothing to do with a dependency floor. **Settling §§ 10.1 and 10.2 changed
+  nothing here.** A rule with two fewer open edges is a clearer rule, not a
+  checked one, and the planted-import requirement § 10.1 adds is itself enforced
+  by nothing in this repository: like § 8's plants it is decidable — if
+  anywhere — inside the assembly's own repository, by that repository's own
+  tests, against a tree and an installed environment this repository never sees.
   The reference implementation is `dotmac_platform_control_plane` pull request
-  **#111**, which is **OPEN, not merged**: its `kernel-pin` job is a required
-  check and is green on the branch. An open pull request is a weaker
+  **#111**, which is **OPEN, not merged**, re-read on 2026-09-01 and still open
+  with no merge commit: its `kernel-pin` job is a required check and is green on
+  the branch. That lane does not yet read the assembly's own imports at all,
+  which is the gap § 10.1 names rather than one it closes. An open pull request is a weaker
   provenance than a merged one and much weaker than a release, and this record
   names it as what it is rather than as a landed exemplar. That pull request
   also cites this record NOWHERE, in any spelling, which is a fact about the
   port rather than an objection to it.
 
-Neither § 10's two unsettled edges — an assembly's own imports as an input to
+§ 10's two formerly unsettled edges — an assembly's own imports as an input to
 the maximum, and where an assembly's lane runs when it publishes no
-distribution — is resolved by this record. Both are recorded in open decision
-24 so that they are owed to somebody rather than left in a paragraph.
+distribution — were settled by Michael Ayoade on 2026-09-01 and are now §§ 10.1
+and 10.2. **That settlement is a decision about the rule and creates no check
+anywhere**, which is the distinction this section exists to hold: open decision
+24 asked which HALF of this record is automated, and the answer to that question
+is unchanged and still owed. What the settlement removes from decision 24 is two
+questions about what the rule says; what it leaves there is the automation
+question in full, plus one residue it raises — § 6's exclusion of the publishing
+job has no stated analogue for an assembly, so whether an assembly's lane may run
+inside the job that builds its image candidate is undecided.
 
 No check in this repository evaluates this record, and no enrolled repository's
 standards profile declares a surface for it. What exists is
@@ -668,8 +757,12 @@ declared floor; a mutation lane whose index query returns nothing and reports
 success; a lane advertising a conjunction while enforcing a proper subset of
 it, with the remainder held only by another function's invariant; a coordinate
 field a filler string satisfies, and a coordinate check never shown to go red
-on a coordinate that does not resolve; and an assembly whose pin is above or
-below the maximum its composed distributions' `Requires-Dist` declare. Each
+on a coordinate that does not resolve; an assembly whose pin is above or
+below the maximum its composed distributions' `Requires-Dist` declare; and an
+assembly whose OWN source imports a symbol first shipped above the floor its
+composition declares — planted on its own, with the composed-set shapes left
+intact, and required to produce a finding that names the assembly rather than a
+module. Each
 needs a synthetic repository shown to go RED. A floor check demonstrated only
 against a conforming tree passes for the wrong reason, which is the defect this
 whole record is about.

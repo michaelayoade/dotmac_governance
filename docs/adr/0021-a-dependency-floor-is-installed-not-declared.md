@@ -57,9 +57,32 @@ context: pinned at exactly a98 the canaries pass; the resolver refuses a97 besid
 the artefact with a real dependency conflict; a97 forced in with `--no-deps
 --force-reinstall` makes the same canaries fail naming the missing symbol. So
 this record does not propose an unbuilt idea. It generalises a mechanism that
-already exists, in the direction ADR 0006's product-first rule requires: name
-the qualifying production implementation and port it, rather than reinventing a
-fleet version beside it.
+already exists, in the direction `dotmac_starter_mt` ADR-0006's product-first
+rule requires: name the qualifying production implementation and port it, rather
+than reinventing a fleet version beside it.
+
+**The next bump measured that same lane, and found a THIRD fact nobody had
+derived.** `0.1.0a7` moves the floor from `>=0.1.0a98` to `>=0.1.0a100`, because
+a new source file imports `dotmac_kernel.product_database_catalog` — absent
+from the published `dotmac-kernel` `0.1.0a99` wheel, present in `0.1.0a100`. The
+excluded version therefore became a99, and **a99 contains
+`dotmac_kernel.transactions` perfectly well.** The a6 lane grepped the forced
+failure for that name as a STRING LITERAL, and neither of its two outcomes is
+the proof: it demands a failure that cannot occur, so the lane goes red for the
+wrong reason; or the name appears in the output for some unrelated reason and
+the lane goes GREEN having established nothing about the new boundary. The
+second is the worse half, and both are silent — nothing about the literal
+announces that it expired the moment the floor moved.
+
+The shape has a name already, and it is two named defects at once.
+`dotmac_starter_mt` ADR-0018's 2026-08-26 amendment states that a guard must
+test the property it is NAMED for; a grep for a written module name tests
+whether that string appears, which is a different property that used to
+coincide with it. And that record's original observation applies unchanged: a
+premise true when written and false later, with nothing in the lane able to
+re-check it. **Two derived facts beside one written one is not two-thirds of a
+control.** It is a lane that is correct until the next bump and vacuous
+afterwards, in the colour of a lane that passed.
 
 This record belongs here rather than in a publishing product. A floor is a
 contract between two repositories, and a rule defined inside one of them cannot
@@ -143,6 +166,28 @@ exit would also be satisfied by a network error or a mistyped index URL — and
 forcing it in anyway must make the canaries fail **naming the missing symbol**,
 because accepting any failure lets an unrelated breakage stand in for the proof.
 
+**And that name is DERIVED too — it is the third fact, not a caption on the
+other two.** The module the mutation requires the failure to name comes from the
+same source of truth the floor does: the package's own imports, read as code,
+resolved against the recorded introduction of each imported module, and reduced
+to the ONE module whose introduction equals the declared floor. A hand-written
+name is a second authority for a fact the floor already fixes, and it drifts on
+exactly the change that makes the lane matter — the floor bump — because
+raising a floor changes which module the boundary is about. The derivation
+refuses rather than guesses in each of the three ways it can be wrong: no recorded
+module introduced this floor, more than one did, or the package no longer
+imports the one that did. The last is the sensitivity half. A row that outlived
+its import leaves the lane demanding a failure that can never happen.
+
+This applies to a NEGATIVE lane that asserts an import failure, and to nothing
+else. A test that merely mentions a version is not in scope; what is in scope is
+a lane whose whole verdict is "the failure was the right failure", because that
+verdict is carried entirely by the name it matches on.
+
+So the mutation lane carries **no literal at all**: not the floor, not the
+target, not the symbol. Any one of the three written by hand is correct until
+the next floor bump and silently vacuous after it.
+
 ### 5. Installed artefacts only, asserted FIRST
 
 The canary runs in an environment where the distribution is INSTALLED and no
@@ -178,8 +223,10 @@ than about the working copy.
    continue.
 5. A post-publication run against the registry-served artefact, distinct from
    the pre-merge run.
-6. Both versions DERIVED — the floor from the artefact's own metadata, the
-   mutation target from the index — with no version literal in the workflow.
+6. All three facts DERIVED — the floor from the artefact's own metadata, the
+   mutation target from the index, and the module the mutation's failure must
+   name from the package's own imports — with no version literal and no module
+   literal in the workflow.
 
 ## Consequences
 
@@ -196,6 +243,12 @@ than about the working copy.
 - Where a dependency's floor cannot be pinned because a transitive constraint
   forbids it, the repository must say so. The recorded exception is uncomfortable
   by design; it is the honest form of a gap that is otherwise invisible.
+- A floor bump becomes a change that can invalidate a lane without editing it.
+  Raising a floor moves which module the boundary is about, so every
+  hand-written name in the negative lane expires at that moment and nothing
+  says so. Deriving the name is what makes the bump a change to one declaration
+  rather than a change to one declaration and an unwritten list of places that
+  quietly agreed with it.
 - A release record naming bytes and a commit answers "which artefact". The
   question a consumer loses on is "against which floor", so the floor becomes its
   own release coordinate — checked against the declaration rather than
@@ -207,17 +260,33 @@ than about the working copy.
 
 **Enforcement status: none FLEET-WIDE, and one reference implementation.** The
 distinction matters, because the two are routinely conflated and only one of
-them is a control.
+them is a control. **The third derived fact added on 2026-09-01 is enforced by
+nothing here either.** No `standards_control` rule reads it, no
+`standards-profile.schema.json` field represents it, and nothing in
+`tools/check_adrs.py` or `tools/check_adr_references.py` — this repository's
+only readers of the ADR directory — evaluates a floor lane. Stating it as a
+requirement is what this record can do; asserting that something checks it
+would be the failure this section names two paragraphs down.
 
 No check in this repository evaluates this record, and no enrolled repository's
 standards profile declares a surface for it. What exists is
-`dotmac-deployment-control` `0.1.0a6`: `scripts/kernel_floor.py`,
+`dotmac-deployment-control`: `scripts/kernel_floor.py`,
 `scripts/artifact_canaries.py` (canaries `declared_kernel_floor` and
 `conflict_savepoint_executes`), the floor and mutation steps in the `behavioural
 canaries (installed wheel)` job, and `tests/architecture/test_kernel_floor.py`,
-which asserts the shape rather than trusting it. Under ADR 0006's product-first
-rule that is the implementation to PORT, and this record names it so that a
-future family is an extraction rather than a second writer.
+which asserts the shape rather than trusting it. The third derived fact landed
+there in pull request #17, merged `6b1ce371b07220914696243647aeb0d3947b87cc`:
+`FIRST_SHIPPED_IN` and the AST import collector moved out of the test module —
+which a workflow step cannot import, which is why the second copy existed —
+into `scripts/kernel_floor.py`, whose `symbol` subcommand the mutation step
+greps for. The same pull request repaired a second instance of the identical
+defect in the implementation's own tests:
+`test_the_cli_prints_the_mutation_target` pinned `0.1.0a97` as a literal,
+correct only while the floor was a98, and was about to rebuild the defect one
+alpha on inside the record's exemplar. Under
+`dotmac_starter_mt` ADR-0006's product-first rule that is the implementation to
+PORT, and this record names it so that a future family is an extraction rather
+than a second writer.
 
 One product holding the mechanism is not coverage of the fleet, and an ADR that
 describes a control it does not have is the failure mode this section exists to
@@ -230,7 +299,13 @@ a single family:
   Dotmac-owned dependency exists at all, and that the repository declares a
   floor-canary surface naming where its canary lives. This is declaration
   checking; on its own it proves a file exists and nothing about what the file
-  does, which is precisely the vacuous pass ADR 0018 refuses to call coverage.
+  does, which is precisely the vacuous pass `dotmac_starter_mt` ADR-0018
+  refuses to call coverage. The third derived fact adds one shape to this
+  bucket and it is the sharpest one here: a module-name LITERAL in the
+  negative lane is visible in the publishing repository's own workflow file,
+  with no oracle, no run observation and no cross-repository lookup. That makes
+  it decidable — **in the publishing repository, not in this one**, which is a
+  different repository's check and not a Governance gate.
 - **Requires an external oracle.** Which release FIRST SHIPPED an imported
   module is a fact about another repository's tags. ADR 0013 § 5 permits
   automation here only through a declared `peeled_tag` oracle carrying immutable
@@ -250,8 +325,9 @@ not a covered one — and this record may not be cited as though it were a gate.
 The planted-violation requirement is stated in advance so the family cannot be
 built without it, and the shapes are already known from measurement: a
 distribution whose declared floor predates a module it imports; a canary lane
-carrying a version literal instead of a derived one; and a mutation lane whose
-index query returns nothing and reports success. Each needs a synthetic
-repository shown to go RED. A floor check demonstrated only against a conforming
-tree passes for the wrong reason, which is the defect this whole record is
-about.
+carrying a version literal instead of a derived one; a mutation lane whose
+failure-match names a module written by hand rather than derived from the
+declared floor; and a mutation lane whose index query returns nothing and
+reports success. Each needs a synthetic repository shown to go RED. A floor
+check demonstrated only against a conforming tree passes for the wrong reason,
+which is the defect this whole record is about.

@@ -314,11 +314,14 @@ than about the working copy.
    subject the claim is about, and shown to go red when it does not — § 9.
 9. Where the repository is an ASSEMBLY rather than a publisher, a pin equal to
    the maximum of the floors derived from its composed distributions'
-   `Requires-Dist` AND the floor its own direct imports require, proven by a lane
-   of its own that runs against its exact resolved lock or image candidate and
-   has been shown RED on a planted assembly import first shipped above that
-   floor — § 10, §§ 10.1 and 10.2. A repository that both publishes and composes
-   owes both.
+   `Requires-Dist` AND the floor its own imports require — the latter DERIVED
+   from those imports through a provenance map that REFUSES an unknown or
+   ambiguous symbol rather than answering for it — proven by a lane of its own
+   that has been shown RED on a planted assembly import first shipped above that
+   floor, with source-side derivation permitted in the candidate build job and
+   artefact-side evidence required in a separate verifier job against the
+   immutable candidate image digest, which may not rebuild it — § 10, §§ 10.1
+   and 10.2. A repository that both publishes and composes owes both.
 
 ### 8. A lane enforces every condition it advertises
 
@@ -421,9 +424,10 @@ actually arrived.
 > assembly's OWN direct imports require, and the assembly's pin must EQUAL that
 > maximum.
 
-The second input was added on 2026-09-01 by the settlement in § 10.1 below,
-which also fixes what makes it more than a declaration. Read § 10.1 before
-reading this quotation as a rule about two numbers.
+The second input was added on 2026-09-01 by the settlement in § 10.1 below, and
+amended the same day so that it is DERIVED from the assembly's imports rather
+than read from the assembly's own declaration. Read § 10.1 before reading this
+quotation as a rule about two numbers.
 
 The word "floor" is doing two jobs across this record and the difference is
 load-bearing here. A library DECLARES a floor, as a `>=` lower bound on its own
@@ -490,11 +494,10 @@ The rulings in §§ 10.1 and 10.2 are his, transcribed rather than made here.
 Settling what a rule SAYS creates no control that checks it — the enforcement
 statement for this section is unchanged and is in § Drift prevention.
 
-#### 10.1 An assembly's own imports join the maximum
+#### 10.1 An assembly's own imports join the maximum, and its contribution is DERIVED
 
 > The effective floor is the MAXIMUM of every composed distribution's INSTALLED
-> `Requires-Dist` and the assembly's own declared direct constraint on that
-> dependency.
+> `Requires-Dist` and the floor the assembly's OWN IMPORTS require.
 
 Two readers become three, and the third has never been read anywhere. The
 composed SET still comes from the assembly's own dependency declaration, and each
@@ -502,20 +505,60 @@ composed FLOOR still comes from installed artefact metadata. The assembly's own
 contribution comes from ITS OWN SOURCE — § 1's derivation, "what the code IMPORTS
 AND CALLS", turned on the assembly instead of on a library.
 
-The declaration is where that contribution is STATED, and stating is not
-establishing. The temptation to confuse the two is sharper here than anywhere
-else in this record, because an assembly's declared direct constraint on the
-dependency **is the `==` pin**: a maximum that reads the pin as its own third
-input returns the pin, agrees with itself, and proves nothing. So the settlement
-comes with the half that makes it fail:
+**Amended later the same day, and the amendment removes a circularity this
+section had only named.** As first settled, the assembly's own input was written
+as its *declared direct constraint*, and an assembly's declared direct constraint
+on the dependency **is the `==` pin** — so a maximum that takes the pin as its own
+third input returns the pin, agrees with itself, and establishes nothing. Michael
+Ayoade closed it:
+
+> The assembly contribution is derived from its imports, using the same
+> first-shipped provenance map as a publisher floor. Its declared direct
+> constraint **states** that result; it does not **establish** it.
+
+The declaration keeps a job — it is where the derived result is written down, and
+a declaration that disagrees with the derivation is itself the finding. What it
+stops being is the source of the number.
+
+The derivation is § 1's and § 4's, applied to the assembly rather than to a
+library, and it runs in this order:
+
+> 1. Parse assembly imports at the exact source revision.
+> 2. Resolve imported kernel symbols/modules to first-shipped versions.
+> 3. **Refuse unknown or ambiguous provenance.**
+> 4. Compute `assembly_import_floor`.
+> 5. Compute `max(assembly_import_floor, composed Requires-Dist floors)`.
+> 6. Require the assembly's exact kernel pin to equal that maximum.
+> 7. Plant an assembly import above the current floor and require failure.
+
+**Step 3 is what makes steps 4 through 7 honest, and it is the step a naive
+implementation leaves out**, because a lookup that returns something for every
+input is easier to write and reads as more robust. A provenance map that silently
+answers for a symbol it does not know puts a FABRICATED number into step 4, and
+every step after it — the maximum, the pin comparison, the plant — is then
+arithmetic over a number nobody derived. The direction of the error is the bad
+one: an unresolved symbol treated as imposing no constraint LOWERS the maximum,
+so the under-constrained floor this record opens with returns wearing a green
+lane. The refusal is therefore loud and terminal — the lane exits non-zero naming
+the symbol whose provenance it could not resolve, and reports no floor at all.
+That is § 4's "fail loudly when the index lists nothing below the floor" and § 9's
+dead-coordinate rule reaching the same place from a third direction: **a map that
+answers when it does not know is a dead coordinate that resolves.**
+
+One thing step 3 inherits, worth stating because it is the cheaper way out of the
+problem: § 10 already prefers DIFFERENCING to a recorded table. Where a real
+install of the excluded version is obtainable, real imports minus real files
+answers provenance with no map to be unknown about. The first-shipped map is the
+fallback for where that install cannot be had, and step 3 is what stops the
+fallback from answering beyond what it knows.
+
+**Step 7 is the plant, and it remains the half that cannot be satisfied by a
+number somebody wrote down:**
 
 > **A planted assembly import first shipped ABOVE that floor must turn the lane
 > RED.**
 
-That sentence is the rule. Everything the lane computes about the assembly's own
-side is judged by it, because it is the only part of § 10 that cannot be
-satisfied by a number somebody wrote down. § 8 applies to the plant as it applies
-to every other condition here: it is planted SEPARATELY from the composed-set
+§ 8 applies to the plant as it applies to every other condition here: it is planted SEPARATELY from the composed-set
 plants, with those left intact, and the finding it produces is DISTINCT — an
 assembly that out-imports its composition must not be reported as a composed
 module having raised its floor, because the two are repaired in different
@@ -551,14 +594,47 @@ install produces today". The measured instance's shape, a pre-merge run and an
 admission gate before the image candidate is built, is therefore § 6's answer in
 the assembly's own terms and not a gap.
 
-**One clause of § 6 is not extended by this settlement, and is left open rather
-than inferred.** § 6's third bullet excludes the PUBLISHING job as a witness,
-because a publisher holding the credential with the bytes on its own disk cannot
-testify to what a registry will serve. An assembly has no registry to be an
-independent witness of, so the exclusion has no direct analogue, and whether an
-assembly's lane may run inside the job that builds its image candidate is not
-decided here. That residue stays in open decision 24, which the settlement of the
-two edges otherwise narrows.
+(That first ruling's "installed package metadata plus the assembly's declared
+constraint" is read through § 10.1's later amendment: the declared constraint
+STATES the assembly's contribution and the derivation establishes it.)
+
+**Amended later the same day: the lane SPLITS IN TWO, and the axis is builder
+versus verifier.** Michael Ayoade's ruling:
+
+> - Source-side import/floor derivation **may** run in the candidate build job.
+> - Artefact-side adoption evidence **must** run in a separate verifier job
+>   against the **immutable candidate image digest**. It must not rebuild the
+>   image.
+>
+> No registry is required; the separation is builder versus verifier.
+
+**This closes the residue the first settlement left open, and corrects its
+reasoning.** That settlement said § 6's third bullet — never inside the
+publishing job — had no assembly analogue, because an assembly has no registry to
+be an independent witness of. It has one after all, and the earlier reasoning was
+aimed one step wide. **§ 6's exclusion was never really about the registry.** It
+is about a job that produced the bytes reporting on the bytes it produced; the
+registry was only the concrete thing a publisher was failing to be independent
+of. Strip the registry out and the property survives intact: a builder holding
+the image it has just made on its own disk is not an independent witness of that
+image, exactly as a publisher holding the wheel is not an independent witness of
+the wheel.
+
+The split is along what each half READS, which is what makes it decidable rather
+than a matter of taste:
+
+- **Source-side** — steps 1 through 5 of § 10.1. It reads the assembly's tree at
+  an exact revision plus installed artefact metadata. Nothing it reads is
+  produced by the build, so the build job may host it without becoming a witness
+  of its own output.
+- **Artefact-side** — what the CANDIDATE actually contains. Its subject is the
+  build's output, so it runs in a separate verifier job whose subject is the
+  **immutable candidate image digest**, addressed as a digest and never as a tag
+  (ADR 0013 § 3 already refuses an image described by tag). **The verifier must
+  not rebuild.** A rebuild answers about a second artefact that merely happens to
+  have been made the same way, which is exactly the substitution a digest exists
+  to prevent, and it converts an independent verification into the builder's own
+  testimony taken twice.
 
 ## Consequences
 
@@ -610,8 +686,19 @@ two edges otherwise narrows.
   OWN source, so the equality can now be broken by a change that touches no
   dependency declaration at all. Adding one import line is enough, and that is
   the cheapest edit in the repository. It is why the assembly's own contribution
-  is judged on a plant rather than on its declaration: the declaration is the
-  `==` pin, and a maximum taken over the pin agrees with the pin.
+  is DERIVED from its imports and then proved by a plant, rather than read from
+  its declaration: the declaration is the `==` pin, and a maximum taken over the
+  pin agrees with the pin.
+- An assembly's lane acquires a second JOB, not merely a second step. Source-side
+  derivation may sit in the candidate build; artefact-side evidence may not,
+  because a builder reporting on the image it just produced is the publisher
+  exclusion in another costume. The cost is a job boundary and an artefact
+  handover; what it buys is that the thing verified is the thing shipped, named
+  by digest, rather than a rebuild that resembles it.
+- A provenance map that refuses will stop lanes that used to finish. Every
+  refusal is a symbol nobody had provenance for, and the floor those lanes were
+  reporting was already partly invented — so the refusals are a backlog being
+  surfaced rather than created.
 
 ## Drift prevention
 
@@ -672,6 +759,12 @@ future decision has to work from:
   by nothing in this repository: like § 8's plants it is decidable — if
   anywhere — inside the assembly's own repository, by that repository's own
   tests, against a tree and an installed environment this repository never sees.
+  The same is true of everything the later amendment adds. Nothing here reads a
+  provenance map, so nothing can tell a map that refuses an unknown symbol from
+  one that answers for it; and whether a lane's artefact-side half runs in a
+  separate verifier job against an immutable digest, or in the job that built the
+  image, is a property of another repository's workflow runs, which ADR 0013 § 1
+  places outside what this repository may assert.
   The reference implementation is `dotmac_platform_control_plane` pull request
   **#111**, which is **OPEN, not merged**, re-read on 2026-09-01 and still open
   with no merge commit: its `kernel-pin` job is a required check and is green on
@@ -685,14 +778,18 @@ future decision has to work from:
 § 10's two formerly unsettled edges — an assembly's own imports as an input to
 the maximum, and where an assembly's lane runs when it publishes no
 distribution — were settled by Michael Ayoade on 2026-09-01 and are now §§ 10.1
-and 10.2. **That settlement is a decision about the rule and creates no check
-anywhere**, which is the distinction this section exists to hold: open decision
-24 asked which HALF of this record is automated, and the answer to that question
-is unchanged and still owed. What the settlement removes from decision 24 is two
-questions about what the rule says; what it leaves there is the automation
-question in full, plus one residue it raises — § 6's exclusion of the publishing
-job has no stated analogue for an assembly, so whether an assembly's lane may run
-inside the job that builds its image candidate is undecided.
+and 10.2. A second ruling the same day closed the circularity the first left in
+§ 10.1 (the assembly's contribution is DERIVED from its imports; its declared
+constraint states that result rather than establishing it, and the derivation
+REFUSES unknown provenance) and closed the residue the first left in § 10.2
+(§ 6's exclusion does have an assembly analogue — the builder/verifier split —
+because that exclusion was never about the registry but about a job reporting on
+the bytes it produced). **All of it is a decision about the rule and creates no
+check anywhere**, which is the distinction this section exists to hold: open
+decision 24 asked which HALF of this record is automated, and the answer to that
+question is unchanged and still owed. What the two rulings remove from decision
+24 is every question about what the rule SAYS. What they leave there is the
+automation question, in full.
 
 No check in this repository evaluates this record, and no enrolled repository's
 standards profile declares a surface for it. What exists is
@@ -759,10 +856,13 @@ it, with the remainder held only by another function's invariant; a coordinate
 field a filler string satisfies, and a coordinate check never shown to go red
 on a coordinate that does not resolve; an assembly whose pin is above or
 below the maximum its composed distributions' `Requires-Dist` declare; and an
-assembly whose OWN source imports a symbol first shipped above the floor its
+an assembly whose OWN source imports a symbol first shipped above the floor its
 composition declares — planted on its own, with the composed-set shapes left
 intact, and required to produce a finding that names the assembly rather than a
-module. Each
+module; a provenance map asked for a symbol it does not hold, which must REFUSE
+and report no floor rather than resolve the symbol to no constraint and lower the
+maximum; and an artefact-side verifier that rebuilds the image instead of reading
+the candidate digest it was given. Each
 needs a synthetic repository shown to go RED. A floor check demonstrated only
 against a conforming tree passes for the wrong reason, which is the defect this
 whole record is about.

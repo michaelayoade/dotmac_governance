@@ -4,7 +4,7 @@
 - Date: 2026-08-30
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
-- Scope: Organization-wide engineering standards, and every enrolled Dotmac repository that publishes a distribution another repository installs
+- Scope: Organization-wide engineering standards, and every enrolled Dotmac repository that publishes a distribution another repository installs, or composes distributions other repositories publish
 - Classification: Internal
 
 ## Context
@@ -83,6 +83,87 @@ premise true when written and false later, with nothing in the lane able to
 re-check it. **Two derived facts beside one written one is not two-thirds of a
 control.** It is a lane that is correct until the next bump and vacuous
 afterwards, in the colour of a lane that passed.
+
+**Three further measurements, on 2026-09-01, are about the LANE rather than the
+floor.** Two of them come from a gate in an unrelated domain, and that is
+precisely why they belong here: they are properties of how a lane is written,
+not of what it measures, so a floor lane inherits them whole. The third is the
+first measurement of this record's shape from the CONSUMER's side, and it does
+not fit the record as written, because the record is written for a publisher.
+
+**A lane may not borrow a condition it advertises.** The gate measured is
+`dotmac_starter_mt` ADR-0072's `rollback_key_failures`, and it advertised that
+a retained rollback key is INCAPABLE OF AN INTERACTIVE SHELL. That property is
+a conjunction —
+`restrict`, a forced command, and no PTY — and the gate enforced `restrict` as
+its own named condition while the PTY clause was covered TRANSITIVELY, by a
+different function: the inventory-row parser refuses `restrict = present` beside
+any permitted capability, so no row the gate could see was able to permit a PTY.
+Airtight on every input the gate could receive, and the wrong shape. Relax that
+parser check for an unrelated and perfectly ordinary reason and the gate keeps
+its colour while a member of its advertised conjunction goes dead, and nothing
+fails anywhere. Repaired in `dotmac_starter_mt` pull request #572, merged
+`e729ebebedb0b16f7b743bc3862e2152b64ddefc`, where the PTY became its own named
+refusal.
+
+One detail of that repair is what makes the rule useful rather than obvious, and
+it is the easiest part to lose. **The three-way decomposition did not exist in
+the tree before the repair.** What existed was one advertised property whose
+conjunctive structure was implicit, and one check over a member of it; naming
+the three conditions was the repair's first act rather than its premise. A
+conjunction nobody has written down is still a conjunction, and its unwritten
+members are exactly the ones nothing covers.
+
+**A coordinate every non-empty string satisfies is not a coordinate.** The same
+record's host-observed evidence coordinate required `host`, `observed_at`,
+`observed_by` and `method`, and validated each only as a non-empty string. So
+`host = "unknown"`, `observed_at = "recently"` and `method = "assumed"` all
+passed, and the gate would then report a retained credential SAFE ON THE
+STRENGTH OF NOBODY HAVING LOOKED. Repaired in the same pull request, which
+refuses a placeholder vocabulary at parse, requires `observed_at` to be an ISO
+date, and requires the observation to name the host the row names.
+
+The second instance of that shape is a different lane in the same repository,
+and its detail is the instructive one. `dotmac_starter_mt`
+`scripts/declared_publication_sweep.py` emitted `TODO: state why this version is
+not installable` as a ledger row's own reason, and its reconciler DID read that
+field — it rejected an empty one. The placeholder is not empty. So the field was
+required, the check existed, the check ran, and it was satisfied by the exact
+string the tool itself wrote to mean "no answer yet" (repaired in
+`dotmac_starter_mt` pull request #559, merged
+`7a8c22df3538f3965cf48a2a5a1aa3e60fd82474`, by hoisting the marker to one
+constant and refusing it by containment). **A required field a filler satisfies
+is worse than a missing one**, because it reads as an answer and nobody goes
+back to look — and in both instances the check was present, ran, and was green,
+which is where this defect always hides.
+
+**The third measurement is the consumer's, and this record could not have caught
+its own opening failure where that failure actually appeared.** The instance in
+the first paragraphs above did not surface in the publisher. It surfaced in a
+DIFFERENT repository, at container boot, in the assembly that composed the
+distribution — and §§ 1 through 6 give that assembly nothing to run, because
+every property they state is a property of a publisher proving its own
+declaration. An assembly does not declare a lower bound for its own imports. It
+pins ONE VERSION EXACTLY and composes several independently released modules,
+each carrying a bound of its own, and the question it has to answer is whether
+that single pin satisfies all of them.
+
+Measured in `dotmac_platform_control_plane` pull request #111, on 2026-09-01:
+the pin was already an exact `0.1.0a98`, and reading each composed artefact's
+`Requires-Dist` out of its INSTALLED metadata gave `>=0.1.0a56`, `>=0.1.0a67`,
+`>=0.1.0a68`, `>=0.1.0a77`, `>=0.1.0a77` and `>=0.1.0a98` across the six
+distributions that assembly composes. The pin EQUALS that maximum, so it was
+neither under- nor over-constrained — and nothing had been computing it. Two
+canonical documents in the same tree still stated `0.1.0a77`, which the pin had
+not been for some time; nothing broke, and nothing could see it.
+
+**That pull request is OPEN and green, not merged, and this record says so
+rather than rounding it up.** Its `kernel-pin` job is a required check and
+passed; the mechanism is proven by execution, on a branch. That is a weaker
+provenance than § 4's publisher exemplar, which shipped, and the difference is
+stated here because a record that generalises an unlanded branch while sounding
+like it generalises a release is making the same kind of claim this record
+exists to refuse.
 
 This record belongs here rather than in a publishing product. A floor is a
 contract between two repositories, and a rule defined inside one of them cannot
@@ -227,6 +308,193 @@ than about the working copy.
    mutation target from the index, and the module the mutation's failure must
    name from the package's own imports — with no version literal and no module
    literal in the workflow.
+7. Every condition the lane advertises enforced inside the lane as its own
+   named check, planted separately, reporting a distinct finding — § 8.
+8. Every coordinate the lane depends on checked to resolve, checked to name the
+   subject the claim is about, and shown to go red when it does not — § 9.
+9. Where the repository is an ASSEMBLY rather than a publisher, a pin equal to
+   the maximum floor derived from its composed distributions' `Requires-Dist`,
+   proven by a lane of its own — § 10. A repository that both publishes and
+   composes owes both.
+
+### 8. A lane enforces every condition it advertises
+
+The mutation lane's verdict is a CONJUNCTION, and § 4 already names its parts:
+the resolver refused the excluded version, AND forcing it in produced a failure,
+AND that failure named the derived module. A lane conforms only when each part
+is its own named check inside the lane — failing on its own account, and
+reporting WHICH part failed rather than that the lane is unsatisfied.
+
+A condition may not be inherited from an invariant held somewhere else, however
+reliably that invariant holds today. The measured instance is in another domain
+and that is the point, because the shape is a property of how a lane is written
+rather than of what it measures: a gate advertised a conjunctive property,
+enforced one member of it, and was correct on every input it could receive
+because a different function refused the inputs that would have violated the
+rest. **A borrowed condition is an unmonitored region wearing another function's
+guard.** The day that other function is relaxed for an unrelated and entirely
+ordinary reason, the lane keeps its colour and loses part of its meaning, and
+nothing anywhere goes red. If a lane states a property, the lane checks it.
+
+Two consequences, and the second is the one that gets skipped:
+
+- Each condition is planted SEPARATELY, with the others left intact, and exactly
+  one finding is asserted per plant. One test that strips everything at once and
+  passes when anything trips cannot say which property it enforces, and stays
+  green after two of three enforcement paths have silently died.
+- The findings must be asserted DISTINCT. Three conditions all reporting "the
+  mutation did not prove the floor" would satisfy three separate tests while
+  enforcing one property, and the separation is then cosmetic.
+
+Where the domain's own grammar makes a single-condition plant UNCONSTRUCTIBLE,
+the lane records that rather than manufacturing a fixture that can only exist
+outside the grammar. The clause is observed by DIFFERENCING instead: hold the
+co-dependent condition at its failing value, move only the clause under test,
+and require the finding set to grow by exactly one finding naming it. A fixture
+built outside the grammar proves the plant, not the property.
+
+The scope is a lane's ADVERTISED conjunction and nothing wider. This is not a
+requirement that every check be decomposed; it is a requirement that a check
+which states a compound property enforce each of its parts. A property whose
+conjunctive structure has never been written down is inside the scope, because
+the unwritten members are exactly the ones nothing covers.
+
+### 9. A coordinate is checked to point at something
+
+Every fact this record requires a lane to DERIVE arrives as a coordinate into
+something outside the lane: a version the index lists, an artefact's
+`Requires-Dist`, a module file under `site-packages`, a run that happened. A
+coordinate is evidence only when the lane checks that it RESOLVES, that it
+resolves to the subject the claim is about, and when that check has itself been
+shown to fail on a coordinate that does not.
+
+§ 4 already carries one instance — an empty index answer FAILS LOUDLY — and says
+why the mutation lane is the surface most exposed to it. This is the general
+form, and the general form is what the special case cannot supply, because the
+next dead coordinate will be a different one.
+
+Three properties, and the third is the one usually absent:
+
+- **Live.** A run identifier, a peeled tag, an index listing or an artefact path
+  is RESOLVED, not merely well-formed. ADR 0013 § 3 already refuses a branch
+  name, "latest" and an unpeeled tag as coordinates, which rules out the
+  malformed ones; it does not require anybody to check that a well-formed one
+  still points at something. A coordinate that has STOPPED resolving fails no
+  differently from one that never did, and a dead run, tag or artefact
+  coordinate is not weak evidence but no evidence.
+- **Exact.** The coordinate names the subject the claim is about — this
+  distribution, this version, this module, this host — and one that resolves to a
+  DIFFERENT subject is refused rather than accepted as near enough. This is
+  § 2's "exactly the minimum" discipline stated as a property of the coordinate
+  rather than as a flag on one command.
+- **Sensitivity-tested.** The check is DEMONSTRATED to go red on an absent
+  coordinate, on a dead one, and on a filler. Without that demonstration the
+  coordinate check is itself a lane whose passing colour nobody has earned,
+  which is this record's own defect one level up.
+
+The filler is the half worth naming explicitly, because it is the one that reads
+as compliance. A required field validated as a non-empty string is satisfied by
+`unknown`, `n/a`, `tbd`, `pending`, `assumed` and `recently`, and a claim with no
+moment is not re-resolvable at all — a reading taken before the subject changed
+is indistinguishable from one taken after. **A required field a filler satisfies
+is worse than a missing one**, because it reads as an answer and nobody goes back
+to look.
+
+The scope is a coordinate that is supposed to point at something real. It is not
+a rule about every string a lane records: a human-written rationale is prose and
+is judged as prose. What is in scope is any field whose whole purpose is to be
+followed back to a run, a tag, an artefact, a file or an observation.
+
+### 10. The consumer form — an ASSEMBLY's floor is the maximum its composition declares
+
+§§ 1 through 9 are written from the PUBLISHER's side: a distribution declaring a
+lower bound for its own imports, and proving that declaration honest. An
+assembly asks a different question, and porting the publisher form to it answers
+the wrong one — while the assembly is where this record's opening failure
+actually arrived.
+
+> An assembly's dependency floor is the MAXIMUM floor derived from the
+> `Requires-Dist` metadata of its composed distributions, and the assembly's pin
+> must EQUAL that maximum.
+
+The word "floor" is doing two jobs across this record and the difference is
+load-bearing here. A library DECLARES a floor, as a `>=` lower bound on its own
+imports. An assembly does not declare one at all: it pins `==`, and its floor is
+a quantity it must DERIVE from what it composes and then compare its pin
+against. Nothing in an assembly's own declaration states this number, which is
+why nothing in an assembly notices when the pin and the number part company.
+
+Both directions are defects, and neither is visible from the pin alone:
+
+- **Under it** — this record's opening failure, arriving through a composed
+  module's requirement rather than through the assembly's own imports. The
+  assembly pins a version something it composes cannot run against, and learns
+  at boot.
+- **Over it** — a dependency upgrade taken on nobody's behalf. It is the smaller
+  harm and it is still a harm: it owes whatever migration rehearsal that upgrade
+  owes, taken without anyone having decided to take it.
+
+Two readers are involved and they read different things, which is worth stating
+because collapsing them is how this goes wrong. The composed SET is enumerated
+from the assembly's own dependency declaration — the tree legitimately answers
+"what does this product compose" — rather than listed by hand, so a module pinned
+in a later change is included without anybody remembering to add a row. Each
+composed distribution's FLOOR is then read from that distribution's INSTALLED
+artefact metadata, never from its source tree and never from a document that
+transcribed it. The reason is § 5's, applied one layer out: a transcription is a
+second authority for a fact the artefact already fixes, and a composition census
+that lists floors by hand is a table somebody must remember to update.
+
+**On this side the mutation's module name is derived by DIFFERENCE, and that is
+better than the publisher form it ports.** § 4 derives the name from a recorded
+`module → first release that shipped it` table. Such a table is incomplete by
+construction: an import added without a matching row is invisible, and the floor
+then goes under-constrained in exactly the shape this record opens with. An
+assembly does not need the table, because it can obtain a real install of the
+excluded version and compute:
+
+> (every submodule of the dependency the composed source ACTUALLY imports, read
+> as code) minus (the submodules that installation actually HAS, read as files)
+
+Real imports on one side, real files on the other, and no row for anyone to
+forget. An EMPTY difference is itself the finding and the command exits non-zero
+saying so, because it means the pin is higher than anything the composition
+needs — the over-constrained half above, reported rather than passed over.
+Where a real install of the excluded version is obtainable, this is the
+PREFERRED form of § 4's third derived fact.
+
+The assembly's mutation drives its REAL BOOT rather than a synthetic import,
+for § 3's reason: the boot is the path that died.
+
+One corollary belongs with this section because it was measured with it. A
+version stated in canonical PROSE is a claim like any other. An assembly's
+as-built architecture document and its pin-state table both stated a kernel
+version the pin had not carried for some time; nothing broke, and nothing could
+see it. A version literal in a canonical document is derived from the
+declaration, or the regions of that document which are not derived are named as
+unmonitored.
+
+**What this section does not settle**, stated so that neither gap is mistaken
+for coverage:
+
+- **An assembly's OWN imports are not an input to the maximum as written
+  above.** The rule takes the maximum over what the assembly COMPOSES. If an
+  assembly's own source imports the dependency more recently than any module it
+  composes, the honest floor is the maximum over both, and the rule as stated
+  does not say so. In the measured instance the equality holds only because no
+  module of the assembly's own out-imports the composed set, and nothing checks
+  that premise — the reference implementation records it in its own test as a
+  condition to be added in the same change that first breaks it. This record
+  states it as a known limit rather than resolving it, because resolving it is
+  a decision about the rule and not a drafting choice.
+- **Where an assembly's lane runs is § 6's question and § 6's answer is written
+  for a publisher.** An assembly that publishes no distribution has no
+  post-publication registry artefact to re-run against, and the measured
+  instance runs its lane pre-merge and again as an admission gate before its
+  image candidate is built. Whether that is § 6's post-publication half in
+  another shape, or a gap, is not decided here.
+
+Both are carried into open decision 24 rather than left in prose.
 
 ## Consequences
 
@@ -255,6 +523,25 @@ than about the working copy.
   transcribed beside it. A floor RAISE also creates an obligation the publisher
   does not discharge: the upgrade the consumer now owes is recorded with the
   release, or it is owed by nobody.
+- Lanes get longer, and the length is the point. A conjunction enforced as named
+  conditions is more code than one verdict over an AND, and it is planted one
+  condition at a time rather than all at once. What that buys is the ability to
+  say WHICH property stopped being enforced, which a single verdict cannot say
+  at any price.
+- A coordinate check that has never been shown to fail becomes a finding in its
+  own right, and repositories will discover they have several. This is the
+  uncomfortable half: the checks in question are green today, have always been
+  green, and their greenness is exactly what is unproven.
+- The record now binds a class of repository it did not previously reach. An
+  assembly that composes distributions owes a lane even though it publishes no
+  distribution, and a repository that both publishes and composes owes both —
+  they answer different questions and neither substitutes for the other.
+- An assembly's pin decays the same way a mutation lane's literal does, and
+  without an edit either. A pin equal to the maximum today stops equalling it
+  the moment any composed module raises its own floor in its own repository, on
+  its own schedule. Nothing in the assembly changes, nothing in its history
+  records the moment, and the pin is simply wrong from then on. Deriving the
+  maximum is what makes that a red lane rather than a silent state.
 
 ## Drift prevention
 
@@ -267,6 +554,56 @@ nothing here either.** No `standards_control` rule reads it, no
 only readers of the ADR directory — evaluates a floor lane. Stating it as a
 requirement is what this record can do; asserting that something checks it
 would be the failure this section names two paragraphs down.
+
+**§§ 8, 9 and 10, added on 2026-09-01, are each enforced by NOTHING, here or
+anywhere else, and they are not equally close to being enforceable.** Saying
+"none" three times would hide the difference, and the difference is what a
+future decision has to work from:
+
+- **§ 8 — a lane enforces every condition it advertises.** Enforcement `none`.
+  This is the FURTHEST from a Governance check of the three, and it is not
+  merely an oracle problem. Deciding whether a lane's checks correspond to the
+  conditions it advertises requires reading the lane's own source AND its own
+  test suite AND the prose that advertises the property, and then judging a
+  correspondence between them. The measured instance makes the difficulty
+  concrete: before its repair the conjunction had never been written down, so
+  no comparison of "advertised" against "enforced" had two sides to compare.
+  This is stated review discipline, and it is decidable — if anywhere — inside
+  the lane's own repository, by that repository's own tests, which is where the
+  measured repair put it.
+- **§ 9 — a coordinate is checked to point at something.** Enforcement `none`,
+  and it splits three ways. That a lane REQUIRES a coordinate field is
+  decidable from that lane's own source, in its own repository. That a
+  coordinate RESOLVES is by construction an external-oracle question: ADR 0013
+  § 5 permits automation only through a declared oracle carrying immutable
+  coordinates, and this repository declares none for a run, a tag, an index
+  listing or an artefact path used this way. That the check is SENSITIVITY-
+  TESTED is a fact about another repository's test suite, which ADR 0013 § 1
+  places outside what this repository may assert. Nothing here changes; the
+  observation is that the first third would be decidable in the lane's own
+  repository, and the other two would not be decidable anywhere without an
+  oracle that does not exist.
+- **§ 10 — an assembly's pin equals the maximum its composition declares.**
+  Enforcement `none`, and this one is not even declaration-checkable from a
+  checked-in tree, which is worth saying because it looks like it should be.
+  The maximum is derived from INSTALLED artefact metadata; that is a property
+  of a resolved environment, not of any repository's content, and the whole
+  point of § 10 is that reading it from a source tree instead is the defect.
+  `standards-profile.schema.json` carries no field for a pin, a composed
+  distribution set, a `Requires-Dist` reading or a floor lane — checked at this
+  repository's `main` `d2066bcb` by enumerating the schema's property names.
+  The reference implementation is `dotmac_platform_control_plane` pull request
+  **#111**, which is **OPEN, not merged**: its `kernel-pin` job is a required
+  check and is green on the branch. An open pull request is a weaker
+  provenance than a merged one and much weaker than a release, and this record
+  names it as what it is rather than as a landed exemplar. That pull request
+  also cites this record NOWHERE, in any spelling, which is a fact about the
+  port rather than an objection to it.
+
+Neither § 10's two unsettled edges — an assembly's own imports as an input to
+the maximum, and where an assembly's lane runs when it publishes no
+distribution — is resolved by this record. Both are recorded in open decision
+24 so that they are owed to somebody rather than left in a paragraph.
 
 No check in this repository evaluates this record, and no enrolled repository's
 standards profile declares a surface for it. What exists is
@@ -327,7 +664,12 @@ built without it, and the shapes are already known from measurement: a
 distribution whose declared floor predates a module it imports; a canary lane
 carrying a version literal instead of a derived one; a mutation lane whose
 failure-match names a module written by hand rather than derived from the
-declared floor; and a mutation lane whose index query returns nothing and
-reports success. Each needs a synthetic repository shown to go RED. A floor
-check demonstrated only against a conforming tree passes for the wrong reason,
-which is the defect this whole record is about.
+declared floor; a mutation lane whose index query returns nothing and reports
+success; a lane advertising a conjunction while enforcing a proper subset of
+it, with the remainder held only by another function's invariant; a coordinate
+field a filler string satisfies, and a coordinate check never shown to go red
+on a coordinate that does not resolve; and an assembly whose pin is above or
+below the maximum its composed distributions' `Requires-Dist` declare. Each
+needs a synthetic repository shown to go RED. A floor check demonstrated only
+against a conforming tree passes for the wrong reason, which is the defect this
+whole record is about.

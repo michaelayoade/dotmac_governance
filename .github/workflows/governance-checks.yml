@@ -8,9 +8,38 @@ on:
 permissions:
   contents: read
 
+# One ref-agnostic group, deliberately: the Seabone runner is a single slot and
+# authoritative runs are SERIALIZED across every branch. That key is the intent,
+# not the defect, and capacity is not the repair.
+#
+# `cancel-in-progress` was the defect. Cancelling DESTROYS validation instead of
+# deferring it, and this workflow has exactly one job -- the acceptance suite and
+# every record validator -- so there is nothing here that is safe to discard
+# mid-flight. Measured on 2026-09-01: three runs cancelled, and one of them was
+# `33516982417`, the `main` run for commit `d46d3a65a4b6631b867a51a1c8f27410d5908a24`,
+# which is pull request #58's own merge. It was alive for 19 seconds
+# (14:01:50Z to 14:02:09Z) and reported no verdict. **That commit reached
+# protected `main` with no completed validation**, in the repository whose stated
+# control is that CI is the acceptance owner. A cancelled run also RENDERS as
+# `fail` in `gh pr checks`, so the setting manufactures false failures as well as
+# missing verdicts, and a lane has already retracted a failure report that was a
+# cancellation.
+#
+# Queue instead. A later run waits for the one in flight rather than killing it.
+#
+# No queue-depth knob is added, and none is needed: GitHub keeps at most ONE
+# pending run per concurrency group, and `timeout-minutes: 10` caps the run ahead
+# of it. The backlog is bounded by the platform and by this file, not by capacity.
+#
+# What this does NOT fix, stated rather than hidden: because GitHub cancels a
+# PENDING run when a newer one enters the same group, a middle commit can still
+# reach `main` without a verdict -- not because its validation was killed in
+# flight, but because it never started. Removing that residue means giving
+# `push: main` a group of its own, which changes the serialization key, so it is
+# NOT done here.
 concurrency:
   group: dotmac-governance-seabone-ci
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   records:

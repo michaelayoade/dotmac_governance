@@ -768,8 +768,23 @@ future decision has to work from:
   The reference implementation is `dotmac_platform_control_plane` pull request
   **#111**, which is **OPEN, not merged**, re-read on 2026-09-01 and still open
   with no merge commit: its `kernel-pin` job is a required check and is green on
-  the branch. That lane does not yet read the assembly's own imports at all,
-  which is the gap § 10.1 names rather than one it closes. An open pull request is a weaker
+  the branch. **A sentence stood here claiming that lane does not read the
+  assembly's own imports at all, and it is RETRACTED.** At head `5f7ebba8`,
+  observed 2026-09-01, that branch carries `scripts/kernel_floor.py`
+  subcommands `assembly-needs` and `assembly-satisfied`, invoked from the
+  `kernel-pin` job. The retracted sentence was a claim about another
+  repository's branch CONTENTS, made without reading them, in the record that
+  exists to refuse exactly that; ADR 0013 § 1 puts such a fact outside what this
+  repository may assert, and § 4 makes it temporal even when true. It may well
+  have been true when written — the branch head had moved from `2dd1ef7d` by the
+  time it was checked — which is § 4's point rather than an excuse: **a claim
+  about a branch expires without an edit, and a governance record is the worst
+  place to keep one.** What this record can say is what it now says: the
+  reference implementation is an OPEN pull request, this repository does not
+  observe its contents, and any statement about what that lane does or does not
+  implement belongs in that repository, dated, with its head named. The
+  refresh responsibility for the observation above is that pull request's own
+  author, before it is cited as evidence of anything. An open pull request is a weaker
   provenance than a merged one and much weaker than a release, and this record
   names it as what it is rather than as a landed exemplar. That pull request
   also cites this record NOWHERE, in any spelling, which is a fact about the

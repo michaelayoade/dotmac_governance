@@ -10,6 +10,16 @@
 
 ## Context
 
+**This record is `Accepted`, and its acceptance was ratified on 2026-09-01.**
+The two dates that now attach to it are different facts and must not be read as
+one: `Effective: 2026-08-30` in the header above is the day this decision began
+binding operationally and is **unchanged**, while 2026-09-01 is the day a
+contradiction between this record and the framing of the change that merged it
+was resolved by a named human. § "Ratification amendment — 2026-09-01" at the end
+records that event and the evidence for it. **Nothing in §§ Context, Decision,
+Consequences or Drift prevention was rewritten**, and no controlled metadata
+field changed.
+
 On 2026-08-29 a decision was taken that the application owned by the Vendor
 Control Plane is presented publicly as **Dotmac Platform** at
 `platform.dotmac.io`, while the repository coordinate, distribution name,
@@ -186,3 +196,121 @@ The verification gap named in Consequences is tracked rather than closed: the
 GHCR package linkage must be confirmed with a `read:packages`-scoped token
 before the first post-rename image build is relied on, and a failed push after
 the rename is the fallback signal.
+
+## Ratification amendment — 2026-09-01
+
+Michael Ayoade ratified this record's `Accepted` status on 2026-09-01. The
+approval is his; this section records it as an attributable event, written by
+the agent that did not make it. Under `AGENTS.md` an agent may not occupy the
+approver role or approve its own output, and neither happened here — the ruling
+below was made by the named human and is transcribed, not made:
+
+> ADR 0016 remains Accepted. The PR's Proposed/non-normative framing was wrong.
+> Do not run reconciler `--apply` until a human-attributed amendment records the
+> 2026-09-01 ratification while preserving the operational effective date.
+
+### The two dates, and why collapsing them fails in both directions
+
+- **`Effective: 2026-08-30` is the operational date.** It is when this decision
+  began binding, and this amendment does not touch it. Everything that relied on
+  this record between 2026-08-30 and 2026-09-01 relied on it **correctly**, and
+  nothing below weakens that reliance retroactively.
+- **2026-09-01 is the ratification date.** It is when the disagreement between
+  this record and its own merge was resolved. It dates **this section and
+  nothing else** in the record.
+
+Moving `Effective` forward to the ratification date would assert that this
+record bound nothing during the two days it did bind. Backdating the
+ratification into the header would assert that the contradiction was resolved on
+the day it was created. Both are false, and a header carries one `Effective`
+value — so the ratification is dated in prose, here, rather than by moving a
+controlled field. A reader who needs the operational date reads the header; a
+reader who needs the ratification date reads this section; neither answers the
+other's question.
+
+### What was wrong: the framing of the merge, not the record
+
+Pull request #37 is titled *"Propose ADR 0016 — the operator-facing control
+plane is Dotmac Platform (PROPOSED, not normative)"*, and its body says *"This
+PR records the decision only."* The file it merged says `Status: Accepted` and
+`Effective: 2026-08-30`. Those two statements cannot both describe the same
+change, and **the record is the half that is correct.**
+
+The history is more specific than "the author got it wrong", and the specifics
+are what make this a repeatable shape rather than one person's slip. #37 carried
+two commits:
+
+| Commit | Authored (UTC) | Effect on the record |
+| --- | --- | --- |
+| `2fd8231a` | 2026-08-30T05:14:26Z | Adds the record as `Status: Proposed` |
+| `031b3895` | 2026-08-30T05:53:53Z | Sets `Status: Accepted` and adds `Effective: 2026-08-30` |
+
+The pull request merged at 2026-08-30T05:57:59Z, four minutes after the second
+commit. The title and opening body were therefore **accurate when written and
+stale when merged**: the acceptance happened *inside* the pull request, and the
+prose describing the pull request was never updated to say so. That second
+commit's message carries the approval in the approver's own words — *"Michael
+Ayoade declared acceptance on 2026-08-30 … 'I, Michael Ayoade, accept ADR 0016,
+effective 2026-08-30.'"* — and it survives into the squash commit `00a27bab`,
+whose **subject line is the stale title** and whose **body records the
+acceptance**. A reader of the subject and a reader of the tree reach opposite
+conclusions about one commit.
+
+So this amendment does **not** retract the 2026-08-30 acceptance and does not
+treat it as absent. It **ratifies** it: a named human has now confirmed, on
+2026-09-01, that `Accepted` was and remains the correct status, so a reader who
+meets the stale title first has a dated, attributable statement to resolve it
+against.
+
+The shape is not unique to this record. ADR 0013 merged the same way ten days
+earlier — pull request #22, titled *"Propose the repository-local claims and
+external oracles standard (ADR 0013)"*, carried a `propose` commit and an
+`accept` commit authored in the same minute, and the file that merged says
+`Status: Accepted`. Two instances is a pattern, and it is the reason the closing
+subsection below is written as an open item rather than as a footnote.
+
+### What ratification changes
+
+The status: nothing. `Status` read `Accepted` before this amendment and reads
+`Accepted` after it — a ratification confirms a status, it does not create one.
+`Date`, `Effective`, `Owner`, `Approver`, `Scope` and `Classification` are
+untouched, and so is every word of §§ Decision, Consequences and Drift
+prevention.
+
+What changes is that the condition Michael attached to the projection hold is
+now satisfied **on this record's side**: he directed that no reconciler
+`--apply` run promote anything on the strength of this record until the
+ratification was recorded here, and this section is that recording. Whether and
+when such a run happens is his call, is made outside this repository, and is not
+performed by this change. The Knowledge entry
+`vendor-control-plane-public-identity-is-dotmac-platform` is not edited here
+either; § Context's instruction about how to read it is unchanged.
+
+### What ratification does NOT change
+
+- **It authorizes nothing new.** § 1's repository rename, § 3's frozen
+  coordinates and § 5's ordering are unchanged, and ratification neither
+  performs nor re-authorizes any of them. Whatever has or has not been executed
+  under the 2026-08-30 acceptance was executed under that acceptance and is
+  unaffected either way; this record makes no claim, here, about the state of
+  any repository other than this one.
+- **It discharges no verification obligation.** The GHCR package linkage named
+  in §§ Consequences and Drift prevention was unverified when this record was
+  drafted and is unverified now. The same is true of § 4's evidence rule, which
+  still has no automated detector and is not claimed to.
+- **It repairs the instance, not the class.** `tools/check_adrs.py` reads a
+  record's controlled metadata region and validates it against itself and
+  against the other records. **Nothing compares that metadata against what the
+  change carrying it says about itself**, which is how a file reading `Status:
+  Accepted` merged inside a pull request titled "PROPOSED, not normative" with
+  every check green — twice. This amendment builds no such comparison and no
+  check of any kind: one record, one change, and a control is a separate
+  reviewed change. Whether the property is decidable at all is a genuine
+  question and not a formality. A pull request title is prose; a title that went
+  stale mid-review is indistinguishable, by inspection of the title, from one
+  that was wrong from the start; and the narrow shape that *is* decidable — a
+  diff that moves a `- Status:` line to `Accepted` while the change's own
+  subject asserts the record is not normative — is neither the whole class nor
+  obviously worth its false positives. Recording the gap is what this record
+  does; deciding it is not, and until it is decided a record whose merge framing
+  contradicts its status is an **unmonitored region** rather than a covered one.

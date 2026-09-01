@@ -383,6 +383,40 @@ reason. Until at least one enrolled repository declares a gate subject to this
 record and the checker is shown red with its admit removed, the control is not
 evidenced — which is why the status above says `none` rather than `pending`.
 
+### Sequencing — added 2026-09-01, and it builds nothing
+
+A dated addition, not a rewrite of anything above. Michael Ayoade settled the
+ORDER in which enforcement may be approached, resolving open decision 42:
+
+> - Sub supplies the first real-target demonstration after bootstrap creates an
+>   admissible target.
+> - Governance extracts the typed family afterward.
+> - The standards profile gains its surface only after executed product evidence
+>   exists.
+> - Until then, ADR 0034 remains normative with enforcement absent.
+
+**The ordering is product-first, and that is the point rather than a scheduling
+preference.** `dotmac_starter_mt` ADR-0006 requires a shared capability to be
+extracted from a qualifying production implementation rather than designed beside
+one. Governance writing the typed family before Sub has demonstrated a real-target
+admit would be **this record's own defect one level up**: a contract authored
+against no real subject, whose fixtures could only be built from the contract. The
+sequence exists so the family is extracted from something that worked, not
+invented from something that was written down.
+
+**This changes the plan and not the state.** Every enforcement statement above
+stands unaltered: there is no `standards_control` rule, no
+`standards-profile.schema.json` field, no CI gate and no check family, and
+**enforcement remains absent until the third phase lands**. A phased plan is not a
+control, and a record that begins reading as though one exists because a sequence
+was agreed has acquired exactly the unearned green this record was written
+against. What is decidable, and where, is unchanged by the sequencing: still only
+inside the gate's own repository, and still not here.
+
+What remains genuinely open is narrower than it was: the **schema details** of the
+surface the profile would gain, and they are gated on executed product evidence
+that does not yet exist. Open decision 42 records that phased disposition.
+
 ## Acceptance — 2026-09-01
 
 Michael Ayoade approved this rule on 2026-09-01 and directed that it live in

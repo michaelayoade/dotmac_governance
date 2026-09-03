@@ -404,6 +404,35 @@ enforced only by whoever remembers it:
 - It creates **no check, no gate and no `standards-profile.schema.json`
   surface**. See § Drift prevention.
 
+### 12. What acceptance requires — added 2026-09-03 on Michael's ruling
+
+This record stays `Proposed` until a specific thing has been demonstrated, and
+the condition is his rather than this record's:
+
+> ADR 0039 should remain `Proposed` until the **report-only profile
+> implementation can admit a real candidate and reject planted defects**. Then
+> Michael can accept it and enforcement can be enabled deliberately.
+
+So the record's own § 7 is its acceptance test, run in the report-only form
+§ Consequences describes:
+
+- **Admit** — a real candidate, resolved from an actual image, is ADMITTED. Not
+  a fixture built to pass; the artefact an assembly would really submit.
+- **Reject** — the planted defects of § 7 are REFUSED, each naming the binding,
+  so a refusal for an unrelated reason cannot stand in for the proof.
+
+**Three states, and they are separate acts by separate parties.** The record is
+**authored** — it exists and says what it says. It is **held** — `Proposed`, not
+normative, citable as nothing, until the demonstration above exists and Michael
+accepts it. It is **activated** — enforcement enabled — only as a later,
+deliberate act, which is open decision 44 and is not implied by acceptance.
+Collapsing any two of those is how a contract becomes policy nobody approved, or
+policy nobody implemented.
+
+The ordering also protects the § Consequences hazard from arriving early: an
+implementation that cannot yet admit a real candidate is exactly the one that
+would be completed by marking unfinished concerns `inapplicable`.
+
 ## Consequences
 
 **No assembly in the fleet can complete this profile today, and that is the
@@ -481,3 +510,9 @@ Open decision 44 records what acceptance would deliberately leave undecided:
 which half of this standard is automated, who owns the dossier schema change
 § 9 needs, and whether the profile digest gains a declared surface in
 `standards-profile.schema.json`.
+
+And § 12 records what acceptance itself now waits on: a report-only
+implementation that has been shown to admit a real candidate and to reject
+planted defects. **Enforcement is a further, separate act after that** — this
+section's verdict of `none` is a description of today, not a permanent property
+of the record.

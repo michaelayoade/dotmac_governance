@@ -102,7 +102,7 @@ Three boundaries, and each is here because it is the one that erodes:
   `resolve_event_attribution` refuses to record `"system"` or `"unknown"` for a
   process that never declared its identity.
 
-### 3. `actor_id` absent, and `actor_label` absent too
+### 3. `actor_id` absent, `actor_label` absent — and where the value goes instead
 
 `anonymous` carries **no `actor_id`**. It joins `system` as a kind whose
 identifier may be absent, and unlike `system` its identifier must be absent:
@@ -120,11 +120,36 @@ unauthenticated attempt in every audit view as though someone were identified,
 which is the same manufactured attribution the amendment repairs, arriving
 through a field nobody was watching.
 
-The submitted identifier is genuinely worth recording — it is how a credential
-stuffing run is recognised. It belongs in the event's **declared details**,
-under a name that says it is a submitted, unverified value, and never in
-`actor_id`, `actor_label` or `actor_party_id`. A detail is data about the
-attempt. The actor columns are claims about who acted.
+**Forbidding it is only half an answer, and the half that loses evidence.** The
+submitted identifier is genuinely worth recording — it is how a credential
+stuffing run is recognised — and it is genuinely not an identity. A contract
+that only forbids it throws the evidence away; a contract that admits it into
+`actor_label` manufactures attribution. So the value is **reclassified**, not
+discarded. Michael's ruling, 2026-09-03:
+
+> A submitted username is **attacker-supplied evidence, not identity**. Store it
+> only in a separately typed, governed observation field — preferably
+> normalized/digested where the use case permits.
+
+Three requirements, and each is doing work:
+
+1. **Separately typed.** Not a free-form bag beside the actor columns: a field
+   whose type says what it is, so a reader cannot mistake it for an identifier
+   and a query cannot join on it by accident.
+2. **Governed.** Declared like any other evidence, with its retention, access
+   and redaction owned rather than inherited by accident from whatever table it
+   landed in. Attacker-supplied bytes in an audit trail are a data-governance
+   subject, not a convenience column.
+3. **Normalized or digested where the use case permits — the preferred form.** A
+   digest keeps the property the evidence is actually for — *the same string was
+   tried again, here and there* — while dropping the attacker's chosen bytes,
+   which are the part that carries injection, PII and impersonation risk. Keep
+   the literal only where the use case genuinely needs it, and then under
+   requirement 2.
+
+What does not change: never `actor_id`, never `actor_label`, never
+`actor_party_id`. Those columns are claims about who acted. This one is an
+observation about what was submitted, and the distinction is the whole record.
 
 ### 4. Party enrichment is forbidden STRUCTURALLY, and what that can mean for a contract
 
@@ -187,19 +212,43 @@ receive Audit v2 events, and a projection remains rebuildable from the
 application rows that own the truth rather than becoming a second authority for
 them.
 
-### 6. Scope, and one edge this record deliberately does not close
+### 6. Scope, and the platform trail — one null must not carry two facts
 
 This record governs the **tenant** audit contract's actor taxonomy.
 
-The **platform** audit trail is not covered, and the reason is a finding rather
-than an omission. `write_platform_audit_event` identifies its actor as
-`actor_admin_id: UUID | None` — a nullable administrator reference with no kind
-column at all. An unauthenticated platform login attempt therefore has the same
-gap in a worse form: a NULL admin id is indistinguishable from an event whose
-actor was simply not recorded, and there is no place to say which. Whether the
-platform trail gains a kind column, adopts the tenant taxonomy, or keeps a
-separate shape is a contract decision this record does not make, and it is open
-decision 45.
+The **platform** audit trail has the same gap in a worse form, and it is a
+finding rather than an omission. `write_platform_audit_event` identifies its
+actor as `actor_admin_id: UUID | None` — a nullable administrator reference with
+**no kind column at all**. So a NULL there is indistinguishable from an event
+whose actor was simply not recorded: **one null carrying two facts**, and no
+place to say which.
+
+**Michael ruled on this on 2026-09-03, and it is a gate rather than a parked
+question:**
+
+> Close decision 45(b) **before calling Platform's audit axis composed**:
+> replace nullable `actor_admin_id` semantics with a typed actor reference
+> (`human_admin | service | anonymous`). **"No admin ID" must not mean both
+> anonymous and unrecorded.**
+
+Two things follow, and they are separable:
+
+- **The vocabulary is named**: `human_admin | service | anonymous`, a typed
+  actor reference rather than a nullable foreign key. This record does not
+  restate it as a taxonomy of its own, because the platform trail's owner
+  implements it — the implementation owner is open decision 45(a).
+- **The precondition is binding**: **Platform's audit axis may not be called
+  composed while that null is ambiguous.** An axis whose actor column cannot
+  distinguish *nobody was identified* from *nobody wrote it down* has not
+  finished, whatever else about it is complete.
+
+**The general rule is worth stating once, because this is its third instance in
+this fleet: one null must not carry two facts.** It is the same family as the
+Knowledge health surface's `UNMEASURED` — *dropped* and *never sent* are
+different states and a single absence cannot mean both — and as a first
+deployment being a **positive claim** rather than an empty prestate. Each time,
+the repair is the same shape: give the second fact its own representation
+instead of asking absence to carry it.
 
 ## Consequences
 
@@ -264,6 +313,12 @@ for. The controls above are stated as required rather than recommended for that
 reason.
 
 Open decision 45 records what acceptance leaves undecided: who owns the
-implementation of both seams and their controls, whether the platform audit
-trail's actor gap in § 6 is closed the same way, and whether the two existing
-unenforced per-kind party rules are repaired in the same change.
+implementation of both seams and their controls, and whether the two existing
+unenforced per-kind party rules (`system` and `service` carry no party) are
+repaired in the same change — which needs a count of existing violating rows
+that only that owner can take.
+
+**What is no longer undecided** is § 6's platform edge. Michael closed it on
+2026-09-03 with a named vocabulary and a precondition, so it is a gate on
+Platform's audit axis rather than a question. Its implementation owner is still
+part of this decision; the shape of the answer is not.

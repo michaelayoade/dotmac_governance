@@ -53,6 +53,11 @@ exists only as prose inside 95 free-text `local_copy_retirement` paragraphs,
 which is why the estate's own adoption state has to be read rather than
 computed.
 
+And that prose is **already ruled out as the evidence**, in the implementing
+repository, for a measured reason — see § 9. So the gap is not a missing
+convention that better writing would close. It is a missing typed field: three
+of the four properties § 9 requires exist today and the fourth exists nowhere.
+
 That is the exact shape of the problem, because the programme metric Michael
 stated on 2026-09-03 is
 
@@ -259,28 +264,81 @@ Two precisions:
   registry receipt is left to that record's own criteria and to open decision
   44.
 
-### 9. Retirement evidence, in the field that already exists
+### 9. Retirement evidence is a typed claim, and prose is not one
 
 **A binding that displaces a local writer or executor owes retirement
-evidence**, and that evidence is recorded where the obligation already lives:
-the dossier's `local_copy_retirement` field and its typed `[[product_writers]]`
-rows. This record deliberately creates **no parallel register**. A second place
-to record a retirement is a second authority for one fact, and the fleet has
-paid for that shape more than once.
+evidence**, and that evidence is a **typed claim**. This record creates **no
+parallel register**: a second place to record a retirement is a second
+authority for one fact, and the fleet has paid for that shape more than once.
 
-What the measurement in § Context requires of that existing schema is one
-addition, stated as a property rather than as a field name, because the schema
-is owned by `dotmac_starter_mt` and not by this repository:
+**The fleet has already ruled on the weaker form, and the ruling is cited here
+rather than restated.** `dotmac_starter_mt`'s
+`tests/architecture/test_product_first_extraction.py`, read on 2026-09-03 at
+`d096e64c13fe3cd8ab89f4a15edd1ce1bc046e2a` — the reasoning sits above
+`PRODUCT_WRITER_STATES` and in `_product_writer_problems`, named by symbol
+because a line number decays:
 
-> A writer row whose `retirement_required` is true must be able to carry its
-> **disposition** as typed data, in the vocabulary ADR 0018 rule 2 already
-> defines — **retired in a named revision**, **transferred to a named owner**,
-> or **still live with a named retirement condition and a named owner**.
-> *"Not yet"* is a permitted value. **Unstated is not.**
+> reading `local_copy_retirement` prose instead is worse — **a sentence is not
+> a claim a checker can compare.**
 
-Until that exists, the programme metric cannot be computed from the tree, and a
-retirement claim is prose. Note what this does not ask for: no new file, no new
-status, no change to the dossier's headline states.
+**The measured failure that produced it** is preserved in that file as
+`test_the_expenses_failure_would_now_be_refused`: **Expenses was rostered "no
+ISP writer in scope" while Sub held two writers its own `local_copy_retirement`
+required to ratchet to zero.** The prose field was present, it was correct, and
+it did not prevent the roster from being wrong — because prose cannot be
+compared. A future reader proposing *"why not just read the prose field, it is
+right there"* should meet that, and not a preference.
+
+So: **`local_copy_retirement` is the human account of the obligation.** It is
+worth reading, it explains what a typed row cannot, and it is **not** the
+evidence a profile is checked against.
+
+#### The shape the profile requires
+
+Stated as a shape rather than as a file, because a contract that names a path
+imports one repository's layout into every assembly:
+
+1. **A closed writer-state vocabulary** distinguishing at minimum: the
+   implementation being extracted from; a writer that exists today and must
+   stop; a product that does not write the capability; and a product that was
+   **looked at** and writes nothing. The last two are separate states
+   deliberately — the difference between them is *whether anybody checked*, and
+   it is what makes a "no writer here" claim checkable rather than merely
+   unrefuted.
+2. **A retirement-required flag**, carried separately from the state.
+3. **Evidence paths at an immutable revision**, pointing at the writer being
+   claimed about. ADR 0013 § 3 coordinates; a claim measured against a moving
+   branch is not a claim.
+4. **A disposition, once the retirement happens** — in the vocabulary ADR 0018
+   rule 2 already defines: **retired in a named revision**, **transferred to a
+   named owner**, or **still live with a named retirement condition and a named
+   owner**. *"Not yet"* is a permitted value. **Unstated is not.**
+
+Properties 1–3 exist today. **Property 4 does not exist anywhere**, which is the
+§ Context finding: 340 typed rows can say a retirement is owed and none can say
+it happened.
+
+**Silence is UNKNOWN, never "nothing to retire."** A missing writer claim says
+nothing, and a consumer that needs an answer **refuses** rather than reading
+absence as a clean bill of health. That rule is already written in the
+implementing repository — it is the same requirement as ADR 0033 § 2's fifth,
+arriving in the dossier's own terms — and the Expenses failure is what happens
+when silence is read as clearance.
+
+**`[[product_writers]]` in `dotmac_starter_mt`'s `EXTRACTION.toml` is the
+fleet's current instance of this shape**, and the one Governance already cites
+across the repository boundary; that file's own comment says so. It is **an**
+instance and not the requirement. An assembly that carries the same four
+properties elsewhere satisfies this section, provided the profile's binding
+points at where they live.
+
+#### Why the shape is the metric's load-bearing joint
+
+The programme metric is *"local writers/executors retired"*. **If the contract
+counts prose, the metric counts sentences; if it counts writer-state
+transitions carrying evidence paths, the metric counts facts.** That is the
+whole distance between a scoreboard and a slogan, and it is decided by which
+field § 9 points at — not by how carefully anyone writes the paragraphs.
 
 Two statements about the existing vocabulary, which this record adopts rather
 than invents, because both are already written down in the tree and are worth

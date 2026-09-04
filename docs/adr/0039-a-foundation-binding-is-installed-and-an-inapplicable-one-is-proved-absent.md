@@ -435,13 +435,28 @@ would be completed by marking unfinished concerns `inapplicable`.
 
 ## Consequences
 
-**No assembly in the fleet can complete this profile today, and that is the
-first useful result rather than an objection.** Nine of the thirteen concerns
-have no fleet owner mature enough to be named as a binding, so a first pass
-produces a profile that is mostly incomplete or `inapplicable`-without-proof.
-That output is a measurement of the estate's real foundation coverage, taken
-concern by concern against installed artifacts, and it is the measurement the
-programme currently lacks.
+**A first pass produces a mostly incomplete profile, and that is the first
+useful result rather than an objection.** The output is a measurement of the
+estate's real foundation coverage, taken concern by concern against installed
+artifacts, and it is the measurement the programme currently lacks.
+
+**Corrected 2026-09-04 on Michael's ruling — this record makes no maturity
+determination.** An earlier version of this paragraph said nine of the thirteen
+concerns had no owner mature enough to be named as a binding. That was a
+maturity list wearing a count: asserting nine are immature asserts four are
+mature, and this record neither measured that nor is the place to state it. His
+replacement, and the scope this record keeps:
+
+> The facility defines and verifies the thirteen-concern profile shape. It makes
+> no fleet-maturity determination. Each assembly must supply immutable bindings,
+> and candidate verification reports which concerns are bound, missing or
+> inapplicable.
+
+**Which concerns are bound, missing or inapplicable is an OUTPUT of candidate
+verification, per assembly, never an input this record supplies.** The earlier
+sentence would have let a reader take four unnamed concerns as settled and skip
+the verification that decides it — the exact substitution of a stated list for a
+measurement that § 5 refuses everywhere else in this record.
 
 **The refusal in § 4 is not deployable until the bindings exist.** Composing a
 refusal into an assembly whose profile cannot be completed stops that assembly
@@ -458,10 +473,11 @@ retired" is derived from 340 typed rows instead of read out of 95 prose
 paragraphs, and the programme's stated metric becomes something a reviewer can
 compute rather than assert.
 
-**A concern that has no owner is now visible as such.** Today an assembly with
-no request-evidence context and an assembly with a mature one are
+**A concern that is not bound is now visible as such.** Today an assembly with
+no request-evidence context and an assembly with a well-established one are
 indistinguishable from outside; both simply have nothing to show. A profile
-makes the first one carry an explicit hole.
+makes the first one carry an explicit hole — as a per-assembly verification
+result, not as a judgement about the concern.
 
 **This record adds a way to be dishonest, and names it.** An `inapplicable`
 binding with a plausible reason and no executable proof is cheaper than any

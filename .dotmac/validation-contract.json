@@ -73,6 +73,12 @@
       "reason": "Programme matrix validation. Reads the repository; the pinned-dossier arm additionally reads a checkout CI supplies."
     },
     {
+      "key": "kernel_adoption_control",
+      "aliases": [],
+      "class": "local",
+      "reason": "Kernel-adoption conformance over this repository's own source (ADR 0042, activated 2026-09-05). Reads this checkout's declaration, its own Python entry points and its own Git HEAD; reads no network, no other repository and no clock -- the date expiries are judged against is supplied as --as-of, so the verdict is reproducible. An enrolled product runs the same command over its own checkout in its own CI; Governance never runs it over another repository."
+    },
+    {
       "key": "standards_control verify",
       "aliases": [
         "dotmac-standards verify"

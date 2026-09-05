@@ -39,11 +39,11 @@ jobs:
 
       - name: Check control-plane lint and formatting
         run: |
-          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-          python3 -m ruff format --check agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff format --check agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
 
       - name: Check typed control-plane boundaries
-        run: python3 -m mypy --strict --scripts-are-modules agent_control gate_control kernel_adoption_control programme_control standards_control tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+        run: python3 -m mypy --strict --scripts-are-modules agent_control gate_control kernel_adoption_control programme_control standards_control tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
 
       - name: Exercise known-good and known-bad controls
         run: python3 -m unittest discover --start-directory tests --verbose
@@ -105,6 +105,25 @@ jobs:
 
       - name: Validate cross-repository programme matrices
         run: python3 -m programme_control --root .
+
+      # This repository is a SUBJECT of the Kernel-adoption standard and not
+      # only its author: `.dotmac/kernel-adoption.json` declares
+      # `not_applicable`, and this step is what CHECKS that premise against
+      # this repository's own source rather than accepting it (ADR 0042's
+      # activation amendment of 2026-09-05).
+      #
+      # Scoped to THIS checkout. An enrolled product runs the same command over
+      # its own checkout in its own CI, because a declaration living in another
+      # repository is not a repository-local fact for Governance (ADR 0013
+      # § 1); propagation to the estate is open decision 52.
+      #
+      # `--as-of` is SUPPLIED, never read from a clock inside the check: the
+      # package calls no clock at all, so an expiry verdict is a function of
+      # this argument and the declaration, and re-running with the same date
+      # gives the same answer forever. CI passes the UTC date of the run.
+      - name: Check this repository's Kernel-adoption declaration
+        run: python3 -m kernel_adoption_control --root . --observer tools.kernel_adoption_observation:observe --as-of "$(date -u +%F)"
+
 
       # The half the step above cannot do. A `no_product_writer` roster claim
       # asserts a fact about another repository's dossier, so the dossier is

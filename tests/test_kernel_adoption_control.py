@@ -23,9 +23,11 @@ source, and a pin arm handed too few sites to be capable of disagreeing.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path, PurePosixPath
 
 from kernel_adoption_control import (
@@ -173,6 +175,13 @@ def transitional_surface(
     )
 
 
+#: The date these fixtures are judged against. Fixed, not `date.today()`: an
+#: expiry assertion whose meaning changes overnight is an assertion nobody can
+#: re-read. `transitional_surface`'s default expiry is 2026-12-01, comfortably
+#: after this, so no fixture below expires by accident.
+AS_OF = date(2026, 9, 5)
+
+
 def evaluate_sources(
     sources: dict[PurePosixPath, str],
     *,
@@ -180,12 +189,14 @@ def evaluate_sources(
     pins: tuple[PinSite, ...] = (),
     transitional: tuple[TransitionalSurface, ...] = (),
     declaration: DeclarationOutcome | None = None,
+    as_of: date = AS_OF,
 ) -> AdoptionReport:
     return evaluate(
         KernelAdoptionInputs(
             sources=sources,
             catalogue=A98,
             pin_sites=pins,
+            as_of=as_of,
             declaration=(
                 declared(prohibited, transitional)
                 if declaration is None
@@ -793,6 +804,12 @@ class DeclarationContract(unittest.TestCase):
         )
 
 
+#: Modules the digest arm of the boundary sweep does not cover, each with an
+#: enforceable premise asserted below. "Exempt" and "unmonitored" are different
+#: states, and a list with no premise turns the first into the second.
+EXEMPT_FROM_THE_DIGEST_SWEEP = frozenset({"declaration_contract"})
+
+
 class BoundaryIsStructural(unittest.TestCase):
     """The package holds no profile parser, and that is asserted rather than said.
 
@@ -808,20 +825,78 @@ class BoundaryIsStructural(unittest.TestCase):
             declaration,
             engine,
             foundation_binding,
+            runner,
         )
 
+        # A gate that enumerates its targets must admit every one of them
+        # (ADR 0034). `runner` was added by ADR 0042's activation amendment; a
+        # list that did not grow with the package would have left the one new
+        # module unmonitored while still reporting green.
         for module in (
             kernel_adoption_control,
             contracts,
             declaration,
             engine,
             foundation_binding,
+            runner,
         ):
             names = set(dir(module))
             for forbidden in ("APPLICATION_PROFILE_SCHEMA", "canonical_bytes"):
                 self.assertNotIn(forbidden, names, module.__name__)
             for name in names:
                 self.assertNotIn("digest", name.lower(), f"{module.__name__}.{name}")
+
+    def test_the_boundary_sweep_covers_every_module_in_the_package(self) -> None:
+        """The enumeration above is compared to the package, not trusted.
+
+        A hand-written module list is exactly the shape that silently stops
+        covering a package: the next module is added, every assertion stays
+        green, and the new file is unmonitored rather than clean. This makes
+        the list a ratchet -- adding a module fails this test until the sweep
+        names it.
+        """
+        package = Path(__file__).resolve().parent.parent / "kernel_adoption_control"
+        on_disk = {
+            path.stem
+            for path in package.glob("*.py")
+            if path.stem not in {"__init__", "__main__"}
+        }
+        swept = {"contracts", "declaration", "engine", "foundation_binding", "runner"}
+        self.assertEqual(
+            on_disk,
+            swept | EXEMPT_FROM_THE_DIGEST_SWEEP,
+            "a module exists that the boundary sweep above neither names nor "
+            "exempts with a reason",
+        )
+
+    def test_the_one_exemption_states_a_premise_that_is_checked(self) -> None:
+        """`declaration_contract` is exempt from the digest arm, and only that.
+
+        The arm forbids any attribute whose name contains "digest", because a
+        Foundation profile digest here would be this package becoming the
+        second verifier. `declaration_contract` carries
+        `KernelCatalogueEvidence.artifact_digest` and the `_DIGEST` pattern
+        validating it, and neither is a profile digest: they identify the
+        KERNEL artifact a declaration was written against, which is the
+        immutable coordinate ADR 0013 § 3 requires and which this package owns.
+
+        A blanket exemption would leave the module unmonitored. So the premise
+        is enforced instead: the two digest-named attributes are enumerated,
+        the module is required to hold no others, and the rest of the boundary
+        -- no profile schema constant, no canonical serializer -- still applies
+        to it.
+        """
+        from kernel_adoption_control import declaration_contract
+
+        names = set(dir(declaration_contract))
+        for forbidden in ("APPLICATION_PROFILE_SCHEMA", "canonical_bytes"):
+            self.assertNotIn(forbidden, names)
+        digest_named = {name for name in names if "digest" in name.lower()}
+        self.assertEqual({"_DIGEST"}, digest_named)
+        self.assertIn(
+            "artifact_digest",
+            {field.name for field in dataclasses.fields(KernelCatalogueEvidence)},
+        )
 
     def test_no_finding_code_speaks_about_a_profile_document(self) -> None:
         for code in FindingCode:

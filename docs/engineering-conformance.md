@@ -87,7 +87,7 @@ plus one environment, so a derived loopback literal is expected there and an
 address check over rendered output would refuse the correct result. What both
 must hold is an immutable image digest.
 
-Six diagnostics, each with a planted-violation proof and a conforming control:
+Eight diagnostics, each with a planted-violation proof and a conforming control:
 
 - `deployment.surface.missing` — a declared path the repository does not
   contain. Checked before content: a surface naming nothing passes every other
@@ -103,7 +103,16 @@ Six diagnostics, each with a planted-violation proof and a conforming control:
   and a port range are not findings.
 - `deployment.credential.filename` — a credential-shaped basename, which
   ADR 0014 § 4 excludes alongside the value because a redaction sweep shaped
-  for values passes straight over it.
+  for values passes straight over it. Read as a VALUE, not as a mention: in a
+  TOML declaration a basename standing as a bare string, an array element, an
+  inline-table field or a key is refused, while the same characters in a `#`
+  comment are prose and stay silent — see ADR 0014's 2026-09-05 amendment for
+  the measured instance and for why a multiline string counts as a value.
+- `deployment.declaration.unparseable` — a TOML declaration the engine cannot
+  parse. It is a refusal and never a fall back to text scanning, because a
+  scanner that skips what it cannot read is a check that cannot refuse: an
+  unparseable file would evaporate the rule above while the report stayed
+  green.
 - `deployment.render-check.absent` — the declared workflow does not run the
   declared comparison. A render nobody compares is a deployment nobody
   approved.

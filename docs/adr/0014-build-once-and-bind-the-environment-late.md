@@ -213,3 +213,104 @@ The family carries planted-violation proofs: one synthetic repository per
 diagnostic code, each shown to go red, alongside a conforming repository shown
 to go green. A check demonstrated only against a clean tree passes for the
 wrong reason.
+
+## Amendment — 2026-09-05: a credential filename is a value, not a mention
+
+Michael Ayoade ruled on 2026-09-05, on the measured instance below, that the
+scanner is what changes:
+
+> fix the scanner. Do not create a new deployment candidate merely to remove
+> explanatory prose.
+
+The ruling is Michael's. This agent-authored section records it and does not
+make the agent an approver. The amendment becomes normative only when Michael
+merges this exact change through protected `main`. § 4's exclusion of a
+credential **filename** is unchanged in substance; what changes is where the
+exclusion is read to apply.
+
+### The distinction
+
+§ 4 excludes a credential filename because a basename is a **binding** —
+something a deployment tool reads and acts on. A binding is refused wherever it
+stands as a **value** in a declaration: a bare string, an element of an array,
+a field of an inline table, or a key.
+
+The same characters inside a `#` comment are a **mention**. The parser discards
+them, no tool ever reads them, and a comment recording where a secret is held
+and how it reaches the host is precisely what a reviewer should find in a
+descriptor. A rule that refuses the artefact for explaining itself teaches
+authors to delete the explanation, which costs the review the thing it needed
+and removes no binding at all.
+
+A **multiline string** is a value, not prose. The discriminator is whether the
+parsed document retains the bytes: a comment does not survive parsing, while a
+`"""…"""` block survives into a value something can read — a filename, a
+command line, a rendered fragment. This is stated because it is arguable and
+must be deliberate: reading a multiline string as prose would hand anyone a
+quoting style in which a real credential binding is invisible to the rule.
+
+The distinction is available only where the engine can parse the declaration's
+grammar. A TOML declaration is read this way. A non-TOML declaration — a
+compose file also names a deployment — keeps the plain-text sweep, which cannot
+tell a value from a mention. That region is stated here as unimproved rather
+than described as covered.
+
+### An unparseable declaration is refused, not skipped
+
+A declaration the engine cannot parse yields its own diagnostic,
+`deployment.declaration.unparseable`, and the credential rule does **not** fall
+back to scanning it as text. A scanner that silently skips what it cannot read
+is a check that cannot refuse: making a file unparseable, by accident or by
+intent, would evaporate the rule while the report stayed green. Refusing is
+also the precondition for the comment reader being trustworthy at all, since a
+lexer that separates comments from values is only meaningful over well-formed
+input.
+
+### The measured instance that forced it
+
+`dotmac_platform_control_plane` `origin/main`
+`522e2b0f702b529ea9a155daf2731bd4c1a95d57` ships a conformant
+`deploy/product.toml`. The family refused it at line 178:
+
+```
+deployment.credential.filename  deploy/product.toml:178
+.env names credential material; ADR 0014 § 4 excludes a credential FILENAME
+```
+
+Line 178 is prose inside a TOML comment, describing where the relay
+dispatcher's OpenBao material goes:
+
+> Its material is held in OpenBao at
+> `secret/dotmac/vendor-control-plane/production/relay-dispatcher` and reaches
+> the host only through the `.env` that `materialize_production_secrets.py`
+> renders.
+
+Measured through the engine's own function: one finding as shipped; zero when
+the token is reworded to `environment file`; zero on the near-miss
+`.environment`. It was that one token, in a comment.
+
+It could not be repaired on the product side. `deploy/product.toml` and
+`deploy/candidates/2026-09-04-activation-relay-service.toml` are the same blob,
+`b7ddf4bfc9141599e3650e4a2b5be722a69ec584`, and that repository's
+`tests/architecture/test_descriptor_promotion.py` enforces both the identity
+and candidate immutability by digest. The alternative to fixing the scanner was
+therefore to cut a new deployment candidate — an act of deployment authority —
+in order to delete explanatory prose.
+
+### Drift prevention for this amendment
+
+The proofs live beside the family they constrain, in
+`tests/test_standards_control.py`:
+
+- the real Platform descriptor, carried byte-for-byte as a fixture whose git
+  blob hash is asserted to be `b7ddf4bf…`, passes. A rule observed only
+  refusing is indistinguishable from one that refuses everything;
+- that same descriptor with `filename = ".env"` appended is refused, naming the
+  file and the line, so admitting the real artefact costs the rule nothing;
+- one proof per shape, each asserting named-or-silent explicitly: comment
+  (silent), a `#` inside a quoted value (named — a stripper that split on `#`
+  would truncate a real binding), array element, inline-table field, multiline
+  string (all named), and unparseable input (its own diagnostic);
+- the pre-change scanner, re-implemented verbatim and kept permanently, is
+  asserted to fire on that comment at line 178, so "the old rule could not tell
+  a value from a mention" is a check rather than a claim.

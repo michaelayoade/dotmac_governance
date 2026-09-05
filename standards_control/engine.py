@@ -5990,7 +5990,14 @@ def _environment_literals(body: str, relative: PurePosixPath) -> list[Diagnostic
     return findings
 
 
-def _credential_filenames(body: str, relative: PurePosixPath) -> list[Diagnostic]:
+def _credential_tokens(body: str, relative: PurePosixPath) -> list[Diagnostic]:
+    """Report every credential-shaped basename in text the caller says is VALUE.
+
+    Split out from the entry point below so the TOML path can hand this the
+    document with its comments removed and the plain-text path can hand it the
+    file. It performs no syntax judgement of its own: whatever reaches it is
+    already held to be a binding.
+    """
     findings: list[Diagnostic] = []
     for number, line in enumerate(body.splitlines(), start=1):
         for raw in re.findall(r"[A-Za-z0-9_.\-/]+", line):
@@ -6008,6 +6015,135 @@ def _credential_filenames(body: str, relative: PurePosixPath) -> list[Diagnostic
                     )
                 )
     return findings
+
+
+def _toml_without_comments(body: str) -> str:
+    """The document's VALUES, with every comment blanked and lines preserved.
+
+    A credential filename is refused because it is a BINDING — something the
+    deployment tool reads and acts on. The same characters inside a `#` comment
+    are a MENTION: the parser discards them, no tool ever reads them, and the
+    comment explaining where a secret lives is precisely what a reviewer wants
+    to find in a descriptor.
+
+    Splitting on `#` would be wrong in the direction that costs recall:
+    `path = "conf/#env/.env"` is a real binding whose value contains a `#`, and
+    a naive stripper truncates it and stops seeing the credential. So this
+    tracks TOML's four string forms and only treats `#` as a comment outside
+    all of them.
+
+    A MULTILINE string is deliberately kept, not blanked. The discriminator is
+    whether the parsed document retains the bytes: a comment is discarded by
+    the parser, while a `\"\"\"...\"\"\"` block survives into a value a tool
+    can read — a filename, a command line, a rendered fragment. Retained bytes
+    are a binding whatever quoting carried them.
+
+    Callers must have parsed the document first. This lexer is trustworthy only
+    over well-formed TOML, which is the other half of why unparseable input is
+    refused rather than swept as text.
+    """
+    out: list[str] = []
+    state: str | None = None
+    index = 0
+    length = len(body)
+    while index < length:
+        char = body[index]
+        if state is None:
+            if char == "#":
+                while index < length and body[index] != "\n":
+                    out.append(" ")
+                    index += 1
+                continue
+            if body.startswith('"""', index):
+                state = "ml-basic"
+                out.append('"""')
+                index += 3
+                continue
+            if body.startswith("'''", index):
+                state = "ml-literal"
+                out.append("'''")
+                index += 3
+                continue
+            if char == '"':
+                state = "basic"
+            elif char == "'":
+                state = "literal"
+            out.append(char)
+            index += 1
+            continue
+        if state == "basic":
+            if char == "\\" and index + 1 < length:
+                out.append(body[index : index + 2])
+                index += 2
+                continue
+            if char in {'"', "\n"}:
+                state = None
+            out.append(char)
+            index += 1
+            continue
+        if state == "literal":
+            if char in {"'", "\n"}:
+                state = None
+            out.append(char)
+            index += 1
+            continue
+        if state == "ml-basic":
+            if char == "\\" and index + 1 < length:
+                out.append(body[index : index + 2])
+                index += 2
+                continue
+            if body.startswith('"""', index):
+                state = None
+                out.append('"""')
+                index += 3
+                continue
+            out.append(char)
+            index += 1
+            continue
+        if body.startswith("'''", index):
+            state = None
+            out.append("'''")
+            index += 3
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _credential_filenames(body: str, relative: PurePosixPath) -> list[Diagnostic]:
+    """ADR 0014 § 4's credential-filename exclusion, over a declaration.
+
+    For a TOML declaration the rule is read semantically: a credential filename
+    standing as a VALUE — a bare string, an array element, an inline-table
+    field, or a key — is a binding and is refused, while the same characters in
+    a comment are prose and are silent. See ADR 0014's 2026-09-05 amendment.
+
+    Unparseable TOML is a REFUSAL, never a pass and never a fall back to text
+    scanning. A scanner that skips what it cannot parse is a check that cannot
+    refuse: making the file unparseable, by accident or on purpose, would
+    evaporate the rule while the report stayed green.
+    """
+    if relative.suffix != ".toml":
+        # A non-TOML declaration (a compose file names one too) keeps the
+        # plain-text sweep. Parsing YAML as TOML would refuse every one of
+        # them, and this change claims no semantic reading there.
+        return _credential_tokens(body, relative)
+    tomllib = importlib.import_module("tomllib")
+    try:
+        tomllib.loads(body)
+    except (ValueError, UnicodeError) as error:
+        return [
+            _finding(
+                DiagnosticCode.DEPLOYMENT_DECLARATION_UNPARSEABLE,
+                "this deployment declaration is not parseable TOML "
+                f"({type(error).__name__}), so its values cannot be told from "
+                "its comments; ADR 0014 § 4 is refused here rather than "
+                "skipped, because a check that cannot read a file must not "
+                "report it clean",
+                path=relative,
+            )
+        ]
+    return _credential_tokens(_toml_without_comments(body), relative)
 
 
 #: Filenames that ARE a deployment declaration in this fleet. Used only to

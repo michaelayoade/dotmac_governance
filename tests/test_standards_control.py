@@ -5,6 +5,7 @@ import base64
 import copy
 import hashlib
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -21,6 +22,9 @@ from standards_control.contracts import (
     GitRevision,
 )
 from standards_control.engine import (
+    _CREDENTIAL_FILENAMES,
+    _CREDENTIAL_SUFFIXES,
+    _credential_filenames,
     _fingerprint,
     _opens_an_smtp_connection,
     _sends_mail,
@@ -8511,3 +8515,191 @@ class TrustedRetirementHistoryTests(unittest.TestCase):
                 )
             finally:
                 fixture.close()
+
+
+# --- ADR 0014 § 4: a credential filename is a VALUE, not a MENTION -----------
+# `dotmac_platform_control_plane` `origin/main`
+# `522e2b0f702b529ea9a155daf2731bd4c1a95d57` shipped a conformant
+# `deploy/product.toml` that this family refused at line 178, where `.env`
+# appears inside a TOML COMMENT explaining that the dispatcher's OpenBao
+# material reaches the host through a rendered environment file. The comment is
+# the artefact explaining itself, which is what a reviewer wants to find there.
+#
+# It could not be repaired on the Platform side. `deploy/product.toml` and
+# `deploy/candidates/2026-09-04-activation-relay-service.toml` are the SAME
+# blob, `b7ddf4bfc9141599e3650e4a2b5be722a69ec584`, and that repository's
+# `tests/architecture/test_descriptor_promotion.py` enforces both the identity
+# and candidate immutability by digest. Deleting the prose would have been a
+# deployment-authority act performed to satisfy a scanner.
+
+#: The real descriptor, byte-for-byte. `test_the_fixture_is_the_real_immutable
+#: _blob` asserts its git blob hash, so "these are the actual bytes" is a check
+#: rather than a claim, and a paraphrase cannot silently replace it.
+PLATFORM_DESCRIPTOR_BLOB = "b7ddf4bfc9141599e3650e4a2b5be722a69ec584"
+PLATFORM_DESCRIPTOR_PATH = (
+    Path(__file__).parent / "fixtures" / "platform-control-plane-descriptor.toml"
+)
+#: The declared path the engine sees. The fixture is named differently on disk
+#: because a file called `product.toml` in THIS repository would make Governance
+#: itself report `deployment.surface.undeclared` — it ships no deployable.
+DECLARED_DESCRIPTOR = PurePosixPath("deploy/product.toml")
+
+
+def _credential_filenames_before_this_change(
+    body: str, relative: PurePosixPath
+) -> list[object]:
+    """The scanner as it stood at `a21afb03`, re-implemented verbatim.
+
+    Kept permanently as a negative control. Without it, "the old rule could not
+    tell a value from a mention" is a claim in a commit message; with it, the
+    claim is a check that fails if anyone ever concludes the old shape was fine.
+    """
+    findings: list[object] = []
+    for number, line in enumerate(body.splitlines(), start=1):
+        for raw in re.findall(r"[A-Za-z0-9_.\-/]+", line):
+            name = raw.rsplit("/", 1)[-1]
+            if name in _CREDENTIAL_FILENAMES or name.endswith(_CREDENTIAL_SUFFIXES):
+                findings.append((number, name))
+    return findings
+
+
+class CredentialFilenameIsAValueTests(unittest.TestCase):
+    """`_credential_filenames` reads TOML semantically.
+
+    Each proof states named-or-silent explicitly rather than counting, because
+    a case that is silent for the wrong reason and a case that is silent for
+    the right one look identical in a total.
+    """
+
+    def descriptor(self) -> str:
+        return PLATFORM_DESCRIPTOR_PATH.read_text(encoding="utf-8")
+
+    def codes(self, body: str, path: PurePosixPath = DECLARED_DESCRIPTOR) -> list[str]:
+        return [item.code.value for item in _credential_filenames(body, path)]
+
+    def assert_named(
+        self, body: str, path: PurePosixPath = DECLARED_DESCRIPTOR
+    ) -> None:
+        self.assertEqual(
+            ["deployment.credential.filename"], self.codes(body, path), body
+        )
+
+    def assert_silent(
+        self, body: str, path: PurePosixPath = DECLARED_DESCRIPTOR
+    ) -> None:
+        self.assertEqual([], self.codes(body, path), body)
+
+    # -- The admit case, and its planted counterpart ------------------------
+
+    def test_the_fixture_is_the_real_immutable_blob(self) -> None:
+        """The two proofs below are worth nothing over a paraphrase."""
+        digest = subprocess.run(
+            ["git", "hash-object", str(PLATFORM_DESCRIPTOR_PATH)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self.assertEqual(PLATFORM_DESCRIPTOR_BLOB, digest)
+
+    def test_the_real_platform_descriptor_passes(self) -> None:
+        """The admit case. A rule observed only refusing is indistinguishable
+        from one that refuses everything."""
+        self.assert_silent(self.descriptor())
+
+    def test_a_binding_planted_in_that_same_file_still_fails(self) -> None:
+        """Admitting the real file may not cost the rule its teeth: the same
+        descriptor with one genuine credential binding appended is refused, and
+        the diagnostic names the file and the line."""
+        planted = self.descriptor() + '\nfilename = ".env"\n'
+        findings = _credential_filenames(planted, DECLARED_DESCRIPTOR)
+        self.assertEqual(1, len(findings))
+        self.assertEqual("deployment.credential.filename", findings[0].code.value)
+        self.assertEqual(DECLARED_DESCRIPTOR, findings[0].path)
+        self.assertEqual(len(planted.splitlines()), findings[0].line)
+
+    def test_the_pre_change_scanner_fired_on_that_comment(self) -> None:
+        """The permanent negative control.
+
+        The scanner as it stood before this change reported exactly one
+        finding, at line 178, on the comment quoted above — the sensitivity
+        measurement that motivated the fix. If this ever goes quiet, the
+        superseded shape was not the one described and the amendment's premise
+        needs re-reading.
+        """
+        before = _credential_filenames_before_this_change(
+            self.descriptor(), DECLARED_DESCRIPTOR
+        )
+        self.assertEqual([(178, ".env")], before)
+
+    # -- The six shapes a naive fix gets wrong ------------------------------
+
+    def test_a_credential_filename_in_a_comment_is_silent(self) -> None:
+        """Prose. The parser discards it; no tool ever reads it."""
+        self.assert_silent(
+            'schema = "ProductDeploymentSpec.v1"\n'
+            "# material reaches the host through the .env that the renderer\n"
+            "# writes, so a host inventory missing it fails closed\n"
+        )
+
+    def test_a_hash_inside_a_quoted_value_does_not_hide_the_binding(self) -> None:
+        """The case that breaks a comment-stripper written as `line.split("#")`.
+
+        `#` here is a character in a real path, not a comment opener. A splitter
+        truncates the value and stops seeing the credential — a fix that loses
+        recall on the shape the rule exists for.
+        """
+        self.assert_named('path = "conf/#env/.env"\n')
+
+    def test_a_credential_filename_in_an_array_is_named(self) -> None:
+        """An array ELEMENT is a value like any other."""
+        self.assert_named('files = [".env"]\n')
+
+    def test_a_credential_filename_in_an_inline_table_is_named(self) -> None:
+        """So is an inline-table field, on one line with its braces."""
+        self.assert_named('secret = { filename = ".env" }\n')
+
+    def test_a_credential_filename_in_a_multiline_string_is_named(self) -> None:
+        """Multiline strings are VALUES, decided deliberately.
+
+        The discriminator is whether the parsed document RETAINS the bytes. A
+        comment is discarded by the parser and reaches no tool. A `\"\"\"...\"\"\"`
+        block survives into a value something can read — a filename, a command
+        line, a rendered fragment — so it is a binding whatever quoting carried
+        it. Treating it as prose would give anyone a way to write a real
+        credential binding the rule ignores, which is the same evaporation the
+        unparseable case below refuses.
+        """
+        self.assert_named('script = """\ncp secrets .env\n"""\n')
+
+    def test_unparseable_toml_is_a_refusal_not_a_pass(self) -> None:
+        """A scanner that skips what it cannot parse is a check that cannot
+        refuse: make the file unparseable, by accident or on purpose, and the
+        rule evaporates while the report stays green. It emits its own
+        diagnostic and does not fall back to text scanning."""
+        self.assertEqual(
+            ["deployment.declaration.unparseable"],
+            self.codes('a = [\nfilename = ".env"\n'),
+        )
+
+    # -- Recall the change may not cost --------------------------------------
+
+    def test_a_bare_value_binding_is_still_named(self) -> None:
+        """The shape the existing family already tested, unchanged."""
+        self.assert_named('tls_key = "server.key"\n')
+
+    def test_a_literal_string_binding_is_still_named(self) -> None:
+        """Single quotes are TOML's literal string, not a comment."""
+        self.assert_named("key_path = '/etc/ssh/id_rsa'\n")
+
+    def test_a_key_naming_credential_material_is_named(self) -> None:
+        """A KEY is a binding too — it names what the value configures."""
+        self.assert_named('".env" = "rendered"\n')
+
+    def test_a_non_toml_declaration_keeps_the_plain_text_sweep(self) -> None:
+        """Scope, stated as a test. This change claims no semantic reading of a
+        compose declaration: parsing YAML as TOML would refuse every one. The
+        mention-versus-value distinction is NOT available there, and that region
+        keeps the pre-change behaviour rather than being quietly widened."""
+        self.assert_named(
+            "# the .env that the renderer writes\n", PurePosixPath("docker-compose.yml")
+        )

@@ -139,6 +139,7 @@ class DiagnosticCode(str, Enum):
     DEPLOYMENT_IMAGE_NOT_PINNED = "deployment.image.not-pinned"
     DEPLOYMENT_ENVIRONMENT_LITERAL = "deployment.environment.literal"
     DEPLOYMENT_CREDENTIAL_FILENAME = "deployment.credential.filename"
+    DEPLOYMENT_DECLARATION_UNPARSEABLE = "deployment.declaration.unparseable"
     DEPLOYMENT_RENDER_CHECK_ABSENT = "deployment.render-check.absent"
     DEPLOYMENT_SURFACE_UNDECLARED = "deployment.surface.undeclared"
     DEPLOYMENT_ACKNOWLEDGEMENT_STALE = "deployment.acknowledgement.stale"

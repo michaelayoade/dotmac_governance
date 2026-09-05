@@ -85,12 +85,15 @@ pass. Building a second immutable-coordinate checker for Kernel adoption would
 be the duplicate-verifier defect arriving in the half of the system that already
 solved it.
 
-One divergence is recorded rather than repaired here. Governance's
-`NON_COORDINATES` alias list is `latest|current|head|main|master`; Foundation's
-`_MOVING_REFERENCE` is `latest|main|master|HEAD|stable|edge`. `stable` and
-`edge` are still REFUSED by Governance's 40-hex rule, so this is a difference in
-how precisely the message names the mistake, not a difference in what is
-admitted. Aligning the two lists belongs to ADR 0018's owner.
+One divergence was found and repaired. Governance's `NON_COORDINATES` alias
+list was `latest|current|head|main|master`; Foundation's `_MOVING_REFERENCE` is
+`latest|main|master|HEAD|stable|edge`. `stable` and `edge` were already REFUSED
+by Governance's 40-hex rule, so the gap was in how precisely the message named
+the mistake rather than in what the registry admitted — and a refusal that says
+only "not 40 hex" leaves the author guessing whether they wrote a branch, a tag
+or a typo. The two aliases are now named, `current` is kept, and the near-miss
+`mainline` is proved to be refused WITHOUT being called a branch alias, because
+widening a list is only safe if it did not quietly become a substring match.
 
 ### What is genuinely unowned
 
@@ -157,7 +160,32 @@ axis.
 
 Runtime-adoption evidence does not go into `.dotmac/standards-profile.json`.
 
-### 5. What this record does not decide
+### 5. The Foundation contract is bound by immutable source coordinate
+
+`kernel_adoption_control.foundation_binding` names the contract Governance
+defers to, and holds nothing else: a repository, a peeled 40-character commit,
+a path and a symbol. It parses nothing.
+
+The intended end state is a RELEASED-VERSION binding. It is unavailable, and
+the reason is measured rather than assumed — see § "What was measured". So the
+binding is made to `ee07c42261e791fde3035e7682a8e2fb77ba4603`, the commit the
+contract's bytes live at, and `released_version` is `None`.
+
+That `None` is a STATED absence. `ContractBinding.requires_release` reports it,
+so a reader sees that this binding is not yet by release without reading a
+docstring, and open decision 50 owns the resolution. When a Foundation release
+carries `application_profile.py`, exactly one literal changes: `released_version`
+becomes that version and `revision` becomes the peeled commit of its tag. The
+coordinate KIND is what changes later, not the shape of everything reading it.
+
+`ContractBinding` refuses a moving alias and a non-40-hex revision at
+construction, so an unusable binding cannot sit in the tree waiting to be
+noticed. `tools/check_receipts.py` remains the AUTHORITY for receipt
+coordinates; the two alias vocabularies are asserted equal by
+`test_the_alias_vocabulary_agrees_with_the_receipt_registry`, because two lists
+that must match and are never compared are two lists that will not match.
+
+### 6. What this record does not decide
 
 - **Where the product states its prohibited and transitional classifications.**
   Arms 4 and 6 above are implemented and proved against supplied inputs, and
@@ -170,8 +198,6 @@ Runtime-adoption evidence does not go into `.dotmac/standards-profile.json`.
   at all, and what oracle attests that release.** Until one exists the
   "require the released contract" half of the ruling is unexecutable, and this
   record does not pretend otherwise. This is open decision 50.
-- **Whether Governance's and Foundation's moving-reference alias lists are
-  aligned.** Recorded above; it belongs to ADR 0018's owner.
 - **Any Kernel-adoption gate.** Activation is a separate, deliberate act, as
   ADR 0039 § 12 requires of its own subject.
 

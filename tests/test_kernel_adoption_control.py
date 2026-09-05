@@ -24,7 +24,7 @@ source, and a pin arm handed too few sites to be capable of disagreeing.
 from __future__ import annotations
 
 import unittest
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from kernel_adoption_control import (
     AdoptionReport,
@@ -36,6 +36,12 @@ from kernel_adoption_control import (
     Severity,
     TransitionalSurface,
     evaluate,
+)
+from kernel_adoption_control.foundation_binding import (
+    _MOVING_ALIAS,
+    FOUNDATION_APPLICATION_PROFILE,
+    ContractBinding,
+    CoordinateError,
 )
 
 # ── the catalogue, read from the Kernel rather than hand-typed ───────────────
@@ -485,9 +491,14 @@ class BoundaryIsStructural(unittest.TestCase):
 
     def test_the_package_declares_no_profile_schema_and_no_digest(self) -> None:
         import kernel_adoption_control
-        from kernel_adoption_control import contracts, engine
+        from kernel_adoption_control import contracts, engine, foundation_binding
 
-        for module in (kernel_adoption_control, contracts, engine):
+        for module in (
+            kernel_adoption_control,
+            contracts,
+            engine,
+            foundation_binding,
+        ):
             names = set(dir(module))
             for forbidden in ("APPLICATION_PROFILE_SCHEMA", "canonical_bytes"):
                 self.assertNotIn(forbidden, names, module.__name__)
@@ -502,6 +513,124 @@ class BoundaryIsStructural(unittest.TestCase):
             )
             for foreign in ("profile", "schema", "digest", "canonical"):
                 self.assertNotIn(foreign, code.value, code.value)
+
+
+class FoundationBinding(unittest.TestCase):
+    """Governance names the Foundation contract by coordinate and parses nothing.
+
+    The intended end state is a released-version binding. It is unavailable:
+    measured 2026-09-05, `application_profile.py` is in none of the three
+    `dotmac-deployment-foundation` tags, and `main`'s `0.4.0a1` is recorded
+    `declared-unpublished`. So the binding is made to the immutable commit the
+    bytes live at, and the absence of a release is a stated fact rather than a
+    silent one.
+    """
+
+    def test_the_shipped_binding_is_an_immutable_coordinate(self) -> None:
+        binding = FOUNDATION_APPLICATION_PROFILE
+        self.assertRegex(binding.revision, r"^[0-9a-f]{40}$")
+        self.assertEqual("michaelayoade/dotmac_starter_mt", binding.repository)
+        self.assertIn("application_profile.py", binding.path.as_posix())
+
+    def test_the_missing_release_is_stated_rather_than_implied(self) -> None:
+        """A binding that is not yet by release must SAY so.
+
+        `released_version=None` read as "no opinion" would be the unstated
+        absence this fleet keeps paying for; `requires_release` makes it a
+        readable fact and open decision 50 owns the resolution.
+        """
+        self.assertTrue(FOUNDATION_APPLICATION_PROFILE.requires_release)
+        self.assertIsNone(FOUNDATION_APPLICATION_PROFILE.released_version)
+
+    def test_a_planted_moving_reference_is_refused_by_name(self) -> None:
+        for alias in ("main", "latest", "HEAD", "stable", "edge"):
+            with self.subTest(alias=alias):
+                with self.assertRaises(CoordinateError) as caught:
+                    ContractBinding(
+                        repository="michaelayoade/dotmac_starter_mt",
+                        revision=alias,
+                        path=PurePosixPath("a.py"),
+                        symbol="S",
+                    )
+                self.assertIn("branch name or floating alias", str(caught.exception))
+
+    def test_a_planted_non_hex_revision_is_refused(self) -> None:
+        for value in ("v0.2.0a2", "0.4.0a1", "deadbeef", "g" * 40):
+            with self.subTest(value=value):
+                with self.assertRaises(CoordinateError) as caught:
+                    ContractBinding(
+                        repository="michaelayoade/dotmac_starter_mt",
+                        revision=value,
+                        path=PurePosixPath("a.py"),
+                        symbol="S",
+                    )
+                self.assertIn("peeled 40-character commit", str(caught.exception))
+
+    def test_a_real_peeled_commit_is_accepted(self) -> None:
+        """The near-miss for the alias arm: `55750e10...` is the `v0.2.0a2` peel.
+
+        A refusal that fired on every value would be indistinguishable from one
+        that works, so the accepted case is asserted with a real coordinate
+        rather than a placeholder.
+        """
+        binding = ContractBinding(
+            repository="michaelayoade/dotmac_starter_mt",
+            revision="55750e104df3dd94b6f9f70bf8c8db53986394c7",
+            path=PurePosixPath("a.py"),
+            symbol="S",
+        )
+        self.assertFalse(binding.requires_release)  # released_version is None
+        self.assertIn("55750e10", binding.cite())
+
+    def test_a_blank_released_version_is_not_a_release(self) -> None:
+        with self.assertRaises(CoordinateError) as caught:
+            ContractBinding(
+                repository="r",
+                revision="55750e104df3dd94b6f9f70bf8c8db53986394c7",
+                path=PurePosixPath("a.py"),
+                symbol="S",
+                released_version="   ",
+            )
+        self.assertIn("reads as a release nobody named", str(caught.exception))
+
+    def test_the_alias_vocabulary_agrees_with_the_receipt_registry(self) -> None:
+        """Two lists that must match and are never compared will not match.
+
+        `tools/check_receipts.py` is the AUTHORITY for receipt coordinates
+        (ADR 0018 § 3, ADR 0019). This module expresses the same refusal for a
+        contract binding, so their agreement is asserted here instead of being
+        left to whoever edits one of them next.
+        """
+        import importlib.util
+
+        root = Path(__file__).resolve().parent.parent
+        spec = importlib.util.spec_from_file_location(
+            "_receipts_under_test", root / "tools" / "check_receipts.py"
+        )
+        assert spec is not None and spec.loader is not None
+        receipts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(receipts)
+
+        registry_alias = receipts.NON_COORDINATES[0][0]
+        for word in (
+            "latest",
+            "current",
+            "head",
+            "HEAD",
+            "main",
+            "master",
+            "stable",
+            "edge",
+            "mainline",
+            "stables",
+            "release",
+        ):
+            with self.subTest(word=word):
+                self.assertEqual(
+                    bool(registry_alias.fullmatch(word)),
+                    bool(_MOVING_ALIAS.fullmatch(word)),
+                    f"{word!r} is classified differently by the two lists",
+                )
 
 
 if __name__ == "__main__":

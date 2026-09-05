@@ -3,6 +3,11 @@
 This module is deliberately not part of ``standards_control.engine``.  It
 checks the bridge evidence for one immutable candidate artifact; it does not
 load, interpret, canonicalize, or authorize an ApplicationFoundationProfile.
+
+It also records how its evidence coordinate is ORDERED against the contract
+pointer in ``kernel_adoption_control.foundation_binding`` -- see
+``CoordinateRelationship`` for why an ordering rather than an equality, and for
+the part of that observation this repository can and cannot re-derive.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ import ast
 import hashlib
 import io
 import json
+import re
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -67,6 +73,17 @@ RECEIPT_FILE_SIZE: Final = 789
 RECEIPT_RETENTION_DAYS: Final = 90
 EVIDENCE_EXPIRES_AT: Final = "2026-12-03T21:13:17Z"
 ISSUE_URL: Final = "https://github.com/michaelayoade/dotmac_starter_mt/issues/642"
+
+
+#: The blob the bridge's evidence coordinate actually contains, and the blob
+#: Governance's contract pointer names. They differ, and that is the point: the
+#: two coordinates answer different questions and are expected to sit at
+#: different revisions of the same file.
+EVIDENCE_CONTRACT_BLOB: Final = "b940826665d3c513132774c07c6e06f415f011e7"
+POINTER_REVISION: Final = "ee07c42261e791fde3035e7682a8e2fb77ba4603"
+POINTER_CONTRACT_BLOB: Final = "9ee491b352543f494621d2947751e227a962492c"
+POINTER_REPOSITORY: Final = "michaelayoade/dotmac_starter_mt"
+_PEELED_COMMIT: Final = re.compile(r"^[0-9a-f]{40}$")
 
 
 class FoundationBootstrapError(ValueError):
@@ -516,11 +533,169 @@ def verify_materialized_evidence(
     )
 
 
+@dataclass(frozen=True)
+class CoordinateRelationship:
+    """How this bridge's evidence coordinate relates to Governance's pointer.
+
+    Governance holds TWO Foundation coordinates and, until this record existed,
+    related them nowhere. They answer different questions and both are correct:
+
+    - `standards_control.foundation_bootstrap.SOURCE_COMMIT` binds what the
+      immutable candidate artifact ACTUALLY CONTAINS. It may never move,
+      because moving it would describe a different artifact than the one whose
+      digests are pinned here.
+    - `kernel_adoption_control.foundation_binding.FOUNDATION_APPLICATION_PROFILE`
+      points at the contract AS IT CURRENTLY STANDS, and is expected to move —
+      to the peeled tag of a Foundation release, per open decision 50.
+
+    So the relationship between them is an ORDERING, not an equality: the
+    evidence revision is an ancestor of the pointer revision on one mainline.
+    Without that stated, the two could drift onto different branches — naming
+    two unrelated files with the same path — and nothing would notice.
+
+    ## What this record can and cannot check
+
+    Ancestry is a fact about `dotmac_starter_mt`'s history, which this
+    repository does not have, so it is NOT re-derived here and this module runs
+    no Git. Under ADR 0013 § 4 it is recorded as an as-of observation carrying
+    its coordinates, its instrument and a named refresh owner.
+
+    What IS decidable locally, and is checked, is that the observation still
+    describes the two live coordinates. If either module's coordinate changes
+    without this record being re-measured, `coordinate_disagreements` names the
+    field that moved. That converts a silent divergence into a loud one, which
+    is the whole property the record exists to provide. It does not, and must
+    not, claim the ancestry was verified today.
+    """
+
+    evidence_repository: str
+    pointer_repository: str
+    contract_path: str
+    evidence_revision: str
+    evidence_blob: str
+    pointer_revision: str
+    pointer_blob: str
+    relation: str
+    measured_on: str
+    instrument: str
+    refresh_owner: str
+
+    def __post_init__(self) -> None:
+        if _repository_slug(self.evidence_repository) != _repository_slug(
+            self.pointer_repository
+        ):
+            raise FoundationBootstrapError(
+                "the two coordinates name different repositories; an ordering "
+                "between revisions of different repositories is not a fact"
+            )
+        for field, value in (
+            ("evidence_revision", self.evidence_revision),
+            ("evidence_blob", self.evidence_blob),
+            ("pointer_revision", self.pointer_revision),
+            ("pointer_blob", self.pointer_blob),
+        ):
+            if not _PEELED_COMMIT.fullmatch(value):
+                raise FoundationBootstrapError(
+                    f"{field} is {value!r}, which is not a peeled 40-character "
+                    "lowercase object name. ADR 0013 § 3 refuses a reference "
+                    "that can move: a branch name or alias identifies no "
+                    "particular bytes, so an ordering over it is not a claim"
+                )
+        if not self.contract_path.strip() or not self.refresh_owner.strip():
+            raise FoundationBootstrapError(
+                "a coordinate relationship needs a contract path and a named "
+                "refresh owner; an unowned observation cannot be re-measured"
+            )
+
+
+def _repository_slug(value: str) -> str:
+    """Reduce the two checked-in spellings of one repository to one slug.
+
+    The bridge records `https://github.com/michaelayoade/dotmac_starter_mt` and
+    the contract pointer records `michaelayoade/dotmac_starter_mt`. Both are
+    correct in their own file. A comparator that compared the raw strings would
+    report a divergence that does not exist, so the normalization is declared
+    here rather than left to whoever reads the two constants next.
+    """
+    text = value.strip().rstrip("/")
+    for prefix in ("https://github.com/", "http://github.com/", "git@github.com:"):
+        text = text.removeprefix(prefix)
+    return text.removesuffix(".git").lower()
+
+
+#: The ordering between Governance's two Foundation coordinates, as observed.
+#:
+#: Re-measure with, from a `dotmac_starter_mt` checkout:
+#:
+#:     git merge-base --is-ancestor <evidence_revision> <pointer_revision>
+#:
+#: Both revisions were on that repository's `origin/main` when this was taken.
+FOUNDATION_COORDINATE_RELATIONSHIP: Final = CoordinateRelationship(
+    evidence_repository=REPOSITORY,
+    pointer_repository=POINTER_REPOSITORY,
+    contract_path=CONTRACT_SOURCE_PATH,
+    evidence_revision=SOURCE_COMMIT,
+    evidence_blob=EVIDENCE_CONTRACT_BLOB,
+    pointer_revision=POINTER_REVISION,
+    pointer_blob=POINTER_CONTRACT_BLOB,
+    relation="evidence_revision is an ancestor of pointer_revision",
+    measured_on="2026-09-05",
+    instrument=(
+        "git merge-base --is-ancestor in a dotmac_starter_mt checkout; both "
+        "revisions were reachable from that repository's origin/main"
+    ),
+    refresh_owner="Michael Ayoade",
+)
+
+
+def coordinate_disagreements(
+    *,
+    pointer_repository: str,
+    pointer_revision: str,
+    pointer_contract_path: str,
+    relationship: CoordinateRelationship = FOUNDATION_COORDINATE_RELATIONSHIP,
+) -> tuple[str, ...]:
+    """Name the coordinate fields the recorded observation no longer describes.
+
+    Report-only: it returns names, it raises nothing, and it authorizes
+    nothing. The pointer's coordinates are PASSED IN rather than imported, so
+    this module keeps its promise to depend on nothing and the caller supplies
+    the real `ContractBinding`.
+
+    Deliberately narrow. It compares repository, contract path and revision —
+    the three things an ordering is about. It does not compare the symbol each
+    side names (`ApplicationFoundationProfile` here, `APPLICATION_PROFILE_SCHEMA`
+    in the pointer), because those differ on purpose and always have; a
+    comparator that flagged them would report a defect that is not one.
+    """
+    disagreements: list[str] = []
+    if _repository_slug(pointer_repository) != _repository_slug(
+        relationship.pointer_repository
+    ):
+        disagreements.append("pointer_repository")
+    if _repository_slug(REPOSITORY) != _repository_slug(
+        relationship.evidence_repository
+    ):
+        disagreements.append("evidence_repository")
+    if pointer_contract_path != relationship.contract_path:
+        disagreements.append("pointer_contract_path")
+    if CONTRACT_SOURCE_PATH != relationship.contract_path:
+        disagreements.append("evidence_contract_path")
+    if pointer_revision != relationship.pointer_revision:
+        disagreements.append("pointer_revision")
+    if SOURCE_COMMIT != relationship.evidence_revision:
+        disagreements.append("evidence_revision")
+    return tuple(disagreements)
+
+
 parse_foundation_bootstrap = load_foundation_bootstrap
 
 __all__ = (
+    "FOUNDATION_COORDINATE_RELATIONSHIP",
+    "CoordinateRelationship",
     "FoundationBootstrapError",
     "FoundationContractBootstrap",
+    "coordinate_disagreements",
     "load_foundation_bootstrap",
     "load_foundation_bootstrap_json",
     "parse_foundation_bootstrap",

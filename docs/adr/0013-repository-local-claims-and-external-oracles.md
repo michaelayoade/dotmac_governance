@@ -283,3 +283,85 @@ reading only `pyproject.toml`, and its cutover documents now carry release-run
 ids, peeled tag commits and exact `EXTRACTION.toml` commit-and-path citations.
 That is the § 2 vocabulary in use, and it is the evidence this record is
 accepted on.
+
+## Amendment — 2026-09-05: retirement evidence oracle kinds
+
+Michael Ayoade approved the issue 33 design on 2026-09-05. His exact
+instruction was:
+
+> I approve the issue #33 design; commit and open the PR
+
+The approval is Michael's. This agent-authored section records it and does not
+make the agent an approver. The amendment becomes normative only when Michael
+merges this exact change through protected `main`. It is the typed-design
+prerequisite for [ADR 0017](0017-module-migrations-retire-compatibility-state.md)
+and Governance issue 33. The existing four oracle kinds remain unchanged.
+
+The existing `deployment_run` kind proves that a named target ran an exact
+artefact. It does not prove which objects a migration database contained, what
+a live catalogue reported while an exclusive fence was held, or whether an
+unexpected dependency caused a teardown transaction to roll back. Two narrow
+oracle kinds are therefore added.
+
+### `product_revision_check` — a product revision produced controlled evidence
+
+This kind describes a repository-built migration database or another
+revision-bound product check. It never describes a deployed target.
+
+| Field | Meaning |
+| --- | --- |
+| `repository` | Canonical product repository |
+| `commit` | Exact 40-character product commit evaluated |
+| `governance_revision` | Exact 40-character Governance revision whose evaluator produced the record |
+| `run_id` | Positive workflow-run identifier |
+| `run_attempt` | Positive attempt number, so a rerun is not conflated with its predecessor |
+| `artifact` | Name, SHA-256 digest, and repository-relative record path of the produced evidence |
+| `collector` | Typed local source reference naming the product-owned evidence adapter |
+| `observed_at` | UTC timestamp carried by the produced record |
+
+The kind identifies the producer and immutable record. It does not turn a CI
+database into evidence about an already deployed database.
+
+### `target_retirement_observation` — a named target produced bounded evidence
+
+This kind describes one phase of a compatibility-state retirement observation
+against a target explicitly named by a human.
+
+| Field | Meaning |
+| --- | --- |
+| `repository` | Canonical product repository |
+| `commit` | Exact 40-character product commit intended to run after the phase |
+| `governance_revision` | Exact 40-character Governance revision whose evaluator produced the record |
+| `run_id` | Positive controlled-run identifier |
+| `run_attempt` | Positive attempt number |
+| `image_digest` | Immutable image digest, never a tag |
+| `target` | Explicit human-provided host or environment name |
+| `phase` | Exactly `pre_drop`, `atomic_teardown`, or `post_upgrade` |
+| `transaction_outcome` | `null` outside `atomic_teardown`; otherwise exactly `committed`, `refused`, or `rolled_back` |
+| `refusal_stage` | `null` unless atomic teardown refused or rolled back; then exactly `fence_acquisition`, `inventory_validation`, or `teardown` |
+| `observation_id` | Stable identifier for this observation |
+| `preceding_observation_id` | Prior phase identifier, or `null` only for `pre_drop` |
+| `deletion_migration` | Typed source reference to the reviewed product or assembly migration |
+| `artifact` | Name, SHA-256 digest, and repository-relative record path of the evidence |
+| `observed_at` | UTC timestamp |
+| `refresh_owner` | Accountable owner for re-observation |
+| `refresh_before` | Exactly `cutover_authorization`, `fenced_teardown`, or `completion_claim` |
+
+The phase and link are load-bearing. A pre-drop observation cannot be relabelled
+or reused as atomic-teardown or post-upgrade evidence, and a chain that changes
+target, product revision, image digest, Governance revision, or deletion
+migration is not one retirement sequence. A post-upgrade observation may follow
+only an atomic observation whose transaction outcome is `committed`. A refused
+or rolled-back atomic attempt is evidence of that attempt, never a completed
+teardown.
+
+Both kinds are external controlled records. A repository-local checker may
+validate their closed shape, immutable coordinates, binding, phase order, and
+internal consistency. It may not authenticate an artefact by trusting the
+artefact's self-declared digest, assert that the cited run occurred, infer a
+target, or claim that it directly observed a database. Retrieval,
+authentication, target access, and destructive authorization remain with the
+named producing and authorization systems. Open decision 18 remains open.
+Open decision 17 also remains open for a generic standards-profile
+representation of the original four oracle kinds; this amendment types only
+the two records required by the retirement observation bundle.

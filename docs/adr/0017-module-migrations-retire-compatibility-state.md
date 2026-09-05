@@ -1,9 +1,10 @@
 # 0017. Module migrations retire compatibility state
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-29
+- Effective: 2026-09-05
 - Owner: Michael Ayoade
-- Approver: Michael Ayoade (intended while Proposed)
+- Approver: Michael Ayoade
 - Scope: Governance-enrolled Dotmac repositories that migrate product behavior into installable modules
 - Classification: Internal
 
@@ -249,3 +250,35 @@ Promotion from Proposed requires the named human's approval to be recorded in
 GitHub and the approved change to merge to canonical `main`. Only then may an
 implementation change cite this ADR as normative, and only an implemented,
 sabotage-tested control may claim automated conformance.
+
+## Acceptance — 2026-09-05
+
+Michael Ayoade approved this record on 2026-09-05 after the completion report
+for Governance issue 3 stated that issue 33 remained blocked because ADR 0017
+still required explicit approval. His response was:
+
+> i approve
+
+The approval is Michael's. This agent-authored section records it; it does not
+make the agent an approver. Under ADR 0001, the promotion becomes effective only
+when Michael merges this exact acceptance change through protected `main`.
+
+Acceptance puts the module-migration retirement rules in force for the stated
+scope. It changes no deployed system, authorizes no destructive deletion, and
+does not claim that the Governance engine observes a product or production
+database. The historical sentences above describing the record as Proposed
+remain as the proposal record; for current status they are superseded by this
+dated acceptance section and the controlled metadata.
+
+Acceptance also creates no automated conformance result. Issue 33 remains the
+implementation owner and its gates remain distinct:
+
+1. this acceptance change merges to canonical `main`;
+2. a reviewed, versioned profile design names the repository-local declarations
+   and the external-evidence boundary;
+3. the parser, stable diagnostics, and known-bad controls are implemented;
+4. exact hosted-CI evidence exists for the merged implementation; and
+5. one enrolled product adopts the control without copying Governance policy.
+
+Until those gates pass, ADR 0017 is normative review discipline, not an
+automated Governance conformance claim.

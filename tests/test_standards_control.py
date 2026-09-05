@@ -6874,25 +6874,25 @@ class RetirementEvaluationFixture:
         observation_path = None
         if bundle is not None:
             bundle["product_revision"] = observed_revision
-            bundle_observation = cast(
-                "dict[str, object]", cast("list[object]", bundle["observations"])[0]
-            )
-            product = bundle_observation.get("migration_database")
-            if isinstance(product, dict):
-                product["repository"] = bundle["repository"]
-                product["commit"] = observed_revision
-                product["governance_revision"] = "b" * 40
-                if product_mutation is not None:
-                    cast("object", product_mutation)(product)
-            for target in cast(
-                "list[object]", bundle_observation.get("deployed_target", [])
-            ):
-                if isinstance(target, dict):
-                    target["repository"] = bundle["repository"]
-                    target["commit"] = observed_revision
-                    target["governance_revision"] = "b" * 40
-                    if target_mutation is not None:
-                        cast("object", target_mutation)(target)
+            for raw_observation in cast("list[object]", bundle["observations"]):
+                if not isinstance(raw_observation, dict):
+                    continue
+                product = raw_observation.get("migration_database")
+                if isinstance(product, dict):
+                    product["repository"] = bundle["repository"]
+                    product["commit"] = observed_revision
+                    product["governance_revision"] = "b" * 40
+                    if product_mutation is not None:
+                        cast("object", product_mutation)(product)
+                for target in cast(
+                    "list[object]", raw_observation.get("deployed_target", [])
+                ):
+                    if isinstance(target, dict):
+                        target["repository"] = bundle["repository"]
+                        target["commit"] = observed_revision
+                        target["governance_revision"] = "b" * 40
+                        if target_mutation is not None:
+                            cast("object", target_mutation)(target)
             observation_path = self.root / "observation.json"
             observation_path.write_text(json.dumps(bundle), encoding="utf-8")
         return verify_repository(
@@ -8094,6 +8094,7 @@ class TrustedRetirementHistoryTests(unittest.TestCase):
                         fixture.legacy_profile["authorities"]
                     )
                     retirement["source_state"] = "draining"
+                    retirement["requested_gate"] = "none"
                 else:
                     retirement["source_state"] = "draining"
                 report = fixture.evaluate_current(current)

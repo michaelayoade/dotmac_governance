@@ -4,24 +4,57 @@
 checked-in Governance profile is `required`; a green run is conformance
 evidence for the evaluated revision, not a certification or compliance claim.
 
-Each strict schema-version-10 profile names repository URL/default branch, its
+Each strict schema-version-11 profile names repository URL/default branch, its
 governance source, protected resources with one owner/writer boundary, drift
 tests, exact Python contract surfaces, its module-declared vocabularies, the
 kernel testing-kit import boundary, its external-connector surface, and its
 deployment-artefact surfaces. The typed gate rejects `Any`, missing or bare
 public annotations, unannotated record fields, and mutable boundary records.
-Schema version 10 has no waiver mechanism and no exemption mechanism. Schema
+Schema version 11 has no waiver mechanism and no exemption mechanism. Schema
 versions 7 and 8 are withdrawn and never accepted: both fail to load rather
 than upgrading.
 
-Schema version 9 is **superseded rather than withdrawn**, and the loader
-distinguishes them. Versions 7 and 8 refused because a number measured under
-the old rule would have been wrong under the new one. Nothing measured changes
-at 10: ADR 0014 adds a surface a version-9 profile simply does not declare, so
-the error names the single mechanical edit instead of leaving a reader to
-decode a bare version mismatch. It still refuses to load, because defaulting
-the new key on a product's behalf would enrol every repository in a standard
-nobody declared.
+Schema versions 9 and 10 are **superseded rather than withdrawn**, and the
+loader distinguishes them. Versions 7 and 8 refused because a number measured
+under the old rule would have been wrong under the new one. Nothing measured
+changed at 10: ADR 0014 added a surface a version-9 profile simply did not
+declare. Version 11 likewise does not reinterpret a version-10 measurement:
+every v11 profile explicitly declares `compatibility_retirements` and
+`retirement_history`. An empty list enrolls no retirement slice; it is not
+evidence that a product has no compatibility state. Each superseded-version
+error names the required mechanical edit, and the loader still refuses the old
+profile because defaulting a new key would enroll a repository in a standard
+it never declared.
+
+## Compatibility-state retirement (ADR 0017, ACCEPTED)
+
+The v11 contract describes a named product-local retirement slice, its current
+authority binding, exact static and catalogue baselines, deletion lineage and
+the four mandatory external exit dispositions. Governance compares declarations
+and supplied product-produced evidence; it does not collect a database
+catalogue, authenticate a workflow record, observe a target, or authorize a
+drop. A non-empty enrollment therefore requires a separately generated
+`RetirementObservationBundle.v1`; absence is a failure rather than an inferred
+zero. Reports expose qualified repository, product-revision and target evidence
+states and enrolled identifiers. They never emit `deletion_authorized`,
+`migration_complete`, or an unqualified completion verdict.
+
+A declared deletion reference must resolve to a Python `upgrade` entry point in
+a repository-relative `migrations` or `versions` path, and its declared owner
+must equal the relation lineage. The product-produced
+`deletion_lineage_owned` check supplies the product-specific lineage evidence;
+Governance validates that closed claim but does not authenticate its artifact.
+Artifact authentication remains ADR 0013 open decision 18.
+
+The JSON schemas constrain UTC timestamps lexically and annotate them with
+`date-time`; Draft 2020-12 consumers may treat that format as annotation. The
+Governance parser is therefore the semantic acceptance authority and rejects
+impossible calendar dates. A producer or consumer must not treat schema-only
+validation as retirement-evidence acceptance.
+
+The first product adoption remains a separate change. Synthetic comparison
+fixtures prove parser and comparator sensitivity only; they do not prove a
+PostgreSQL fence, transaction rollback, or `DROP ... RESTRICT` behavior.
 
 ## Deployment artefact surface (ADR 0014, PROPOSED)
 

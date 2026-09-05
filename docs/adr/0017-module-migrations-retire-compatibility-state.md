@@ -719,6 +719,18 @@ unexpected dependency that reaches and is refused by fenced `DROP ... RESTRICT`.
 Each refusal proves no partial grant, function, trigger, or relation removal. A
 Governance-only fixture cannot claim that database behavior.
 
+### Serialization clarification — 2026-09-05
+
+For the evidence records referenced above, `Artifact` is exactly `{name,
+sha256, path}`. Product evidence has exactly the closed fields recorded in ADR
+0013's contemporaneous clarification; target evidence likewise has exactly the
+closed target-retirement-observation fields there. Transaction attempts are
+`{scenario, transaction_outcome, refusal_stage, catalogue_coverage,
+catalogue_edges, checks}`; their three scenarios map respectively to fence
+acquisition, inventory validation, and teardown refusal. UTC timestamps end in
+`Z`, increase along phase links, and all SHA values are lower-case full digests.
+This is a mechanical serialization clarification of the accepted design.
+
 ### 5. First adoption and completion boundary
 
 The first enrollment candidate is `dotmac_sub`, because the programme already

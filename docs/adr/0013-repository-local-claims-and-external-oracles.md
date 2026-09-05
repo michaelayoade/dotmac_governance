@@ -365,3 +365,17 @@ named producing and authorization systems. Open decision 18 remains open.
 Open decision 17 also remains open for a generic standards-profile
 representation of the original four oracle kinds; this amendment types only
 the two records required by the retirement observation bundle.
+
+### Serialization clarification — 2026-09-05
+
+The approved retirement design uses closed records. `Artifact` is exactly
+`{name, sha256, path}`. `ProductRevisionEvidence` is exactly
+`{kind, repository, commit, governance_revision, run_id, run_attempt, artifact,
+collector, observed_at, catalogue_coverage, catalogue_edges, checks,
+transaction_attempts}` with `kind: product_revision_check`. Target evidence is
+exactly `{kind, repository, commit, governance_revision, run_id, run_attempt,
+image_digest, target, phase, transaction_outcome, refusal_stage, observation_id,
+preceding_observation_id, deletion_migration, artifact, observed_at,
+refresh_owner, refresh_before, catalogue_coverage, catalogue_edges, checks}`
+with `kind: target_retirement_observation`. This completes serialization only;
+it does not grant collection, authentication, or deletion authority.

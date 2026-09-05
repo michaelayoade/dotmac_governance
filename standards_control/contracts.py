@@ -142,6 +142,25 @@ class DiagnosticCode(str, Enum):
     DEPLOYMENT_RENDER_CHECK_ABSENT = "deployment.render-check.absent"
     DEPLOYMENT_SURFACE_UNDECLARED = "deployment.surface.undeclared"
     DEPLOYMENT_ACKNOWLEDGEMENT_STALE = "deployment.acknowledgement.stale"
+    RETIREMENT_SURFACE_DUPLICATE = "retirement.surface.duplicate"
+    RETIREMENT_SOURCE_UNMEASURED = "retirement.source.unmeasured"
+    RETIREMENT_STATIC_ADDED = "retirement.static.added"
+    RETIREMENT_STATIC_STALE = "retirement.static.stale"
+    RETIREMENT_STATIC_CHANGED = "retirement.static.changed"
+    RETIREMENT_CATALOGUE_ADDED = "retirement.catalogue.added"
+    RETIREMENT_CATALOGUE_STALE = "retirement.catalogue.stale"
+    RETIREMENT_CATALOGUE_CHANGED = "retirement.catalogue.changed"
+    RETIREMENT_AUTHORITY_CONFLICT = "retirement.authority.conflict"
+    RETIREMENT_HISTORY_CHANGED = "retirement.history.changed"
+    RETIREMENT_WRITER_FORBIDDEN = "retirement.writer.forbidden"
+    RETIREMENT_PROJECTION_INVALID = "retirement.projection.invalid"
+    RETIREMENT_DELETION_LINEAGE_MISMATCH = "retirement.deletion.lineage-mismatch"
+    RETIREMENT_GATE_NONZERO = "retirement.gate.nonzero"
+    RETIREMENT_EVIDENCE_MISSING = "retirement.evidence.missing"
+    RETIREMENT_EVIDENCE_BINDING_MISMATCH = "retirement.evidence.binding-mismatch"
+    RETIREMENT_EVIDENCE_UNKNOWN = "retirement.evidence.unknown"
+    RETIREMENT_TEARDOWN_INVENTORY_MISMATCH = "retirement.teardown.inventory-mismatch"
+    RETIREMENT_COMPLETION_UNSUPPORTED = "retirement.completion.unsupported"
 
 
 @dataclass(frozen=True)
@@ -389,6 +408,82 @@ class StandardsProfile:
     testing_kit_boundary: TestingKitBoundary
     external_connector_surface: ExternalConnectorSurface
     deployment_artefact_surfaces: tuple[DeploymentArtefactSurface, ...]
+    compatibility_retirements: tuple[CompatibilityRetirement, ...]
+    retirement_history: tuple[RetirementHistory, ...]
+
+
+@dataclass(frozen=True)
+class SourceReference:
+    kind: str
+    path: PurePosixPath
+    member: str
+
+
+@dataclass(frozen=True)
+class StaticRetirementEdge:
+    kind: str
+    path: PurePosixPath
+    symbol: PythonSymbol
+    target: str
+    fingerprint: str
+    consumer_id: str | None
+
+    @property
+    def identity(self) -> tuple[str, PurePosixPath, PythonSymbol, str, str | None]:
+        return (self.kind, self.path, self.symbol, self.target, self.consumer_id)
+
+
+@dataclass(frozen=True)
+class CatalogueRetirementEdge:
+    kind: str
+    identity: str
+    definition_sha256: str
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.kind, self.identity)
+
+
+@dataclass(frozen=True)
+class CompatibilityRetirement:
+    retirement_id: str
+    relation_kind: str
+    relation_identity: str
+    owner_lineage: str
+    authority_state: str
+    current_authority_id: AuthorityId
+    current_writer: SourceReference
+    target_module_authority_id: AuthorityId | None
+    displaced_authority_id: AuthorityId | None
+    accountable_owner: str
+    disposition_kind: str
+    disposition_authority_id: AuthorityId | None
+    projection_kind: str | None
+    projection_writer: SourceReference | None
+    source_state: str
+    requested_gate: str
+    consumers: tuple[str, ...]
+    consumer_blocked_by: tuple[SourceReference, ...]
+    static_baseline: tuple[StaticRetirementEdge, ...]
+    catalogue_baseline: tuple[CatalogueRetirementEdge, ...]
+    collector: SourceReference
+    collector_workflow_path: PurePosixPath
+    collector_producer_id: str
+    normalization_version: str
+    deletion_migration: SourceReference | None
+    deletion_owner_lineage: str | None
+    teardown_set: tuple[CatalogueRetirementEdge, ...]
+    fence_relations: tuple[str, ...]
+    exit_conditions: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class RetirementHistory:
+    retirement_id: str
+    relation_identity: str
+    displaced_authority: AuthorityId
+    current_authority_id: AuthorityId
+    closure_kind: str
 
 
 @dataclass(frozen=True)
@@ -417,6 +512,10 @@ class ConformanceReport:
     profile_id: ProfileId | None
     enforcement_mode: EnforcementMode | None
     diagnostics: tuple[Diagnostic, ...]
+    enrolled_retirement_ids: tuple[str, ...] = ()
+    product_revision_evidence: str = "not_supplied"
+    target_evidence: str = "not_supplied"
+    repository_contracts: str | None = None
 
     @property
     def conforms(self) -> bool:
@@ -432,4 +531,12 @@ class ConformanceReport:
             ),
             "conforms": self.conforms,
             "diagnostics": [item.to_dict() for item in self.diagnostics],
+            "repository_contracts": self.repository_contracts
+            if self.repository_contracts is not None
+            else "pass"
+            if self.conforms
+            else "fail",
+            "product_revision_evidence": self.product_revision_evidence,
+            "target_evidence": self.target_evidence,
+            "enrolled_retirement_ids": list(self.enrolled_retirement_ids),
         }

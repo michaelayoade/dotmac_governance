@@ -14,11 +14,13 @@
     "module_declared_vocabularies",
     "testing_kit_boundary",
     "external_connector_surface",
-    "deployment_artefact_surfaces"
+    "deployment_artefact_surfaces",
+    "compatibility_retirements",
+    "retirement_history"
   ],
   "properties": {
     "schema_version": {
-      "const": 10
+      "const": 11
     },
     "profile_id": {
       "$ref": "#/$defs/slug"
@@ -69,9 +71,127 @@
       "items": {
         "$ref": "#/$defs/deployment_artefact_surface"
       }
+    },
+    "compatibility_retirements": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/compatibility_retirement" }
+    },
+    "retirement_history": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/retirement_history" }
     }
   },
   "$defs": {
+    "compatibility_retirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retirement_id", "authority_transition", "accountable_owner", "relation", "disposition", "source_state", "requested_gate", "consumers", "static_baseline", "catalogue_baseline", "collector", "deletion", "external_exit_conditions"],
+      "properties": {
+        "retirement_id": {"$ref": "#/$defs/slug"},
+        "authority_transition": {"$ref": "#/$defs/authority_transition"},
+        "accountable_owner": {"type": "string", "minLength": 1},
+        "relation": {"$ref": "#/$defs/relation"},
+        "disposition": {"$ref": "#/$defs/disposition"},
+        "source_state": {"type": "string", "enum": ["draining", "drained"]},
+        "requested_gate": {"type": "string", "enum": ["none", "pre_drop", "post_upgrade"]},
+        "consumers": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/consumer"}},
+        "static_baseline": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/static_edge"}},
+        "catalogue_baseline": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/catalogue_edge"}},
+        "collector": {"$ref": "#/$defs/collector"},
+        "deletion": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/deletion"}]},
+        "external_exit_conditions": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"$ref": "#/$defs/external_exit_condition"}}
+      }
+    },
+    "retirement_history": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retirement_id", "relation_identity", "displaced_authority", "current_authority_id", "activation_record", "closure_record"],
+      "properties": {
+        "retirement_id": {"$ref": "#/$defs/slug"},
+        "relation_identity": {"type": "string", "minLength": 1},
+        "displaced_authority": {"$ref": "#/$defs/displaced_authority"},
+        "current_authority_id": {"$ref": "#/$defs/slug"},
+        "activation_record": {"$ref": "#/$defs/activation_record"},
+        "closure_record": {"$ref": "#/$defs/closure_record"}
+      }
+    },
+    "source_ref": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "path", "symbol"], "properties": {"kind": {"const": "python_symbol"}, "path": {"$ref": "#/$defs/path"}, "symbol": {"$ref": "#/$defs/python_symbol"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "path", "anchor"], "properties": {"kind": {"const": "document_section"}, "path": {"$ref": "#/$defs/path"}, "anchor": {"type": "string", "minLength": 1}}}
+      ]
+    },
+    "python_symbol": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"},
+    "relation": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "identity", "owner_lineage"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["table", "view", "materialized_view", "cache", "read_model"]},
+        "identity": {"type": "string", "minLength": 1}, "owner_lineage": {"$ref": "#/$defs/slug"}
+      }
+    },
+    "authority_transition": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["state", "current_authority_id", "current_writer", "target_module_authority_id"], "properties": {"state": {"const": "legacy_active"}, "current_authority_id": {"$ref": "#/$defs/slug"}, "current_writer": {"$ref": "#/$defs/source_ref"}, "target_module_authority_id": {"$ref": "#/$defs/slug"}}},
+        {"type": "object", "additionalProperties": false, "required": ["state", "current_authority_id", "current_writer", "displaced_authority", "activation_record"], "properties": {"state": {"const": "module_active"}, "current_authority_id": {"$ref": "#/$defs/slug"}, "current_writer": {"$ref": "#/$defs/source_ref"}, "displaced_authority": {"$ref": "#/$defs/displaced_authority"}, "activation_record": {"$ref": "#/$defs/activation_record"}}}
+      ]
+    },
+    "displaced_authority": {
+      "type": "object", "additionalProperties": false, "required": ["authority_id", "writer", "historical_profile"],
+      "properties": {"authority_id": {"$ref": "#/$defs/slug"}, "writer": {"$ref": "#/$defs/source_ref"}, "historical_profile": {"$ref": "#/$defs/immutable_record"}}
+    },
+    "immutable_record": {
+      "type": "object", "additionalProperties": false, "required": ["repository", "commit", "path", "sha256"],
+      "properties": {"repository": {"type": "string", "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+$"}, "commit": {"$ref": "#/$defs/git_sha"}, "path": {"$ref": "#/$defs/path"}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "activation_record": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "commit", "path", "sha256", "retirement_id", "relation_identity"],
+      "properties": {"repository": {"type": "string", "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+$"}, "commit": {"$ref": "#/$defs/git_sha"}, "path": {"$ref": "#/$defs/path"}, "sha256": {"$ref": "#/$defs/sha256"}, "retirement_id": {"$ref": "#/$defs/slug"}, "relation_identity": {"type": "string", "minLength": 1}}
+    },
+    "disposition": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "delete"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "module_authority_id"], "properties": {"kind": {"const": "migrate_to_module"}, "module_authority_id": {"$ref": "#/$defs/slug"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "authority_id", "reason"], "properties": {"kind": {"const": "retain_product_record"}, "authority_id": {"$ref": "#/$defs/slug"}, "reason": {"type": "string", "minLength": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "projection"], "properties": {"kind": {"const": "temporary_projection"}, "projection": {"$ref": "#/$defs/projection"}}}
+      ]
+    },
+    "projection": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "derivation", "provenance", "freshness", "retirement_condition"], "properties": {"kind": {"const": "ordinary_view"}, "derivation": {"type": "string", "minLength": 1}, "provenance": {"type": "string", "minLength": 1}, "freshness": {"type": "string", "minLength": 1}, "retirement_condition": {"type": "string", "minLength": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "derivation", "provenance", "freshness", "canonical_writer", "drift_invariant", "repair_path", "retirement_condition"], "properties": {"kind": {"const": "stored"}, "derivation": {"type": "string", "minLength": 1}, "provenance": {"type": "string", "minLength": 1}, "freshness": {"type": "string", "minLength": 1}, "canonical_writer": {"$ref": "#/$defs/source_ref"}, "drift_invariant": {"type": "string", "minLength": 1}, "repair_path": {"$ref": "#/$defs/path"}, "retirement_condition": {"type": "string", "minLength": 1}}}
+      ]
+    },
+    "consumer": {"type": "object", "additionalProperties": false, "required": ["consumer_id", "need", "blocked_by"], "properties": {"consumer_id": {"$ref": "#/$defs/slug"}, "need": {"type": "string", "minLength": 1}, "blocked_by": {"$ref": "#/$defs/source_ref"}}},
+    "static_edge": {"type": "object", "additionalProperties": false, "required": ["kind", "path", "symbol", "target", "fingerprint", "consumer_id"], "properties": {"kind": {"type": "string", "enum": ["local_decision_writer", "compatibility_writer", "reverse_feed", "fallback_writer", "reader", "caller", "import", "orm_relationship", "dependency", "repair_job", "refresh_job", "consumer"]}, "path": {"$ref": "#/$defs/path"}, "symbol": {"$ref": "#/$defs/python_symbol"}, "target": {"type": "string", "minLength": 1}, "fingerprint": {"$ref": "#/$defs/sha256"}, "consumer_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/slug"}]} }},
+    "catalogue_edge": {"type": "object", "additionalProperties": false, "required": ["kind", "identity", "definition_sha256"], "properties": {"kind": {"type": "string", "enum": ["foreign_key", "constraint", "trigger", "grant", "column_grant", "dependent_relation", "function", "refresh_object", "other_dependency"]}, "identity": {"type": "string", "minLength": 1}, "definition_sha256": {"$ref": "#/$defs/sha256"}}},
+    "collector": {"type": "object", "additionalProperties": false, "required": ["source", "workflow_path", "producer_id", "normalization_version"], "properties": {"source": {"$ref": "#/$defs/source_ref"}, "workflow_path": {"$ref": "#/$defs/path"}, "producer_id": {"$ref": "#/$defs/slug"}, "normalization_version": {"const": "python-ast-v1"}}},
+    "deletion": {"type": "object", "additionalProperties": false, "required": ["migration", "owner_lineage", "teardown_set", "fence_relations"], "properties": {"migration": {"$ref": "#/$defs/source_ref"}, "owner_lineage": {"$ref": "#/$defs/slug"}, "teardown_set": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/catalogue_edge"}}, "fence_relations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}},
+    "external_exit_condition": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["condition_id", "kind", "status", "accountable_owner", "requirement"], "properties": {"condition_id": {"$ref": "#/$defs/slug"}, "kind": {"type": "string", "enum": ["archival", "external_clients", "old_process_drain", "restart_prevention"]}, "status": {"const": "required"}, "accountable_owner": {"type": "string", "minLength": 1}, "requirement": {"type": "string", "minLength": 1}}}, {"type": "object", "additionalProperties": false, "required": ["condition_id", "kind", "status", "accountable_owner", "rationale"], "properties": {"condition_id": {"$ref": "#/$defs/slug"}, "kind": {"type": "string", "enum": ["archival", "external_clients", "old_process_drain", "restart_prevention"]}, "status": {"const": "not_applicable"}, "accountable_owner": {"type": "string", "minLength": 1}, "rationale": {"type": "string", "minLength": 1}}}]},
+    "closure_record": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "post_upgrade_observation"], "properties": {"kind": {"const": "deleted"}, "post_upgrade_observation": {"$ref": "#/$defs/target_observation"}}}, {"type": "object", "additionalProperties": false, "required": ["kind", "repository", "commit", "path", "sha256", "authority_id", "reason"], "properties": {"kind": {"const": "retained_product_record"}, "repository": {"type": "string", "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+$"}, "commit": {"$ref": "#/$defs/git_sha"}, "path": {"$ref": "#/$defs/path"}, "sha256": {"$ref": "#/$defs/sha256"}, "authority_id": {"$ref": "#/$defs/slug"}, "reason": {"type": "string", "minLength": 1}}}]},
+    "target_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "repository", "commit", "governance_revision", "run_id", "run_attempt", "image_digest", "target", "phase", "transaction_outcome", "refusal_stage", "observation_id", "preceding_observation_id", "deletion_migration", "artifact", "observed_at", "refresh_owner", "refresh_before", "catalogue_coverage", "catalogue_edges", "checks"],
+      "properties": {"kind": {"const": "target_retirement_observation"}, "repository": {"type": "string", "pattern": "^https://[^/\\s]+/[^/\\s]+/[^/\\s]+$"}, "commit": {"$ref": "#/$defs/git_sha"}, "governance_revision": {"$ref": "#/$defs/git_sha"}, "run_id": {"type": "integer", "minimum": 1}, "run_attempt": {"type": "integer", "minimum": 1}, "image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "target": {"type": "string", "minLength": 1}, "phase": {"type": "string", "enum": ["pre_drop", "atomic_teardown", "post_upgrade"]}, "transaction_outcome": {"oneOf": [{"type": "null"}, {"type": "string", "enum": ["committed", "refused", "rolled_back"]}]}, "refusal_stage": {"oneOf": [{"type": "null"}, {"type": "string", "enum": ["fence_acquisition", "inventory_validation", "teardown"]}]}, "observation_id": {"$ref": "#/$defs/slug"}, "preceding_observation_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/slug"}]}, "deletion_migration": {"$ref": "#/$defs/source_ref"}, "artifact": {"$ref": "#/$defs/artifact"}, "observed_at": {"$ref": "#/$defs/utc_timestamp"}, "refresh_owner": {"type": "string", "minLength": 1}, "refresh_before": {"type": "string", "enum": ["cutover_authorization", "fenced_teardown", "completion_claim"]}, "catalogue_coverage": {"type": "string", "enum": ["measured", "unmeasured"]}, "catalogue_edges": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/catalogue_edge"}}, "checks": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/check_result"}}},
+      "allOf": [
+        {"if": {"properties": {"catalogue_coverage": {"const": "unmeasured"}}}, "then": {"properties": {"catalogue_edges": {"maxItems": 0}}}},
+        {"if": {"properties": {"phase": {"const": "pre_drop"}}}, "then": {"properties": {"transaction_outcome": {"type": "null"}, "refusal_stage": {"type": "null"}, "preceding_observation_id": {"type": "null"}, "refresh_before": {"const": "cutover_authorization"}, "catalogue_coverage": {"const": "measured"}}}},
+        {"if": {"properties": {"phase": {"const": "post_upgrade"}}}, "then": {"properties": {"transaction_outcome": {"type": "null"}, "refusal_stage": {"type": "null"}, "preceding_observation_id": {"$ref": "#/$defs/slug"}, "refresh_before": {"const": "completion_claim"}, "catalogue_coverage": {"const": "measured"}}}},
+        {"if": {"properties": {"phase": {"const": "atomic_teardown"}}}, "then": {"properties": {"transaction_outcome": {"type": "string", "enum": ["committed", "refused", "rolled_back"]}, "preceding_observation_id": {"$ref": "#/$defs/slug"}, "refresh_before": {"const": "fenced_teardown"}}}},
+        {"if": {"properties": {"transaction_outcome": {"const": "committed"}}}, "then": {"properties": {"refusal_stage": {"type": "null"}, "catalogue_coverage": {"const": "measured"}}}},
+        {"if": {"properties": {"transaction_outcome": {"enum": ["refused", "rolled_back"]}}}, "then": {"properties": {"refusal_stage": {"type": "string", "enum": ["fence_acquisition", "inventory_validation", "teardown"]}}}},
+        {"if": {"properties": {"refusal_stage": {"const": "fence_acquisition"}}}, "then": {"properties": {"transaction_outcome": {"type": "string", "enum": ["refused", "rolled_back"]}, "catalogue_coverage": {"const": "unmeasured"}}}},
+        {"if": {"properties": {"refusal_stage": {"enum": ["inventory_validation", "teardown"]}}}, "then": {"properties": {"transaction_outcome": {"type": "string", "enum": ["refused", "rolled_back"]}, "catalogue_coverage": {"const": "measured"}}}}
+      ]
+    },
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["name", "sha256", "path"], "properties": {"name": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}, "path": {"$ref": "#/$defs/path"}}},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "utc_timestamp": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"},
+    "check_result": {"type": "object", "additionalProperties": false, "required": ["check_id", "outcome", "evidence_selector"], "properties": {"check_id": {"type": "string", "enum": ["source_edges_zero", "consumers_zero", "writers_absent_or_exact_teardown", "catalogue_matches_reviewed_teardown", "projection_fixed_point", "archival_exit_settled", "external_clients_exited", "old_processes_drained", "old_process_restart_prevented", "deletion_lineage_owned", "exclusive_nowait_fences_held", "inventory_rechecked_under_fence", "teardown_in_dependency_order", "drop_restrict_used", "failure_rolls_back_without_partial_teardown", "post_upgrade_objects_absent", "owner_paths_pass_without_fallback", "intended_revision_running"]}, "outcome": {"type": "string", "enum": ["pass", "fail", "unknown"]}, "evidence_selector": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$"}}},
     "slug": {
       "type": "string",
       "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"

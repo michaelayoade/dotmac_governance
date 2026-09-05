@@ -42,6 +42,7 @@ from .contracts import (
     VocabularyMemberType,
     VocabularyStorage,
 )
+from .retirement import RetirementError, parse_retirements
 
 SLUG = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -576,28 +577,14 @@ def _deployment_artefact_surface(
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
-    _keys(
-        data,
-        frozenset(
-            {
-                "schema_version",
-                "profile_id",
-                "repository",
-                "governance_model",
-                "enforcement_mode",
-                "authorities",
-                "typed_contract_surfaces",
-                "module_declared_vocabularies",
-                "testing_kit_boundary",
-                "external_connector_surface",
-                "deployment_artefact_surfaces",
-            }
-        ),
-        "profile",
-    )
-    version = data["schema_version"]
+    version = data.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):
-        raise ProfileError("schema_version must be integer 10")
+        raise ProfileError("schema_version must be integer 11")
+    if version == 10:
+        raise ProfileError(
+            "schema_version 10 is superseded by 11: declare "
+            "compatibility_retirements and retirement_history, then move to v11"
+        )
     if version == 7:
         # Version 7 shipped an exclusion that was a SILENT subtraction: nothing
         # recorded what left the measured universe. It is withdrawn rather than
@@ -657,8 +644,29 @@ def parse_profile(value: object) -> StandardsProfile:
             "indistinguishable from a repository that ships none. Add the key "
             "and set schema_version to 10"
         )
-    if version != 10:
-        raise ProfileError("schema_version must be integer 10")
+    if version != 11:
+        raise ProfileError("schema_version must be integer 11")
+    _keys(
+        data,
+        frozenset(
+            {
+                "schema_version",
+                "profile_id",
+                "repository",
+                "governance_model",
+                "enforcement_mode",
+                "authorities",
+                "typed_contract_surfaces",
+                "module_declared_vocabularies",
+                "testing_kit_boundary",
+                "external_connector_surface",
+                "deployment_artefact_surfaces",
+                "compatibility_retirements",
+                "retirement_history",
+            }
+        ),
+        "profile",
+    )
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
         mode = EnforcementMode(raw_mode)
@@ -709,8 +717,14 @@ def parse_profile(value: object) -> StandardsProfile:
         raise ProfileError(
             "deployment_artefact_surfaces surface_id values must be unique"
         )
+    try:
+        retirements, retirement_history = parse_retirements(
+            data["compatibility_retirements"], data["retirement_history"]
+        )
+    except RetirementError as error:
+        raise ProfileError(str(error)) from error
     return StandardsProfile(
-        schema_version=10,
+        schema_version=11,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,
@@ -721,6 +735,8 @@ def parse_profile(value: object) -> StandardsProfile:
         testing_kit_boundary=_testing_kit_boundary(data["testing_kit_boundary"]),
         external_connector_surface=connector_surface,
         deployment_artefact_surfaces=deployments,
+        compatibility_retirements=retirements,
+        retirement_history=retirement_history,
     )
 
 

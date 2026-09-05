@@ -1,7 +1,8 @@
 # 0003. Public governance repository and enforced branch protection
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-26
+- Effective: 2026-09-05
 - Owner: Michael Ayoade
 - Approver: Michael Ayoade
 - Scope: `https://github.com/michaelayoade/dotmac_governance`
@@ -180,3 +181,36 @@ is not a record of what happened.
   the classification vocabulary is fixed.
 - Secret scanning and push protection are enabled, so the secrets rule has a
   mechanism behind it rather than only a prohibition.
+
+## Amendment — 2026-09-05: retire the public self-hosted execution path
+
+Michael approved the public-repository decision and this amendment by directing
+the two remaining Governance issues to be fixed. Acceptance becomes effective
+only when this exact change is merged by Michael through protected `main`; the
+agent-authored branch and pull request do not approve themselves.
+
+Required Governance validation now runs on GitHub's disposable
+`ubuntu-latest` runner. The historical Seabone job guard, custom runner labels
+and cross-ref concurrency group are removed. No concurrency group replaces the
+old one, so this workflow cannot cancel an older run merely because a later ref
+entered that repository-level group. This does not promise that every possible
+Git commit completes a run; platform failures, timeouts and manual cancellation
+remain observable outcomes.
+
+For current behavior, this amendment supersedes the earlier clauses that make
+the Seabone job guard a publication condition, state that a fork receives no
+validation, require that guard to be re-verified, or accept continuing public
+self-hosted execution as a consequence. Those clauses remain above as the
+historical control and incident record; they no longer define the target state.
+
+The platform's `all_external_contributors` approval policy remains required and
+is verified by reading the setting from GitHub. It is defence in depth for the
+hosted job, not the isolation boundary: the runner is disposable, permissions
+remain read-only, and the workflow receives no repository-scoped host or
+long-lived credential. A workflow file cannot prove the external setting.
+
+Issue 3 remains open through the transition. After the amended workflow passes
+on canonical `main`, runner id 21 is deregistered from the repository and its
+agent is removed from Seabone under explicit host authorization. The issue may
+close only after GitHub reports no registered Governance runner and the host
+removal is recorded; merge alone is not retirement evidence.

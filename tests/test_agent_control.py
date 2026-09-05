@@ -227,6 +227,97 @@ class RepositoryFixture:
 
 
 class AgentControlTests(unittest.TestCase):
+    def test_public_governance_uses_disposable_hosted_ci(self):
+        repository_root = Path(__file__).resolve().parent.parent
+        workflow_path = repository_root / ".github/workflows/governance-checks.yml"
+        workflow = workflow_path.read_text(encoding="utf-8")
+        visibility_adr = (
+            repository_root / "docs/adr/0003-public-governance-repository.md"
+        ).read_text(encoding="utf-8")
+        readme = (repository_root / "README.md").read_text(encoding="utf-8")
+
+        def control_violations(candidate: str) -> list[str]:
+            violations: list[str] = []
+            required_prefix = """name: Governance checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+"""
+            if not candidate.startswith(required_prefix):
+                violations.append("triggers or top-level permissions changed")
+
+            lines = candidate.splitlines()
+            job_lines: list[str] = []
+            try:
+                job_start = lines.index("  records:")
+            except ValueError:
+                violations.append("records job is missing")
+            else:
+                for line in lines[job_start + 1 :]:
+                    if line.startswith("  ") and not line.startswith("    "):
+                        break
+                    job_lines.append(line)
+            job_block = "\n".join(job_lines)
+
+            runner_values = [
+                line.split(":", maxsplit=1)[1].strip()
+                for line in job_lines
+                if line.startswith("    runs-on:")
+            ]
+            if runner_values != ["ubuntu-latest"]:
+                violations.append("records job is not on ubuntu-latest")
+            if "    name: Governance record validation" not in job_block:
+                violations.append("required job name changed")
+            for forbidden in (
+                "pull_request_target",
+                "self-hosted",
+                "seabone",
+                "concurrency:",
+                ": write",
+                "${{ secrets.",
+            ):
+                if forbidden in candidate.lower():
+                    violations.append(f"forbidden workflow surface: {forbidden}")
+            return violations
+
+        self.assertEqual([], control_violations(workflow))
+        self.assertFalse((repository_root / ".github/actionlint.yaml").exists())
+        self.assertIn("- Status: Accepted", visibility_adr)
+        self.assertIn("- Effective: 2026-09-05", visibility_adr)
+        self.assertIn("Validation runs on a disposable", readme)
+
+        sabotages = {
+            "privileged trigger": workflow.replace(
+                "  pull_request:\n", "  pull_request_target:\n"
+            ),
+            "write permission": workflow.replace("contents: read", "contents: write"),
+            "cancellation group": workflow.replace(
+                "jobs:\n",
+                "concurrency:\n  group: shared\n  cancel-in-progress: true\n\njobs:\n",
+            ),
+            "secret injection": workflow.replace(
+                "    runs-on: ubuntu-latest\n",
+                "    runs-on: ubuntu-latest\n    env:\n      TOKEN: ${{ secrets.TOKEN }}\n",
+            ),
+        }
+        runner_decoy = workflow.replace(
+            "    runs-on: ubuntu-latest\n",
+            "    # runs-on: ubuntu-latest\n"
+            "    runs-on: [linux, x64, dotmac-governance]\n",
+        )
+        self.assertIn(
+            "records job is not on ubuntu-latest",
+            control_violations(runner_decoy),
+        )
+        for label, sabotage in sabotages.items():
+            with self.subTest(label=label):
+                self.assertTrue(control_violations(sabotage))
+
     def test_canonical_guidance_preserves_orchestration_and_identity_boundaries(self):
         repository_root = Path(__file__).resolve().parent.parent
         global_guidance = (repository_root / "docs/agent-guidance/global.md").read_text(

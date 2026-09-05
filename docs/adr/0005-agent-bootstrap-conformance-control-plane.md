@@ -285,3 +285,31 @@ and discovery metadata rather than manufacturing evidence.
 - Adding any endpoint ID, moving organization-wide rollout from `pilot` to
   `managed`, admitting a production endpoint, or retiring the old guidance
   writer requires a reviewed change and the applicable accepted decision.
+
+## Amendment — 2026-09-05: tiered orchestration and cross-model clients
+
+The workstation pilot now carries a cost-tiered agent topology in its canonical
+guidance. One primary remains the planner and final acceptor; one cheap worker is
+the default; stronger models and additional workers are evidence-triggered.
+Knowledge and Fleet reads use narrow tool-allowlisted agents. Database and
+observability access remain unavailable until their owning applications expose
+bounded service operations; neither SSH nor arbitrary SQL is an admissible
+substitute.
+
+Claude-to-Codex integration uses OpenAI's supported Claude Code plugin over the
+Codex app server. Codex-to-Claude remains a bounded local advisory adapter. Both
+directions are one-hop, primary-originated and cost-bounded. Automatic review
+gates stay disabled because a review/fix/review loop consumes both vendors'
+limits and can blur the sole-primary authority boundary. A write rescue is an
+explicit implementation handoff with one writer, never an advisory review.
+
+This amendment corrects the stale Claude-specific trailer rule: commits carry
+an accountable human author and committer and no AI attribution trailer, in
+accordance with the already enforced commit-identity control.
+
+The amendment does not activate managed endpoint configuration, add an endpoint,
+retire the Knowledge bootstrap writer, or claim that schema version 1 can render
+Fleet stdio, plugins, per-server credentials, role definitions or bridge files.
+Those artifacts require typed policy support, effective-client tests, exact
+reviewed provenance and complete backup/rollback coverage before the existing
+activation gate can pass.

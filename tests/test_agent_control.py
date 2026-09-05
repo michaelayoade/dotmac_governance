@@ -227,6 +227,29 @@ class RepositoryFixture:
 
 
 class AgentControlTests(unittest.TestCase):
+    def test_canonical_guidance_preserves_orchestration_and_identity_boundaries(self):
+        repository_root = Path(__file__).resolve().parent.parent
+        global_guidance = (repository_root / "docs/agent-guidance/global.md").read_text(
+            encoding="utf-8"
+        )
+        claude_guidance = (
+            repository_root / "docs/agent-guidance/claude-user.md"
+        ).read_text(encoding="utf-8")
+
+        for required_rule in (
+            "## Agent orchestration and model routing",
+            "Use a star topology",
+            "One writer owns each worktree and shared path",
+            "Cross-model delegation is one hop",
+            "Fleet inventory never grants SSH",
+        ):
+            self.assertIn(required_rule, global_guidance)
+
+        self.assertIn("Never add `Co-Authored-By`", claude_guidance)
+        self.assertIn("codex@openai-codex", claude_guidance)
+        self.assertIn("Keep its stop-time review gate disabled", claude_guidance)
+        self.assertNotIn("Co-Authored-By: Claude", claude_guidance)
+
     def evaluate(
         self,
         profile: dict[str, object] | None = None,

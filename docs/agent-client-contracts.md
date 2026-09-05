@@ -2,7 +2,7 @@
 
 This is the vendor-contract reference for the accepted workstation pilot agent
 control plane. It records the official client behavior that the typed adapters depend
-on. It was reviewed against the live official documentation on 2026-07-31.
+on. It was reviewed against the live official documentation on 2026-09-05.
 Re-check it before changing a rendered field or raising a client-version floor.
 
 The review covers every official page that changes this control plane's
@@ -30,12 +30,20 @@ enforcement path.
 | Hooks | Managed hook definitions can be enforced from `requirements.toml`, but their scripts are not distributed by Codex. | Device management must deliver scripts before `allow_managed_hooks_only` can safely become true. |
 | MCP | A requirements `mcp_servers` table disables servers whose name and identity do not match. | The policy owns the allowlist; the existing Knowledge bootstrap owner remains responsible for attributable credential plumbing. |
 | Host matching | `remote_sandbox_config` hostname matching is best-effort policy selection, not authenticated device proof. | Endpoint identity comes from an explicit enrollment and attributable principal, never a hostname inference. |
+| Subagents | Local Codex supports custom user and project agents with independent model, reasoning, sandbox and MCP configuration. Every subagent consumes its own model and tool tokens; OpenAI recommends bounded read-heavy work as the starting point. | The primary remains the sole planner and final acceptor. Default to one Luna worker and explicit tool allowlists; use Terra/Astra only after an evidence-triggered escalation. |
+| Claude Code integration | OpenAI deprecates `codex mcp-server` and directs Claude Code users to the official `openai/codex-plugin-cc`, which uses the Codex app server and the existing local Codex authentication/configuration. | Pin and inspect the plugin, keep automatic stop review disabled, and treat review, rescue and transfer as distinct authority modes. The plugin does not transfer Git, production or approval authority. |
+
+The workstation pilot inspected and installed plugin version `1.0.6` from exact
+source revision `db52e28f4d9ded852ab3942cea316258ae4ef346`. A later version or
+revision needs a fresh contract review before its evidence replaces this row.
 
 Official references:
 
 - [Custom instructions with AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
 - [Managed configuration](https://learn.chatgpt.com/docs/enterprise/managed-configuration)
 - [Configuration reference: requirements.toml](https://learn.chatgpt.com/docs/config-file/config-reference#requirementstoml)
+- [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+- [Codex integration for Claude Code](https://learn.chatgpt.com/docs/mcp-server)
 
 ## Claude Code
 
@@ -51,6 +59,8 @@ Official references:
 | Version gates | `requiredMinimumVersion`/`requiredMaximumVersion` can block startup, but older clients may ignore newer fields and invalid managed values may fail open. | Do not set a hard version floor until inventory proves every endpoint supports it; validate the pilot policy with `claude doctor`. |
 | Diagnostics | `/context`, `/memory`, `/hooks`, `/mcp`, `/permissions`, `/doctor`, and `/status` expose different effective-state views. | Fleet attestation must collect bounded non-secret results from the appropriate diagnostic command. |
 | Observability | OpenTelemetry can attribute auth, MCP connections, permissions, hooks, tools, errors, and usage when configured. | OTel is evidence input, not the policy owner. Prompt/tool detail logging remains off unless separately approved. |
+| Subagent models | User agents may select `haiku`, `sonnet`, `opus`, `fable`, a full model ID or `inherit`, plus an effort and permission mode. Fable is intended for the hardest and longest-running tasks and may consume usage credits. | Sonnet is the normal primary, Haiku owns bounded reads, Opus is the first deep-analysis escalation, and Fable is exceptional. Model choice never grants authority. |
+| Plugin hooks | A plugin may contribute session and Stop hooks without adding those hook bodies to model context. The OpenAI Codex plugin's optional Stop review can launch a long cross-model loop. | Install the plugin with the review gate disabled. Enabling it requires a separate explicit cost and authority decision plus loop/timeout evidence. |
 
 Official references:
 
@@ -69,6 +79,8 @@ Official references:
 - [Monitoring](https://code.claude.com/docs/en/monitoring-usage)
 - [Security](https://code.claude.com/docs/en/security)
 - [Network configuration](https://code.claude.com/docs/en/network-config)
+- [Subagents](https://code.claude.com/docs/en/sub-agents)
+- [Model configuration](https://code.claude.com/docs/en/model-config)
 
 ## Current activation boundary
 
@@ -83,5 +95,8 @@ activation fails closed until all of these are true:
    environment loader without exposing a value.
 5. The accepted local installer creates its backup and rollback manifest.
 6. Version inventory and vendor-native doctor/status checks pass.
+7. Candidate guidance preserves the current orchestration, attribution and
+   cross-model authority rules without duplication, and any installed plugin is
+   identified by version and source revision.
 
 Production application hosts remain unrepresentable in schema version 1.

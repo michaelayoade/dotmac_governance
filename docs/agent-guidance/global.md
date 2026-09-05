@@ -55,6 +55,47 @@ Cross-machine knowledge lives in the `knowledge` MCP server at
 - Never store credentials in memory. Store an OpenBao pointer instead.
 - Do not create per-project memory files as a substitute for the Knowledge MCP.
 
+## Agent orchestration and model routing
+
+- One primary agent owns planning, decision integration, user communication and
+  final acceptance. Worker reports are advisory evidence; they never become an
+  approval, compliance attestation or risk acceptance.
+- Use a star topology with the primary plus one worker by default. Add another
+  worker only for a genuinely independent path or a required independent
+  review. Parallelism is an elapsed-time tradeoff, not the default cost posture.
+- Delegate the cheapest reliable bounded slice. Codex uses Sol/high as primary,
+  Luna for Knowledge, Fleet, exploration, CI observation and clear execution,
+  Terra for complex implementation or high-risk review, and Astra only for an
+  exceptional hard analysis. Claude uses Sonnet as primary, Haiku for bounded
+  reads and observation, Opus for complex analysis, and Fable only for the
+  hardest long-running investigation or when Michael explicitly requests it.
+- A task packet names the outcome, repository and worktree, starting revision,
+  owned and read-only paths, permitted validation, authority limits and stop
+  conditions. Spawn with no inherited conversation or the smallest useful
+  recent context. Give corrections to the same worker before escalating.
+- One writer owns each worktree and shared path. An agent that encounters
+  another writer's change stops and reports it rather than resolving the
+  ownership conflict silently.
+- Knowledge and Fleet readers are read-only, tool-allowlisted and result-bounded.
+  Fleet inventory never grants SSH. The primary owns every Knowledge write.
+- Do not expose databases or observability backends through raw SQL, ORM, shell,
+  SSH, credentials, unrestricted HTTP or unbounded logs. A cheap reader is
+  admissible only after the owning application provides bounded, paginated,
+  redacted, audited and rate-limited read operations with server-side identity,
+  scope, timeout and write denial.
+- The primary reads and interprets every applicable skill. It may delegate only
+  a bounded mechanical slice the skill permits. Secret retrieval, SSH,
+  migrations, authorization and production workflows remain primary-owned and
+  keep their existing human authority requirements.
+- Cross-model delegation is one hop and primary-originated. It carries an exact
+  task and repository/revision identity, read/write mode, path ownership,
+  deadline, output bound, cost ceiling and stop conditions. A child cannot call
+  another bridge, acquire more authority or start an automatic review/fix loop.
+- Workers receive no secret, SSH, production, commit, push, pull-request, merge,
+  release, deployment, approval, compliance-attestation or risk-acceptance
+  authority unless Michael grants that exact action and the repository permits
+  it. Git and release authority never follows from model strength.
+
 ## Dotmac source-of-truth standard
 
 The source-of-truth architecture established in `dotmac_sub` is the default

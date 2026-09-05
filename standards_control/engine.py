@@ -223,7 +223,43 @@ def _trusted_retirement_transitions(
                 "retirement history: trusted base profile is not an object; direction=base-to-current",
             )
         ]
-    if base.get("schema_version") == 10:
+    base_version = base.get("schema_version")
+    if (
+        isinstance(base_version, int)
+        and not isinstance(base_version, bool)
+        and base_version in {9, 10}
+    ):
+        # Versions 9 and 10 predate the retirement ledger. Validate their
+        # shared body by promoting only the fields introduced after that
+        # version, then treat the necessarily absent ledger as empty. This
+        # lets a pinned v9 product adopt v11 directly without a throwaway v10
+        # merge, while refusing unknown fields or a backported retirement row.
+        promoted = dict(base)
+        if (
+            "compatibility_retirements" in promoted
+            or "retirement_history" in promoted
+            or (base_version == 9 and "deployment_artefact_surfaces" in promoted)
+        ):
+            return [
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    "retirement history: pre-retirement trusted base declares later-version fields; direction=base-to-current",
+                )
+            ]
+        if base_version == 9:
+            promoted["deployment_artefact_surfaces"] = []
+        promoted["schema_version"] = 11
+        promoted["compatibility_retirements"] = []
+        promoted["retirement_history"] = []
+        try:
+            parse_profile(promoted)
+        except ProfileError:
+            return [
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement history: trusted base v{base_version} profile is malformed; direction=base-to-current",
+                )
+            ]
         base_active: list[object] = []
         base_history: list[object] = []
     elif (

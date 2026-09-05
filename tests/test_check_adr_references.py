@@ -32,8 +32,11 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from check_adr_references import (  # noqa: E402
     BASELINE_PATH,
+    FOREIGN_REPRODUCTIONS,
+    SCANNED_SUFFIXES,
     Finding,
     ReferenceCheckError,
+    corpus,
     evaluate,
     local_adr_numbers,
     scan,
@@ -296,6 +299,88 @@ class ProductionTreeControls(unittest.TestCase):
             Finding(path="a/b.md", line=7, number="0018").key(),
             f"a/b.md:7:{ref('0018')}",
         )
+
+
+class ForeignReproductionExclusionControls(unittest.TestCase):
+    """A structural exemption states an ENFORCEABLE premise, or the region is
+    unmonitored rather than exempt.
+
+    `FOREIGN_REPRODUCTIONS` drops files from the corpus, and a dropped file is
+    invisible to this guard. That is only defensible if two things hold, and
+    each fails differently:
+
+    - it hides a REAL report. An exclusion covering nothing looks identical to
+      one covering something, and would pass forever after its subject changed.
+    - it hides ONLY the declared paths. An exclusion that quietly widened would
+      make regions unmonitored with no diff to review.
+
+    Both are checked here rather than argued in a comment, because the reasoning
+    that produced this exclusion was originally recorded only in a commit
+    message and a one-off measurement -- neither of which is a check.
+    """
+
+    @staticmethod
+    def _tracked_scanned() -> set[Path]:
+        """Every tracked file the corpus WOULD hold with no exclusions."""
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return {
+            Path(name)
+            for name in result.stdout.splitlines()
+            if name
+            and Path(name).suffix.lower() in SCANNED_SUFFIXES
+            and (REPO_ROOT / name).is_file()
+        }
+
+    def test_each_declared_reproduction_would_otherwise_be_reported(self) -> None:
+        """The load-bearing side. Scanned directly, the file yields a finding --
+        so the exclusion suppresses a real report rather than nothing."""
+        held = local_adr_numbers(REPO_ROOT)
+        for relative in sorted(FOREIGN_REPRODUCTIONS):
+            with self.subTest(path=relative.as_posix()):
+                target = REPO_ROOT / relative
+                self.assertTrue(
+                    target.is_file(), "a declaration whose subject vanished"
+                )
+                findings = scan_text(
+                    target.read_text(),
+                    held=held,
+                    path=relative.as_posix(),
+                )
+                self.assertNotEqual(
+                    findings,
+                    [],
+                    "this exclusion hides nothing: either the reproduction no "
+                    "longer carries a foreign citation, or the guard stopped "
+                    "seeing it. Remove the entry or find out which",
+                )
+
+    def test_the_corpus_omits_exactly_the_declared_paths(self) -> None:
+        """The other side: no broader corpus. The difference between what is
+        tracked and what is scanned must be exactly the two declared
+        exclusions -- so a widened exemption fails rather than going quiet."""
+        scanned = {path.relative_to(REPO_ROOT) for path in corpus(REPO_ROOT)}
+        omitted = self._tracked_scanned() - scanned
+        self.assertEqual(omitted, {BASELINE_PATH} | set(FOREIGN_REPRODUCTIONS))
+
+    def test_the_same_bytes_at_an_undeclared_path_are_still_reported(self) -> None:
+        """The exclusion is keyed on the PATH, not on the content. A copy
+        elsewhere is a citation this repository makes, and is reported."""
+        held = local_adr_numbers(REPO_ROOT)
+        relative = sorted(FOREIGN_REPRODUCTIONS)[0]
+        body = (REPO_ROOT / relative).read_text()
+        findings = scan_text(body, held=held, path="docs/not-a-reproduction.md")
+        self.assertNotEqual(findings, [])
+
+    def test_the_declared_set_is_not_empty(self) -> None:
+        """A check over an empty set passes for the wrong reason. If the last
+        reproduction is retired, the exclusion goes with it."""
+        self.assertNotEqual(FOREIGN_REPRODUCTIONS, frozenset())
 
 
 if __name__ == "__main__":

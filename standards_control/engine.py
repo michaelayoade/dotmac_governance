@@ -20,6 +20,7 @@ from .contracts import (
     CONSERVED_MODULE_SYMBOL,
     BranchName,
     CanonicalRepository,
+    CatalogueRetirementEdge,
     ConformanceReport,
     ConnectorCategory,
     ConnectorScope,
@@ -32,12 +33,19 @@ from .contracts import (
     ModuleDeclaredVocabulary,
     PinnedGovernanceModelRef,
     Severity,
+    SourceReference,
     StandardsProfile,
     TestingKitBoundary,
     TypedContractSurface,
     VocabularyMemberKind,
 )
-from .profile import ProfileError, load_profile
+from .profile import ProfileError, load_profile, parse_profile
+from .retirement import (
+    CheckResult,
+    RetirementError,
+    RetirementObservationBundle,
+    parse_observation_bundle,
+)
 
 STATUS_LINE = re.compile(r"^- Status:\s*(Proposed|Accepted)\s*$", re.MULTILINE)
 BARE_CONTAINERS = frozenset(
@@ -89,6 +97,1304 @@ def _notice(
 ) -> Diagnostic:
     """A published observation, not a failure: notices never fail a run."""
     return Diagnostic(code, Severity.NOTICE, message, path, None)
+
+
+def _reference_exists(root: Path, reference: SourceReference) -> bool:
+    """Resolve a closed source reference without importing or executing it."""
+    candidate = root.joinpath(*reference.path.parts)
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+        text = resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeError, ValueError):
+        return False
+    if reference.kind == "document_section":
+        wanted = re.sub(r"[^a-z0-9 -]", "", reference.member.lower())
+        wanted = re.sub(r"[ -]+", "-", wanted).strip("-")
+        return any(
+            re.sub(
+                r"[ -]+", "-", re.sub(r"[^a-z0-9 -]", "", match.group(1).lower())
+            ).strip("-")
+            == wanted
+            for match in re.finditer(r"^#{1,6}\s+(.+?)\s*#*\s*$", text, re.MULTILINE)
+        )
+    try:
+        tree = ast.parse(text, filename=reference.path.as_posix())
+    except SyntaxError:
+        return False
+    names: set[str] = set()
+
+    def visit(nodes: Sequence[ast.stmt], prefix: tuple[str, ...] = ()) -> None:
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                qualified = (*prefix, node.name)
+                names.add(".".join(qualified))
+                visit(node.body, qualified)
+
+    visit(tree.body)
+    symbol = str(reference.member)
+    return any(name == symbol or symbol.endswith(f".{name}") for name in names)
+
+
+def _is_migration_entrypoint(reference: SourceReference) -> bool:
+    """Recognize a versioned migration entry point, never an arbitrary source."""
+    return (
+        reference.kind == "python_symbol"
+        and reference.path.suffix == ".py"
+        and any(part in {"migrations", "versions"} for part in reference.path.parts)
+        and reference.member.rsplit(".", 1)[-1] == "upgrade"
+    )
+
+
+def _reference_in_text(kind: object, member: object, path: object, text: str) -> bool:
+    """The source-reference resolver for immutable Git blobs."""
+    if (
+        not isinstance(kind, str)
+        or not isinstance(member, str)
+        or not isinstance(path, str)
+    ):
+        return False
+    if kind == "document_section":
+        wanted = re.sub(r"[^a-z0-9 -]", "", member.lower())
+        wanted = re.sub(r"[ -]+", "-", wanted).strip("-")
+        return any(
+            re.sub(
+                r"[ -]+", "-", re.sub(r"[^a-z0-9 -]", "", hit.group(1).lower())
+            ).strip("-")
+            == wanted
+            for hit in re.finditer(r"^#{1,6}\s+(.+?)\s*#*\s*$", text, re.MULTILINE)
+        )
+    if kind != "python_symbol":
+        return False
+    try:
+        tree = ast.parse(text, filename=path)
+    except SyntaxError:
+        return False
+    names: set[str] = set()
+
+    def visit(nodes: Sequence[ast.stmt], prefix: tuple[str, ...] = ()) -> None:
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                qualified = (*prefix, node.name)
+                names.add(".".join(qualified))
+                visit(node.body, qualified)
+
+    visit(tree.body)
+    return any(name == member or member.endswith(f".{name}") for name in names)
+
+
+def _trusted_retirement_transitions(
+    root: Path,
+    profile_path: Path,
+    profile: StandardsProfile,
+    base_revision: GitRevision | None,
+) -> list[Diagnostic]:
+    """Compare raw v11 retirement records to their exact trusted-base bytes."""
+    if base_revision is None:
+        if not (profile.compatibility_retirements or profile.retirement_history):
+            return []
+        return [
+            _finding(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                "retirement history: trusted base revision is missing; direction=base-to-current",
+            )
+        ]
+    try:
+        relative = profile_path.resolve().relative_to(root.resolve()).as_posix()
+        base_text = subprocess.check_output(
+            ["git", "show", f"{base_revision}:{relative}"],
+            cwd=root,
+            text=True,
+            timeout=10,
+        )
+        base = json.loads(base_text)
+        current = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError):
+        return [
+            _finding(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                "retirement history: trusted base profile is unavailable or invalid; direction=base-to-current",
+            )
+        ]
+    if not isinstance(base, dict) or not isinstance(current, dict):
+        return [
+            _finding(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                "retirement history: trusted base profile is not an object; direction=base-to-current",
+            )
+        ]
+    if base.get("schema_version") == 10:
+        base_active: list[object] = []
+        base_history: list[object] = []
+    elif (
+        base.get("schema_version") == 11
+        and isinstance(base.get("compatibility_retirements"), list)
+        and isinstance(base.get("retirement_history"), list)
+    ):
+        try:
+            parse_profile(base)
+        except ProfileError:
+            return [
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    "retirement history: trusted base v11 profile is malformed; direction=base-to-current",
+                )
+            ]
+        base_active = base["compatibility_retirements"]
+        base_history = base["retirement_history"]
+    else:
+        return [
+            _finding(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                "retirement history: trusted base retirement fields are invalid; direction=base-to-current",
+            )
+        ]
+    active = current.get("compatibility_retirements")
+    history = current.get("retirement_history")
+    if not isinstance(active, list) or not isinstance(history, list):
+        return [
+            _finding(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                "retirement history: current retirement fields are invalid; direction=base-to-current",
+            )
+        ]
+    findings: list[Diagnostic] = []
+    if history[: len(base_history)] != base_history:
+        findings.append(
+            _finding(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                "retirement history: existing history is not an unchanged prefix; direction=base-to-current",
+            )
+        )
+
+    def records(rows: list[object]) -> dict[str, dict[str, object]]:
+        return {
+            str(item.get("retirement_id")): item
+            for item in rows
+            if isinstance(item, dict)
+        }
+
+    def relation_identity(record: Mapping[str, object]) -> str:
+        relation = record.get("relation")
+        return str(relation.get("identity")) if isinstance(relation, dict) else ""
+
+    old, new = records(base_active), records(active)
+    old_history = records(base_history)
+    current_authority_ids = {
+        str(authority.authority_id) for authority in profile.authorities
+    }
+
+    def validate_module_active(rid: str, item: Mapping[str, object]) -> None:
+        transition = item.get("authority_transition")
+        relation = item.get("relation")
+        if (
+            not isinstance(transition, dict)
+            or transition.get("state") != "module_active"
+        ):
+            return
+        displaced = transition.get("displaced_authority")
+        activation = transition.get("activation_record")
+        relation_identity = (
+            relation.get("identity") if isinstance(relation, dict) else None
+        )
+        if not isinstance(displaced, dict) or not isinstance(activation, dict):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: module activation records are incomplete; direction=module-active-to-immutable",
+                )
+            )
+            return
+        historical = displaced.get("historical_profile")
+        writer = displaced.get("writer")
+        if not isinstance(historical, dict) or not isinstance(writer, dict):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: displaced authority record is incomplete; direction=module-active-to-history",
+                )
+            )
+            return
+        historical_coordinates = tuple(
+            historical.get(key) for key in ("repository", "commit", "path", "sha256")
+        )
+        activation_coordinates = tuple(
+            activation.get(key) for key in ("repository", "commit", "path", "sha256")
+        )
+        if historical.get("repository") != str(profile.repository.canonical_url):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    f"retirement {rid}: historical profile repository does not equal canonical repository; direction=canonical-to-historical",
+                )
+            )
+            return
+        if (
+            activation.get("repository") != str(profile.repository.canonical_url)
+            or activation_coordinates == historical_coordinates
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: activation record is not distinct canonical immutable evidence; direction=historical-to-activation",
+                )
+            )
+            return
+
+        def blob(coordinates: Sequence[object]) -> bytes | None:
+            if len(coordinates) != 4:
+                return None
+            commit, path, digest = coordinates[1], coordinates[2], coordinates[3]
+            if (
+                not isinstance(commit, str)
+                or not isinstance(path, str)
+                or not isinstance(digest, str)
+            ):
+                return None
+            try:
+                result = subprocess.check_output(
+                    ["git", "show", f"{commit}:{path}"], cwd=root, timeout=10
+                )
+            except (OSError, subprocess.SubprocessError):
+                return None
+            return result if hashlib.sha256(result).hexdigest() == digest else None
+
+        historical_blob = blob(historical_coordinates)
+        activation_blob = blob(activation_coordinates)
+        if historical_blob is None or activation_blob is None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: immutable historical or activation blob is unavailable or changed; direction=coordinates-to-blob",
+                )
+            )
+            return
+        try:
+            historical_profile = json.loads(historical_blob)
+        except json.JSONDecodeError:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: historical profile blob is not JSON; direction=blob-to-profile",
+                )
+            )
+            return
+        authorities = (
+            historical_profile.get("authorities")
+            if isinstance(historical_profile, dict)
+            else None
+        )
+        matches = (
+            [
+                entry
+                for entry in authorities
+                if isinstance(entry, dict)
+                and entry.get("authority_id") == displaced.get("authority_id")
+            ]
+            if isinstance(authorities, list)
+            else []
+        )
+        if len(matches) != 1 or writer.get("path") not in matches[0].get(
+            "canonical_writer_paths", []
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    f"retirement {rid}: displaced authority/writer is not uniquely bound in historical profile; direction=historical-profile-to-writer",
+                )
+            )
+            return
+        writer_path = writer.get("path")
+        if not isinstance(writer_path, str):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    f"retirement {rid}: displaced writer path is invalid; direction=historical-profile-to-writer",
+                )
+            )
+            return
+        try:
+            writer_blob = subprocess.check_output(
+                ["git", "show", f"{historical_coordinates[1]}:{writer_path}"],
+                cwd=root,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            writer_blob = None
+        if writer_blob is None or not _reference_in_text(
+            writer.get("kind"),
+            writer.get("symbol", writer.get("anchor")),
+            writer_path,
+            writer_blob,
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    f"retirement {rid}: displaced source reference does not resolve at historical commit; direction=historical-to-source",
+                )
+            )
+        if (
+            activation.get("retirement_id") != rid
+            or activation.get("relation_identity") != relation_identity
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: activation identity does not bind active relation; direction=activation-to-active",
+                )
+            )
+
+    for rid, item in new.items():
+        validate_module_active(rid, item)
+    old_relations = {relation_identity(item) for item in old.values()} | {
+        str(item.get("relation_identity")) for item in old_history.values()
+    }
+    old_ids = set(old) | set(old_history)
+    for rid, item in new.items():
+        relation = item.get("relation", {})
+        identity = str(relation.get("identity")) if isinstance(relation, dict) else ""
+        if rid not in old and (rid in old_ids or identity in old_relations):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: new identity reuses trusted-base retirement identity; direction=base-to-current",
+                )
+            )
+    base_bytes = base_text.encode()
+    expected_historical = {
+        "repository": str(profile.repository.canonical_url),
+        "commit": str(base_revision),
+        "path": relative,
+        "sha256": hashlib.sha256(base_bytes).hexdigest(),
+    }
+    appended = records(history[len(base_history) :])
+    for rid in appended:
+        if rid not in old:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: appended history has no trusted-base active retirement; direction=active-to-history",
+                )
+            )
+    for rid, prior in old.items():
+        current_item = new.get(rid)
+        prior_relation = prior.get("relation", {})
+        if not isinstance(prior_relation, dict):
+            prior_relation = {}
+        prior_transition = prior.get("authority_transition")
+        if current_item is None:
+            closed = appended.get(rid)
+            if closed is None or closed.get("relation_identity") != prior_relation.get(
+                "identity"
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                        f"retirement {rid}: active retirement removed without matching appended history; direction=active-to-history",
+                    )
+                )
+            elif (
+                not isinstance(prior_transition, dict)
+                or prior_transition.get("state") != "module_active"
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                        f"retirement {rid}: legacy-active retirement cannot close directly; direction=legacy-to-history",
+                    )
+                )
+            else:
+                transition = prior_transition
+                assert isinstance(transition, dict)
+                disposition = prior.get("disposition")
+                disposition_data = disposition if isinstance(disposition, dict) else {}
+                closure = closed.get("closure_record")
+                closure_data = closure if isinstance(closure, dict) else {}
+                expected_closure_kind = (
+                    "retained_product_record"
+                    if disposition_data.get("kind") == "retain_product_record"
+                    else "deleted"
+                )
+                if (
+                    closed.get("displaced_authority")
+                    != transition.get("displaced_authority")
+                    or closed.get("current_authority_id")
+                    != transition.get("current_authority_id")
+                    or closed.get("activation_record")
+                    != transition.get("activation_record")
+                    or closure_data.get("kind") != expected_closure_kind
+                ):
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                            f"retirement {rid}: appended history does not bind active module transition; direction=active-to-history",
+                        )
+                    )
+                elif expected_closure_kind == "retained_product_record" and (
+                    closure_data.get("authority_id")
+                    != disposition_data.get("authority_id")
+                    or closure_data.get("reason") != disposition_data.get("reason")
+                    or closure_data.get("authority_id") not in current_authority_ids
+                ):
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                            f"retirement {rid}: retained-product closure does not preserve its active disposition; direction=active-to-history",
+                        )
+                    )
+                elif expected_closure_kind == "deleted":
+                    post_upgrade = closure_data.get("post_upgrade_observation")
+                    post_data = post_upgrade if isinstance(post_upgrade, dict) else {}
+                    deletion = prior.get("deletion")
+                    deletion_data = deletion if isinstance(deletion, dict) else {}
+                    raw_checks = post_data.get("checks")
+                    post_checks = (
+                        {
+                            str(check.get("check_id")): check.get("outcome")
+                            for check in raw_checks
+                            if isinstance(check, dict)
+                        }
+                        if isinstance(raw_checks, list)
+                        else {}
+                    )
+                    required_post_checks = {
+                        "post_upgrade_objects_absent",
+                        "owner_paths_pass_without_fallback",
+                        "intended_revision_running",
+                        "old_processes_drained",
+                        "old_process_restart_prevented",
+                    }
+                    if (
+                        prior.get("source_state") != "drained"
+                        or prior.get("requested_gate") != "post_upgrade"
+                        or post_data.get("repository")
+                        != str(profile.repository.canonical_url)
+                        or post_data.get("deletion_migration")
+                        != deletion_data.get("migration")
+                        or post_data.get("refresh_owner")
+                        != prior.get("accountable_owner")
+                        or post_data.get("catalogue_coverage") != "measured"
+                        or post_data.get("catalogue_edges") != []
+                        or set(post_checks) != required_post_checks
+                        or any(
+                            post_checks[check] != "pass"
+                            for check in required_post_checks
+                        )
+                    ):
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                                f"retirement {rid}: deleted closure does not bind the canonical repository and reviewed migration; direction=active-to-post-upgrade",
+                            )
+                        )
+            continue
+        if current_item.get("relation") != prior_relation:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: relation identity changed; direction=base-to-current",
+                )
+            )
+        previous = prior.get("authority_transition", {})
+        present = current_item.get("authority_transition", {})
+        if not isinstance(previous, dict) or not isinstance(present, dict):
+            continue
+        if previous.get("state") == "module_active":
+            if present != previous:
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                        f"retirement {rid}: module authority transition changed or reversed; direction=module-active-to-immutable",
+                    )
+                )
+        elif (
+            previous.get("state") == "legacy_active"
+            and present.get("state") == "module_active"
+        ):
+            displaced = present.get("displaced_authority", {})
+            activation = present.get("activation_record")
+            expected_displaced = {
+                "authority_id": previous.get("current_authority_id"),
+                "writer": previous.get("current_writer"),
+                "historical_profile": expected_historical,
+            }
+            activation_data = activation if isinstance(activation, dict) else {}
+            activation_valid = isinstance(activation, dict)
+            if activation_valid:
+                coordinates = {
+                    key: activation_data.get(key)
+                    for key in ("repository", "commit", "path", "sha256")
+                }
+                activation_valid = (
+                    coordinates != expected_historical
+                    and coordinates["repository"]
+                    == str(profile.repository.canonical_url)
+                    and isinstance(coordinates["commit"], str)
+                    and isinstance(coordinates["path"], str)
+                    and isinstance(coordinates["sha256"], str)
+                )
+                if activation_valid:
+                    try:
+                        activation_bytes = subprocess.check_output(
+                            [
+                                "git",
+                                "show",
+                                f"{coordinates['commit']}:{coordinates['path']}",
+                            ],
+                            cwd=root,
+                            timeout=10,
+                        )
+                        activation_valid = (
+                            hashlib.sha256(activation_bytes).hexdigest()
+                            == coordinates["sha256"]
+                        )
+                    except (OSError, subprocess.SubprocessError):
+                        activation_valid = False
+            if (
+                displaced != expected_displaced
+                or present.get("current_authority_id")
+                != previous.get("target_module_authority_id")
+                or not activation_valid
+                or activation_data.get("retirement_id") != rid
+                or activation_data.get("relation_identity")
+                != prior_relation.get("identity")
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                        f"retirement {rid}: activation does not bind trusted legacy authority/profile; direction=legacy-to-module-active",
+                    )
+                )
+        elif (
+            previous.get("state") == "legacy_active"
+            and present.get("state") == "legacy_active"
+            and present != previous
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: legacy authority transition changed without activation; direction=legacy-to-immutable",
+                )
+            )
+        elif (
+            previous.get("state") == "module_active"
+            and present.get("state") == "legacy_active"
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: authority transition reversed; direction=module-active-to-legacy",
+                )
+            )
+        if (
+            prior.get("source_state") == "drained"
+            and current_item.get("source_state") == "draining"
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    f"retirement {rid}: source transition reversed; direction=drained-to-draining",
+                )
+            )
+    return findings
+
+
+def _retirement_contracts(
+    root: Path,
+    profile: StandardsProfile,
+    bundle: RetirementObservationBundle | None,
+    *,
+    observed_governance_revision: GitRevision | None,
+    observed_revision: GitRevision | None,
+) -> tuple[list[Diagnostic], str, str, bool]:
+    """Evaluate repository declarations only; collectors own all observations.
+
+    This deliberately makes no database or network call.  A non-empty
+    enrollment without its separately supplied observation is reported as such
+    rather than treated as a zero inventory.
+    """
+    findings: list[Diagnostic] = []
+    product_supplied = False
+    product_errors = False
+    target_supplied = False
+    target_errors = False
+    repository_diagnostic_ids: set[int] = set()
+    evidence_diagnostic_ids: set[int] = set()
+    head = (
+        str(observed_revision)
+        if observed_revision is not None
+        else _git(root, "rev-parse", "HEAD")
+    )
+    canonical_repository = str(profile.repository.canonical_url)
+    authority_paths = {
+        authority.authority_id: set(authority.canonical_writer_paths)
+        for authority in profile.authorities
+    }
+    enrolled = {item.retirement_id for item in profile.compatibility_retirements}
+    observed_ids = (
+        set()
+        if bundle is None
+        else {item.retirement_id for item in bundle.observations}
+    )
+    id_mismatch = bundle is not None and observed_ids != enrolled
+    if id_mismatch:
+        evidence_start = len(findings)
+        for rid in sorted(observed_ids ^ enrolled):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_SURFACE_DUPLICATE,
+                    f"retirement {rid}: enrollment identity is absent on one bundle side; direction=enrolled-to-observed",
+                )
+            )
+        evidence_diagnostic_ids.update(id(item) for item in findings[evidence_start:])
+    bundle_mismatch = id_mismatch
+    if bundle is not None:
+        bundle_mismatch = bundle_mismatch or (
+            bundle.repository != canonical_repository
+            or bundle.product_revision != head
+            or observed_governance_revision is None
+            or bundle.governance_revision != str(observed_governance_revision)
+        )
+
+    def compare_catalogue(
+        rid: str,
+        label: str,
+        expected: Sequence[CatalogueRetirementEdge],
+        actual: Sequence[CatalogueRetirementEdge],
+    ) -> None:
+        declared = {edge.key: edge.definition_sha256 for edge in expected}
+        seen = {edge.key: edge.definition_sha256 for edge in actual}
+        for identity in sorted(seen.keys() - declared.keys(), key=str):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_CATALOGUE_ADDED,
+                    f"retirement {rid}: catalogue identity {identity} added in {label}; direction=observed-minus-reviewed",
+                )
+            )
+        for identity in sorted(declared.keys() - seen.keys(), key=str):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_CATALOGUE_STALE,
+                    f"retirement {rid}: catalogue identity {identity} stale in {label}; direction=reviewed-minus-observed",
+                )
+            )
+        for identity in sorted(declared.keys() & seen.keys(), key=str):
+            if declared[identity] != seen[identity]:
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_CATALOGUE_CHANGED,
+                        f"retirement {rid}: catalogue identity {identity} changed in {label}; direction=reviewed-to-observed",
+                    )
+                )
+
+    def checks(
+        rid: str,
+        label: str,
+        records: Sequence[CheckResult],
+        required: set[str],
+        forbidden: set[str] | None = None,
+    ) -> None:
+        results = {record.check_id: record.outcome for record in records}
+        for check in sorted(required):
+            if results.get(check) != "pass":
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                        f"retirement {rid}: check {check} in {label} is not pass; direction=required-to-pass",
+                    )
+                )
+        for check in sorted((forbidden or set()) & results.keys()):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                    f"retirement {rid}: check {check} appears after refusal stage in {label}; direction=absent-to-present",
+                )
+            )
+        for check in sorted(results.keys() - required):
+            if check not in (forbidden or set()):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                        f"retirement {rid}: check {check} is inapplicable in {label}; direction=absent-to-present",
+                    )
+                )
+
+    admission = {
+        "source_edges_zero",
+        "consumers_zero",
+        "writers_absent_or_exact_teardown",
+        "catalogue_matches_reviewed_teardown",
+        "deletion_lineage_owned",
+    }
+    exit_checks = {
+        "archival": "archival_exit_settled",
+        "external_clients": "external_clients_exited",
+        "old_process_drain": "old_processes_drained",
+        "restart_prevention": "old_process_restart_prevented",
+    }
+    for retirement in profile.compatibility_retirements:
+        repository_start = len(findings)
+        rid = retirement.retirement_id
+        if retirement.projection_kind is not None and (
+            (retirement.relation_kind == "view")
+            != (retirement.projection_kind == "ordinary_view")
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_PROJECTION_INVALID,
+                    f"retirement {rid}: projection kind {retirement.projection_kind} conflicts with relation kind {retirement.relation_kind}; direction=relation-to-projection",
+                )
+            )
+        if (
+            retirement.deletion_owner_lineage is not None
+            and retirement.deletion_owner_lineage != retirement.owner_lineage
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_DELETION_LINEAGE_MISMATCH,
+                    f"retirement {rid}: deletion lineage {retirement.deletion_owner_lineage} does not own relation lineage {retirement.owner_lineage}; direction=relation-to-deletion",
+                )
+            )
+        if retirement.deletion_migration is not None and not _is_migration_entrypoint(
+            retirement.deletion_migration
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_DELETION_LINEAGE_MISMATCH,
+                    f"retirement {rid}: deletion reference is not a versioned Python migration upgrade entry point; direction=deletion-to-owner-lineage",
+                    path=retirement.deletion_migration.path,
+                )
+            )
+        # Governance can prove the declared owner equals the relation owner and
+        # that the referenced source is a migration entry point.  The product's
+        # controlled `deletion_lineage_owned` result proves membership in that
+        # product-specific lineage; authenticating its artefact remains outside
+        # this repository under ADR 0013 open decision 18.
+        if (
+            retirement.disposition_kind == "retain_product_record"
+            and retirement.disposition_authority_id not in authority_paths
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    f"retirement {rid}: retained product record authority {retirement.disposition_authority_id} is not declared; direction=disposition-to-authority",
+                )
+            )
+        current_paths = authority_paths.get(retirement.current_authority_id)
+        if current_paths is None or retirement.current_writer.path not in current_paths:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    f"retirement {rid}: authority/current writer binding is not declared; direction=authority-to-writer",
+                )
+            )
+        references = [retirement.current_writer, retirement.collector]
+        references.extend(retirement.consumer_blocked_by)
+        if retirement.projection_writer is not None:
+            references.append(retirement.projection_writer)
+        if retirement.deletion_migration is not None:
+            references.append(retirement.deletion_migration)
+        for reference in references:
+            if not _reference_exists(root, reference):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_EVIDENCE_UNKNOWN,
+                        f"retirement {rid}: source reference {reference.path} is unresolved; direction=declared-to-source",
+                        path=reference.path,
+                    )
+                )
+        workflow = root.joinpath(*retirement.collector_workflow_path.parts)
+        try:
+            workflow.resolve(strict=True).relative_to(root.resolve())
+            if not workflow.is_file():
+                raise OSError
+        except (OSError, ValueError):
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_EVIDENCE_UNKNOWN,
+                    f"retirement {rid}: collector workflow {retirement.collector_workflow_path} is unresolved; direction=declared-to-source",
+                    path=retirement.collector_workflow_path,
+                )
+            )
+        forbidden = {"local_decision_writer", "reverse_feed", "fallback_writer"}
+        declared_consumers = set(retirement.consumers)
+        baseline_consumers = {
+            edge.consumer_id
+            for edge in retirement.static_baseline
+            if edge.kind == "consumer" and edge.consumer_id is not None
+        }
+        if baseline_consumers != declared_consumers:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_SURFACE_DUPLICATE,
+                    f"retirement {rid}: consumer identities do not match static baseline; direction=consumers-to-static",
+                )
+            )
+        if retirement.authority_state == "module_active":
+            for edge in retirement.static_baseline:
+                if edge.kind in forbidden:
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_WRITER_FORBIDDEN,
+                            f"retirement {rid}: static identity {edge.kind}:{edge.path}:{edge.symbol} remains after module activation; direction=baseline-to-forbidden",
+                            path=edge.path,
+                        )
+                    )
+        observed = (
+            None
+            if bundle is None
+            else next(
+                (item for item in bundle.observations if item.retirement_id == rid),
+                None,
+            )
+        )
+        observed_evidence_start = len(findings)
+        if observed is not None and observed.source_coverage != "measured":
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_SOURCE_UNMEASURED,
+                    f"retirement {rid}: source coverage is unmeasured; direction=unmeasured-to-required",
+                )
+            )
+        if observed is not None:
+            assert bundle is not None
+            if (
+                bundle.producer_id != retirement.collector_producer_id
+                or bundle.normalization_version != retirement.normalization_version
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                        f"retirement {rid}: bundle producer or normalization does not match collector; direction=collector-to-bundle",
+                    )
+                )
+            if (
+                bundle.repository != canonical_repository
+                or bundle.product_revision != head
+                or observed_governance_revision is None
+                or bundle.governance_revision != str(observed_governance_revision)
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                        f"retirement {rid}: bundle coordinates do not bind trusted checkout; direction=trusted-to-bundle",
+                    )
+                )
+            declared = {
+                edge.identity: edge.fingerprint for edge in retirement.static_baseline
+            }
+            actual = {edge.identity: edge.fingerprint for edge in observed.static_edges}
+            for identity in sorted(actual.keys() - declared.keys(), key=str):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_STATIC_ADDED,
+                        f"retirement {rid}: static identity {identity} was added; direction=observed-minus-baseline",
+                    )
+                )
+            for identity in sorted(declared.keys() - actual.keys(), key=str):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_STATIC_STALE,
+                        f"retirement {rid}: static identity {identity} is stale; direction=baseline-minus-observed",
+                    )
+                )
+            for identity in sorted(declared.keys() & actual.keys(), key=str):
+                if declared[identity] != actual[identity]:
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_STATIC_CHANGED,
+                            f"retirement {rid}: static identity {identity} fingerprint changed; direction=baseline-to-observed",
+                        )
+                    )
+            writers = set(observed.canonical_decision_writers)
+            if writers != {retirement.current_writer}:
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                        f"retirement {rid}: observed canonical writer set does not equal declared writer binding; direction=declared-to-observed",
+                    )
+                )
+            if retirement.authority_state == "module_active":
+                for edge in observed.static_edges:
+                    if edge.kind in forbidden:
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_WRITER_FORBIDDEN,
+                                f"retirement {rid}: writer identity {edge.kind}:{edge.path}:{edge.symbol} remains module-active; direction=forbidden-to-absent",
+                                path=edge.path,
+                            )
+                        )
+            if retirement.source_state == "drained" and (
+                observed.static_edges or retirement.consumers
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                        f"retirement {rid}: drained source has nonzero static edges or consumers; direction=nonzero-to-zero",
+                    )
+                )
+            observed_consumers = {
+                edge.consumer_id
+                for edge in observed.static_edges
+                if edge.kind == "consumer" and edge.consumer_id is not None
+            }
+            if observed_consumers != declared_consumers:
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_SURFACE_DUPLICATE,
+                        f"retirement {rid}: observed consumer identities do not match declaration; direction=declaration-to-observed",
+                    )
+                )
+            evidence_diagnostic_ids.update(
+                id(item) for item in findings[observed_evidence_start:]
+            )
+            migration = observed.migration_database
+            repository_diagnostic_ids.update(
+                id(item)
+                for item in findings[repository_start:]
+                if id(item) not in evidence_diagnostic_ids
+            )
+            product_start = len(findings)
+            if migration is None:
+                if retirement.requested_gate != "none":
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_EVIDENCE_MISSING,
+                            f"retirement {rid}: requested gate {retirement.requested_gate} has no product migration evidence; direction=required-to-missing",
+                        )
+                    )
+            else:
+                product_supplied = True
+                if (
+                    migration.repository,
+                    migration.commit,
+                    migration.governance_revision,
+                    migration.collector,
+                ) != (
+                    bundle.repository,
+                    bundle.product_revision,
+                    bundle.governance_revision,
+                    retirement.collector,
+                ):
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                            f"retirement {rid}: product evidence repository/commit/governance/collector mismatches declaration; direction=bundle-to-product",
+                        )
+                    )
+                if migration.catalogue_coverage != "measured":
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_SOURCE_UNMEASURED,
+                            f"retirement {rid}: product admission catalogue is unmeasured; direction=measured-to-required",
+                        )
+                    )
+                compare_catalogue(
+                    rid,
+                    "product admission",
+                    (
+                        retirement.teardown_set
+                        if retirement.deletion_migration is not None
+                        else retirement.catalogue_baseline
+                    ),
+                    migration.catalogue_edges,
+                )
+                checks(rid, "product admission", migration.checks, admission)
+                for attempt in migration.transaction_attempts:
+                    required_product = {"failure_rolls_back_without_partial_teardown"}
+                    forbidden_product: set[str] = set()
+                    if attempt.scenario == "inventory_mismatch":
+                        required_product |= {
+                            "exclusive_nowait_fences_held",
+                            "inventory_rechecked_under_fence",
+                        }
+                        forbidden_product = {
+                            "teardown_in_dependency_order",
+                            "drop_restrict_used",
+                        }
+                    elif attempt.scenario == "drop_restrict_dependency":
+                        required_product |= {
+                            "exclusive_nowait_fences_held",
+                            "inventory_rechecked_under_fence",
+                            "teardown_in_dependency_order",
+                            "drop_restrict_used",
+                        }
+                    elif attempt.catalogue_coverage != "unmeasured":
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+                                f"retirement {rid}: check {attempt.scenario} fence refusal catalogue coverage is not unmeasured; direction=unmeasured-to-observed",
+                            )
+                        )
+                    if attempt.scenario == "lock_contention":
+                        forbidden_product = {
+                            "exclusive_nowait_fences_held",
+                            "inventory_rechecked_under_fence",
+                            "teardown_in_dependency_order",
+                            "drop_restrict_used",
+                        }
+                    checks(
+                        rid,
+                        f"product {attempt.scenario}",
+                        attempt.checks,
+                        required_product,
+                        forbidden_product,
+                    )
+                    if attempt.scenario == "inventory_mismatch":
+                        if attempt.catalogue_coverage != "measured":
+                            findings.append(
+                                _finding(
+                                    DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+                                    f"retirement {rid}: product inventory-mismatch catalogue is unmeasured; direction=measured-to-required",
+                                )
+                            )
+                        if {
+                            edge.key: edge.definition_sha256
+                            for edge in attempt.catalogue_edges
+                        } == {
+                            edge.key: edge.definition_sha256
+                            for edge in retirement.teardown_set
+                        }:
+                            findings.append(
+                                _finding(
+                                    DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+                                    f"retirement {rid}: inventory-mismatch catalogue does not differ from teardown set; direction=mismatch-to-different",
+                                )
+                            )
+                    elif attempt.scenario == "drop_restrict_dependency":
+                        compare_catalogue(
+                            rid,
+                            "product teardown refusal",
+                            retirement.teardown_set,
+                            attempt.catalogue_edges,
+                        )
+            product_errors = product_errors or len(findings) > product_start
+            target_start = len(findings)
+            target_chain_coordinates = (
+                None
+                if not observed.deployed_target
+                else (
+                    observed.deployed_target[0].repository,
+                    observed.deployed_target[0].commit,
+                    observed.deployed_target[0].governance_revision,
+                    observed.deployed_target[0].image_digest,
+                    observed.deployed_target[0].target,
+                    observed.deployed_target[0].deletion_migration,
+                )
+            )
+            for phase in observed.deployed_target:
+                target_supplied = True
+                phase_coordinates = (
+                    phase.repository,
+                    phase.commit,
+                    phase.governance_revision,
+                    phase.image_digest,
+                    phase.target,
+                    phase.deletion_migration,
+                )
+                if phase_coordinates != target_chain_coordinates:
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                            f"retirement {rid}: target phase {phase.phase} changes stable chain coordinates; direction=first-phase-to-current-phase",
+                        )
+                    )
+                if (
+                    phase.repository,
+                    phase.commit,
+                    phase.governance_revision,
+                    phase.deletion_migration,
+                    phase.refresh_owner,
+                ) != (
+                    bundle.repository,
+                    bundle.product_revision,
+                    bundle.governance_revision,
+                    retirement.deletion_migration,
+                    retirement.accountable_owner,
+                ):
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                            f"retirement {rid}: target phase {phase.phase} coordinate, deletion migration, or refresh owner mismatches declaration; direction=declaration-to-target",
+                        )
+                    )
+                required_target: set[str]
+                forbidden_target: set[str] = set()
+                expected_catalogue: tuple[CatalogueRetirementEdge, ...] | None = (
+                    retirement.catalogue_baseline
+                )
+                if phase.phase == "pre_drop":
+                    required_target = admission | set(exit_checks.values())
+                    if retirement.projection_kind == "stored":
+                        required_target.add("projection_fixed_point")
+                    expected_catalogue = (
+                        retirement.teardown_set
+                        if retirement.deletion_migration
+                        else retirement.catalogue_baseline
+                    )
+                elif phase.phase == "post_upgrade":
+                    required_target = {
+                        "post_upgrade_objects_absent",
+                        "owner_paths_pass_without_fallback",
+                        "intended_revision_running",
+                        "old_processes_drained",
+                        "old_process_restart_prevented",
+                    }
+                    expected_catalogue = ()
+                elif phase.transaction_outcome == "committed":
+                    required_target = {
+                        "exclusive_nowait_fences_held",
+                        "inventory_rechecked_under_fence",
+                        "catalogue_matches_reviewed_teardown",
+                        "teardown_in_dependency_order",
+                        "drop_restrict_used",
+                    }
+                    expected_catalogue = retirement.teardown_set
+                elif phase.refusal_stage == "fence_acquisition":
+                    required_target = {"failure_rolls_back_without_partial_teardown"}
+                    forbidden_target = {
+                        "exclusive_nowait_fences_held",
+                        "inventory_rechecked_under_fence",
+                        "teardown_in_dependency_order",
+                        "drop_restrict_used",
+                    }
+                    if phase.catalogue_coverage != "unmeasured":
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+                                f"retirement {rid}: fence refusal catalogue is not unmeasured; direction=unmeasured-to-observed",
+                            )
+                        )
+                    expected_catalogue = None
+                elif phase.refusal_stage == "inventory_validation":
+                    required_target = {
+                        "exclusive_nowait_fences_held",
+                        "inventory_rechecked_under_fence",
+                        "failure_rolls_back_without_partial_teardown",
+                    }
+                    forbidden_target = {
+                        "teardown_in_dependency_order",
+                        "drop_restrict_used",
+                    }
+                    expected_catalogue = None
+                else:
+                    required_target = {
+                        "exclusive_nowait_fences_held",
+                        "inventory_rechecked_under_fence",
+                        "teardown_in_dependency_order",
+                        "drop_restrict_used",
+                        "failure_rolls_back_without_partial_teardown",
+                    }
+                    expected_catalogue = retirement.teardown_set
+                checks(
+                    rid,
+                    f"target {phase.phase}",
+                    phase.checks,
+                    required_target,
+                    forbidden_target,
+                )
+                if expected_catalogue is not None:
+                    if phase.catalogue_coverage != "measured":
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_SOURCE_UNMEASURED,
+                                f"retirement {rid}: target {phase.phase} catalogue is unmeasured; direction=measured-to-required",
+                            )
+                        )
+                    compare_catalogue(
+                        rid,
+                        f"target {phase.phase}",
+                        expected_catalogue,
+                        phase.catalogue_edges,
+                    )
+                elif phase.refusal_stage == "inventory_validation":
+                    if phase.catalogue_coverage != "measured":
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+                                f"retirement {rid}: target inventory-validation catalogue is unmeasured; direction=measured-to-required",
+                            )
+                        )
+                    elif {
+                        edge.key: edge.definition_sha256
+                        for edge in phase.catalogue_edges
+                    } == {
+                        edge.key: edge.definition_sha256
+                        for edge in retirement.teardown_set
+                    }:
+                        findings.append(
+                            _finding(
+                                DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+                                f"retirement {rid}: target inventory-validation catalogue does not differ from teardown set; direction=mismatch-to-different",
+                            )
+                        )
+            target_phases = observed.deployed_target
+            if retirement.requested_gate == "pre_drop" and not any(
+                phase.phase == "pre_drop" for phase in target_phases
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.RETIREMENT_EVIDENCE_MISSING,
+                        f"retirement {rid}: requested gate pre_drop has no pre_drop target observation; direction=required-to-missing",
+                    )
+                )
+            if retirement.requested_gate == "post_upgrade":
+                committed = any(
+                    phase.phase == "atomic_teardown"
+                    and phase.transaction_outcome == "committed"
+                    for phase in target_phases
+                )
+                post = any(phase.phase == "post_upgrade" for phase in target_phases)
+                if not committed or not post:
+                    findings.append(
+                        _finding(
+                            DiagnosticCode.RETIREMENT_COMPLETION_UNSUPPORTED,
+                            f"retirement {rid}: requested gate post_upgrade lacks committed atomic predecessor or post_upgrade observation; direction=predecessor-to-completion",
+                        )
+                    )
+            target_errors = target_errors or len(findings) > target_start
+        else:
+            repository_diagnostic_ids.update(
+                id(item)
+                for item in findings[repository_start:]
+                if id(item) not in evidence_diagnostic_ids
+            )
+        if retirement.requested_gate != "none" and observed is None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_EVIDENCE_MISSING,
+                    f"retirement {rid}: requested gate {retirement.requested_gate} has no supplied target observation; direction=required-to-missing",
+                )
+            )
+        elif observed is None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_EVIDENCE_MISSING,
+                    f"retirement {rid}: enrolled slice has no supplied observation bundle; direction=enrollment-to-evidence",
+                )
+            )
+    if bundle_mismatch:
+        product_errors = product_errors or product_supplied
+        target_errors = target_errors or target_supplied
+    repository_error = any(
+        item.severity is Severity.ERROR and id(item) in repository_diagnostic_ids
+        for item in findings
+    )
+    return (
+        findings,
+        "inconsistent"
+        if product_errors
+        else "consistent"
+        if product_supplied
+        else "not_supplied",
+        "inconsistent"
+        if target_errors
+        else "consistent"
+        if target_supplied
+        else "not_supplied",
+        repository_error,
+    )
 
 
 def _normalize_url(raw: str) -> CanonicalRepository | None:
@@ -3101,7 +4407,7 @@ def _schedule_table_subjects(tree: ast.Module) -> list[str]:
         for child in ast.walk(node):
             if not isinstance(child, ast.Dict):
                 continue
-            for key, value in zip(child.keys, child.values):
+            for key, value in zip(child.keys, child.values, strict=False):
                 if (
                     isinstance(key, ast.Constant)
                     and key.value == SCHEDULE_TABLE_TASK_KEY
@@ -4804,15 +6110,37 @@ def verify_repository(
     governance_root: Path | None = None,
     observed_governance_repository: CanonicalRepository | None = None,
     observed_governance_revision: GitRevision | None = None,
+    base_revision: GitRevision | None = None,
+    observed_revision: GitRevision | None = None,
+    retirement_observation_path: Path | None = None,
 ) -> ConformanceReport:
     """Evaluate one repository through the single typed policy owner."""
     try:
         profile = load_profile(profile_path)
     except ProfileError as error:
         return ConformanceReport(
-            None, None, (_finding(DiagnosticCode.PROFILE_INVALID, str(error)),)
+            None,
+            None,
+            (_finding(DiagnosticCode.PROFILE_INVALID, str(error)),),
+            repository_contracts="fail",
         )
     findings: list[Diagnostic] = []
+    bundle: RetirementObservationBundle | None = None
+    malformed_retirement_observation = False
+    if retirement_observation_path is not None:
+        try:
+            bundle = parse_observation_bundle(
+                json.loads(retirement_observation_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, RetirementError) as error:
+            malformed_retirement_observation = True
+            findings.append(
+                _finding(
+                    DiagnosticCode.RETIREMENT_EVIDENCE_UNKNOWN,
+                    f"retirement observation is invalid: {error}",
+                )
+            )
+    repository_start = len(findings)
     repository = observed_repository or _git_origin(root)
     if repository is None:
         findings.append(
@@ -4860,6 +6188,27 @@ def verify_repository(
         )
     )
     findings.extend(_authorities(root, profile))
+    findings.extend(
+        _trusted_retirement_transitions(root, profile_path, profile, base_revision)
+    )
+    repository_before_retirement_end = len(findings)
+    (
+        retirement_findings,
+        product_revision_evidence,
+        target_evidence,
+        retirement_error,
+    ) = _retirement_contracts(
+        root,
+        profile,
+        bundle,
+        observed_governance_revision=observed_governance_revision,
+        observed_revision=observed_revision,
+    )
+    if malformed_retirement_observation:
+        product_revision_evidence = "inconsistent"
+        target_evidence = "inconsistent"
+    findings.extend(retirement_findings)
+    repository_after_retirement_start = len(findings)
     for surface in profile.typed_contract_surfaces:
         findings.extend(_typed(root, surface))
     for vocabulary in profile.module_declared_vocabularies:
@@ -4943,6 +6292,17 @@ def verify_repository(
     findings.extend(_testing_kit(root, profile.testing_kit_boundary, inventory or ()))
     findings.extend(_external_connector(root, profile, scope))
     findings.extend(_deployment_artefact(root, profile.deployment_artefact_surfaces))
+    repository_error = (
+        retirement_error
+        or any(
+            item.severity is Severity.ERROR
+            for item in findings[repository_start:repository_before_retirement_end]
+        )
+        or any(
+            item.severity is Severity.ERROR
+            for item in findings[repository_after_retirement_start:]
+        )
+    )
     return ConformanceReport(
         profile.profile_id,
         profile.enforcement_mode,
@@ -4956,4 +6316,8 @@ def verify_repository(
                 ),
             )
         ),
+        tuple(item.retirement_id for item in profile.compatibility_retirements),
+        product_revision_evidence,
+        target_evidence,
+        "fail" if repository_error else "pass",
     )

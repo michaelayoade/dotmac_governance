@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
 from .contracts import BranchName, CanonicalRepository, GitRevision
 from .engine import verify_repository
+
+
+def _git_revision(value: str) -> GitRevision:
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise argparse.ArgumentTypeError("must be a full lower-case Git SHA")
+    return GitRevision(value)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -23,6 +30,17 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--governance-root", type=Path)
     verify.add_argument("--governance-repository")
     verify.add_argument("--governance-revision")
+    verify.add_argument(
+        "--base-revision",
+        type=_git_revision,
+        help="Trusted base commit for history-sensitive checks.",
+    )
+    verify.add_argument(
+        "--repository-revision",
+        type=_git_revision,
+        help="Trusted checked-out product commit.",
+    )
+    verify.add_argument("--retirement-observation", type=Path)
     verify.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
@@ -57,13 +75,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         governance_root=governance_root,
         observed_governance_repository=governance_repository,
         observed_governance_revision=governance_revision,
+        observed_revision=arguments.repository_revision,
+        base_revision=arguments.base_revision,
+        retirement_observation_path=arguments.retirement_observation,
     )
     if arguments.format == "json":
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     else:
         state = "PASS" if report.conforms else "FAIL"
         mode = report.enforcement_mode.value if report.enforcement_mode else "unknown"
-        print(f"{state} profile={report.profile_id or 'invalid'} mode={mode}")
+        retirements = ",".join(report.enrolled_retirement_ids) or "none"
+        print(
+            f"{state} profile={report.profile_id or 'invalid'} mode={mode} "
+            f"repository_contracts={report.to_dict()['repository_contracts']} "
+            f"product_revision_evidence={report.product_revision_evidence} "
+            f"target_evidence={report.target_evidence} "
+            f"enrolled_retirement_ids={retirements}"
+        )
         for item in report.diagnostics:
             location = f" {item.path}" if item.path else ""
             if item.line is not None:

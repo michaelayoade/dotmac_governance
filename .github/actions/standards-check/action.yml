@@ -17,6 +17,10 @@ inputs:
     description: Conformance report format (text or json).
     required: false
     default: text
+  retirement-observation:
+    description: Optional path to a generated retirement observation bundle.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -28,14 +32,25 @@ runs:
         DOTMAC_STANDARDS_PROFILE: ${{ inputs.profile }}
         DOTMAC_STANDARDS_DEFAULT_BRANCH: ${{ inputs.default-branch }}
         DOTMAC_STANDARDS_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        DOTMAC_STANDARDS_RETIREMENT_OBSERVATION: ${{ inputs.retirement-observation }}
+        DOTMAC_STANDARDS_BASE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        DOTMAC_STANDARDS_PRODUCT_REVISION: ${{ github.sha }}
         DOTMAC_STANDARDS_GOVERNANCE_REPOSITORY: ${{ github.action_repository }}
         DOTMAC_STANDARDS_GOVERNANCE_REVISION: ${{ github.action_ref }}
       run: |
-        python3 "${GITHUB_ACTION_PATH}/../../../tools/dotmac-standards" verify \
+        args=(python3 "${GITHUB_ACTION_PATH}/../../../tools/dotmac-standards" verify \
           --root "${DOTMAC_STANDARDS_ROOT}" \
           --profile "${DOTMAC_STANDARDS_PROFILE}" \
           --default-branch "${DOTMAC_STANDARDS_DEFAULT_BRANCH}" \
           --governance-root "${GITHUB_ACTION_PATH}/../../.." \
           --governance-repository "${DOTMAC_STANDARDS_GOVERNANCE_REPOSITORY}" \
           --governance-revision "${DOTMAC_STANDARDS_GOVERNANCE_REVISION}" \
-          --format "${DOTMAC_STANDARDS_OUTPUT_FORMAT}"
+          --repository-revision "${DOTMAC_STANDARDS_PRODUCT_REVISION}" \
+          --format "${DOTMAC_STANDARDS_OUTPUT_FORMAT}")
+        if [[ -n "${DOTMAC_STANDARDS_BASE_REVISION}" && "${DOTMAC_STANDARDS_BASE_REVISION}" != "0000000000000000000000000000000000000000" ]]; then
+          args+=(--base-revision "${DOTMAC_STANDARDS_BASE_REVISION}")
+        fi
+        if [[ -n "${DOTMAC_STANDARDS_RETIREMENT_OBSERVATION}" ]]; then
+          args+=(--retirement-observation "${DOTMAC_STANDARDS_RETIREMENT_OBSERVATION}")
+        fi
+        "${args[@]}"

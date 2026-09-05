@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "profile_id": "dotmac-governance-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
@@ -43,7 +43,8 @@
     {
       "surface_id": "standards-control-contracts",
       "paths": [
-        "standards_control/contracts.py"
+        "standards_control/contracts.py",
+        "standards_control/retirement.py"
       ],
       "require_public_annotations": true,
       "forbid_any": true,
@@ -69,5 +70,7 @@
     },
     "conserved_exclusions": []
   },
-  "deployment_artefact_surfaces": []
+  "deployment_artefact_surfaces": [],
+  "compatibility_retirements": [],
+  "retirement_history": []
 }

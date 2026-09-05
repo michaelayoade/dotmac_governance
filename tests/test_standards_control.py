@@ -28,6 +28,11 @@ from standards_control.engine import (
     connector_scope,
     verify_repository,
 )
+from standards_control.retirement import (
+    RetirementError,
+    parse_observation_bundle,
+    parse_retirements,
+)
 
 REPOSITORY = CanonicalRepository("https://github.com/michaelayoade/dotmac_governance")
 PRODUCT_REPOSITORY = CanonicalRepository("https://github.com/michaelayoade/example")
@@ -1832,7 +1837,7 @@ def deployment_files(
 
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 10,
+        "schema_version": 11,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
         "governance_model": {
@@ -1871,6 +1876,8 @@ def profile() -> dict[str, object]:
         },
         "external_connector_surface": connector_surface(),
         "deployment_artefact_surfaces": [deployment_surface()],
+        "compatibility_retirements": [],
+        "retirement_history": [],
     }
 
 
@@ -2759,7 +2766,7 @@ class StandardsTests(unittest.TestCase):
             schema["properties"]["enforcement_mode"]["enum"],
             ["candidate", "required"],
         )
-        self.assertEqual(schema["properties"]["schema_version"]["const"], 10)
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 11)
         self.assertIn("testing_kit_boundary", schema["required"])
         self.assertIn("external_connector_surface", schema["required"])
         # ADR 0014's surface is REQUIRED, not optional. An optional key would
@@ -6249,3 +6256,2096 @@ class UntrackedSourceTests(unittest.TestCase):
             probe.unlink(missing_ok=True)
         after = connector_scope(ROOT)
         self.assertEqual(after.untracked, (), "the in-situ probe was not restored")
+
+
+def retirement_source(kind: str = "python_symbol") -> dict[str, str]:
+    if kind == "document_section":
+        return {"kind": kind, "path": "docs/retirement.md", "anchor": "Collector"}
+    return {"kind": kind, "path": "example/service.py", "symbol": "example.decide"}
+
+
+def retirement_migration_source() -> dict[str, str]:
+    return {
+        "kind": "python_symbol",
+        "path": "migrations/drop_example.py",
+        "symbol": "migrations.drop_example.upgrade",
+    }
+
+
+def retirement_declaration() -> dict[str, object]:
+    return {
+        "retirement_id": "example-cache-retirement",
+        "authority_transition": {
+            "state": "legacy_active",
+            "current_authority_id": "example-owner",
+            "current_writer": retirement_source(),
+            "target_module_authority_id": "example-module",
+        },
+        "accountable_owner": "example-team",
+        "relation": {
+            "kind": "cache",
+            "identity": "example-cache",
+            "owner_lineage": "example-product",
+        },
+        "disposition": {
+            "kind": "retain_product_record",
+            "authority_id": "example-owner",
+            "reason": "Independent product record remains.",
+        },
+        "source_state": "draining",
+        "requested_gate": "none",
+        "consumers": [],
+        "static_baseline": [],
+        "catalogue_baseline": [],
+        "collector": {
+            "source": retirement_source(),
+            "workflow_path": ".github/workflows/retirement.yml",
+            "producer_id": "example-collector",
+            "normalization_version": "python-ast-v1",
+        },
+        "deletion": None,
+        "external_exit_conditions": [
+            {
+                "condition_id": "archival",
+                "kind": "archival",
+                "status": "required",
+                "accountable_owner": "example-team",
+                "requirement": "Archive the record.",
+            },
+            {
+                "condition_id": "clients",
+                "kind": "external_clients",
+                "status": "not_applicable",
+                "accountable_owner": "example-team",
+                "rationale": "No external clients.",
+            },
+            {
+                "condition_id": "drain",
+                "kind": "old_process_drain",
+                "status": "required",
+                "accountable_owner": "example-team",
+                "requirement": "Drain old workers.",
+            },
+            {
+                "condition_id": "restart",
+                "kind": "restart_prevention",
+                "status": "required",
+                "accountable_owner": "example-team",
+                "requirement": "Prevent restart.",
+            },
+        ],
+    }
+
+
+def observation_bundle() -> dict[str, object]:
+    static_kinds = [
+        "local_decision_writer",
+        "compatibility_writer",
+        "reverse_feed",
+        "fallback_writer",
+        "reader",
+        "caller",
+        "import",
+        "orm_relationship",
+        "dependency",
+        "repair_job",
+        "refresh_job",
+        "consumer",
+    ]
+    return {
+        "schema_version": 1,
+        "repository": "https://github.com/michaelayoade/example",
+        "product_revision": "a" * 40,
+        "governance_revision": "b" * 40,
+        "producer_id": "example-collector",
+        "normalization_version": "python-ast-v1",
+        "observations": [
+            {
+                "retirement_id": "example-cache-retirement",
+                "source_inventory": {
+                    "coverage": "measured",
+                    "measured_kinds": static_kinds,
+                    "edges": [],
+                    "canonical_decision_writers": [retirement_source()],
+                    "unavailable_regions": [],
+                },
+                "migration_database": None,
+                "deployed_target": [],
+            }
+        ],
+    }
+
+
+def catalogue_edge(identity: str = "example-cache") -> dict[str, str]:
+    return {"kind": "constraint", "identity": identity, "definition_sha256": "e" * 64}
+
+
+def product_revision_evidence() -> dict[str, object]:
+    return {
+        "kind": "product_revision_check",
+        "repository": "https://github.com/michaelayoade/example",
+        "commit": "a" * 40,
+        "governance_revision": "b" * 40,
+        "run_id": 1,
+        "run_attempt": 1,
+        "artifact": {
+            "name": "migration-evidence",
+            "sha256": "f" * 64,
+            "path": "evidence/product.json",
+        },
+        "collector": retirement_source(),
+        "observed_at": "2026-09-05T10:00:00Z",
+        "catalogue_coverage": "measured",
+        "catalogue_edges": [catalogue_edge()],
+        "checks": [],
+        "transaction_attempts": [
+            {
+                "scenario": "lock_contention",
+                "transaction_outcome": "refused",
+                "refusal_stage": "fence_acquisition",
+                "catalogue_coverage": "unmeasured",
+                "catalogue_edges": [],
+                "checks": [],
+            },
+            {
+                "scenario": "inventory_mismatch",
+                "transaction_outcome": "rolled_back",
+                "refusal_stage": "inventory_validation",
+                "catalogue_coverage": "measured",
+                "catalogue_edges": [catalogue_edge()],
+                "checks": [],
+            },
+            {
+                "scenario": "drop_restrict_dependency",
+                "transaction_outcome": "rolled_back",
+                "refusal_stage": "teardown",
+                "catalogue_coverage": "measured",
+                "catalogue_edges": [catalogue_edge()],
+                "checks": [],
+            },
+        ],
+    }
+
+
+def target_evidence(
+    *,
+    phase: str = "pre_drop",
+    observation_id: str = "pre",
+    preceding: str | None = None,
+    observed_at: str = "2026-09-05T10:00:00Z",
+    repository: str = "https://github.com/michaelayoade/example",
+    commit: str = "a" * 40,
+    governance_revision: str = "b" * 40,
+    image_digest: str = "sha256:" + "c" * 64,
+    transaction_outcome: str | None = None,
+    refusal_stage: str | None = None,
+    refresh_before: str = "cutover_authorization",
+) -> dict[str, object]:
+    return {
+        "kind": "target_retirement_observation",
+        "repository": repository,
+        "commit": commit,
+        "governance_revision": governance_revision,
+        "run_id": 2,
+        "run_attempt": 1,
+        "image_digest": image_digest,
+        "target": "staging",
+        "phase": phase,
+        "transaction_outcome": transaction_outcome,
+        "refusal_stage": refusal_stage,
+        "observation_id": observation_id,
+        "preceding_observation_id": preceding,
+        "deletion_migration": retirement_migration_source(),
+        "artifact": {
+            "name": "target-evidence",
+            "sha256": "d" * 64,
+            "path": "evidence/target.json",
+        },
+        "observed_at": observed_at,
+        "refresh_owner": "example-team",
+        "refresh_before": refresh_before,
+        "catalogue_coverage": "measured",
+        "catalogue_edges": [],
+        "checks": [],
+    }
+
+
+class RetirementContractTests(unittest.TestCase):
+    def assert_malformed(self, value: object, parser: object) -> None:
+        with self.assertRaises(RetirementError):
+            cast("object", parser)(value)
+
+    def test_v10_is_superseded_by_one_stable_profile_diagnostic(self) -> None:
+        value = profile()
+        value["schema_version"] = 10
+        report = StandardsTests().evaluate(value)
+        messages = [item.message for item in report.diagnostics]
+        self.assertTrue(
+            any("superseded by 11" in message for message in messages), messages
+        )
+
+    def test_retirement_declaration_is_closed_and_exact(self) -> None:
+        parse_retirements([retirement_declaration()], [])
+        malformed = retirement_declaration()
+        cast("dict[str, object]", malformed["relation"])["unexpected"] = True
+        self.assert_malformed(
+            ([malformed], []),
+            lambda value: parse_retirements(*cast("tuple[object, object]", value)),
+        )
+        for forbidden_claim in (
+            "migration_complete",
+            "deletion_ready",
+            "deletion_authorized",
+        ):
+            malformed = retirement_declaration()
+            malformed[forbidden_claim] = True
+            self.assert_malformed(
+                ([malformed], []),
+                lambda value: parse_retirements(*cast("tuple[object, object]", value)),
+            )
+
+    def test_exit_conditions_require_exact_four_kinds(self) -> None:
+        value = retirement_declaration()
+        exits = cast("list[object]", value["external_exit_conditions"])
+        exits.pop()
+        self.assert_malformed(
+            ([value], []),
+            lambda pair: parse_retirements(*cast("tuple[object, object]", pair)),
+        )
+
+    def test_observation_source_inventory_rejects_unavailable_measured_region(
+        self,
+    ) -> None:
+        value = observation_bundle()
+        inventory = cast(
+            "dict[str, object]",
+            cast("dict[str, object]", value["observations"])[0]["source_inventory"],
+        )
+        inventory["unavailable_regions"] = ["example/unknown.py"]
+        self.assert_malformed(value, parse_observation_bundle)
+
+    def test_product_evidence_requires_exact_three_sabotage_attempts(self) -> None:
+        value = observation_bundle()
+        observation = cast(
+            "dict[str, object]", cast("list[object]", value["observations"])[0]
+        )
+        observation["migration_database"] = product_revision_evidence()
+        parse_observation_bundle(value)
+        product = cast("dict[str, object]", observation["migration_database"])
+        cast("list[object]", product["transaction_attempts"]).pop()
+        self.assert_malformed(value, parse_observation_bundle)
+
+    def test_each_sabotage_attempt_has_stage_and_coverage_mapping(self) -> None:
+        for scenario, stage, coverage in (
+            ("lock_contention", "fence_acquisition", "unmeasured"),
+            ("inventory_mismatch", "inventory_validation", "measured"),
+            ("drop_restrict_dependency", "teardown", "measured"),
+        ):
+            value = observation_bundle()
+            observation = cast(
+                "dict[str, object]", cast("list[object]", value["observations"])[0]
+            )
+            product = product_revision_evidence()
+            attempt = next(
+                item
+                for item in cast("list[object]", product["transaction_attempts"])
+                if cast("dict[str, object]", item)["scenario"] == scenario
+            )
+            cast("dict[str, object]", attempt)["refusal_stage"] = (
+                "teardown" if stage != "teardown" else "inventory_validation"
+            )
+            observation["migration_database"] = product
+            self.assert_malformed(value, parse_observation_bundle)
+
+            value = observation_bundle()
+            observation = cast(
+                "dict[str, object]", cast("list[object]", value["observations"])[0]
+            )
+            product = product_revision_evidence()
+            attempt = next(
+                item
+                for item in cast("list[object]", product["transaction_attempts"])
+                if cast("dict[str, object]", item)["scenario"] == scenario
+            )
+            cast("dict[str, object]", attempt)["catalogue_coverage"] = (
+                "measured" if coverage == "unmeasured" else "unmeasured"
+            )
+            observation["migration_database"] = product
+            self.assert_malformed(value, parse_observation_bundle)
+
+    def test_evidence_rejects_unknown_or_duplicate_checks_and_catalogue_edges(
+        self,
+    ) -> None:
+        value = observation_bundle()
+        product = product_revision_evidence()
+        product["checks"] = [
+            {"check_id": "not-a-check", "outcome": "pass", "evidence_selector": "x"}
+        ]
+        cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+            "migration_database"
+        ] = product
+        self.assert_malformed(value, parse_observation_bundle)
+        value = observation_bundle()
+        product = product_revision_evidence()
+        product["catalogue_edges"] = [catalogue_edge(), catalogue_edge()]
+        cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+            "migration_database"
+        ] = product
+        self.assert_malformed(value, parse_observation_bundle)
+
+    def test_evidence_rejects_boolean_ids_bad_timestamp_and_digest(self) -> None:
+        for mutation in (
+            lambda row: row.update(run_id=True),
+            lambda row: row.update(observed_at="2026-99-05T10:00:00Z"),
+            lambda row: cast("dict[str, object]", row["artifact"]).update(
+                sha256="A" * 64
+            ),
+        ):
+            value = observation_bundle()
+            product = product_revision_evidence()
+            mutation(product)
+            cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+                "migration_database"
+            ] = product
+            self.assert_malformed(value, parse_observation_bundle)
+
+    def test_target_refresh_mapping_and_transaction_fields_are_closed(self) -> None:
+        for phase, refresh in (
+            ("pre_drop", "fenced_teardown"),
+            ("post_upgrade", "completion_claim"),
+        ):
+            value = observation_bundle()
+            cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+                "deployed_target"
+            ] = [target_evidence(phase=phase, refresh_before=refresh)]
+            self.assert_malformed(value, parse_observation_bundle)
+        value = observation_bundle()
+        atomic = target_evidence(
+            phase="atomic_teardown",
+            observation_id="atomic",
+            preceding="pre",
+            transaction_outcome="refused",
+            refusal_stage="fence_acquisition",
+            refresh_before="fenced_teardown",
+            observed_at="2026-09-05T10:01:00Z",
+        )
+        atomic["catalogue_coverage"] = "unmeasured"
+        cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+            "deployed_target"
+        ] = [target_evidence(), atomic]
+        parse_observation_bundle(value)
+        value = observation_bundle()
+        target = target_evidence()
+        target["refresh_owner"] = ""
+        cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+            "deployed_target"
+        ] = [target]
+        self.assert_malformed(value, parse_observation_bundle)
+
+        value = observation_bundle()
+        target = target_evidence()
+        target["observed_at"] = "2026-02-30T10:00:00Z"
+        cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+            "deployed_target"
+        ] = [target]
+        self.assert_malformed(value, parse_observation_bundle)
+
+    def test_target_chain_rejects_predecessor_coordinate_and_timestamp_changes(
+        self,
+    ) -> None:
+        base = target_evidence()
+        atomic = target_evidence(
+            phase="atomic_teardown",
+            observation_id="atomic",
+            preceding="pre",
+            observed_at="2026-09-05T10:01:00Z",
+            transaction_outcome="committed",
+            refresh_before="fenced_teardown",
+        )
+        post = target_evidence(
+            phase="post_upgrade",
+            observation_id="post",
+            preceding="atomic",
+            observed_at="2026-09-05T10:02:00Z",
+            refresh_before="completion_claim",
+        )
+        changed = observation_bundle()
+        changed_rows = [copy.deepcopy(base), copy.deepcopy(atomic), copy.deepcopy(post)]
+        changed_rows[1]["commit"] = "c" * 40
+        cast("dict[str, object]", cast("list[object]", changed["observations"])[0])[
+            "deployed_target"
+        ] = changed_rows
+        parse_observation_bundle(changed)
+        for mutation in (
+            lambda rows: rows[1].update(preceding_observation_id="wrong"),
+            lambda rows: rows[1].update(observed_at="2026-09-05T09:59:00Z"),
+        ):
+            value = observation_bundle()
+            rows = [copy.deepcopy(base), copy.deepcopy(atomic), copy.deepcopy(post)]
+            mutation(rows)
+            cast("dict[str, object]", cast("list[object]", value["observations"])[0])[
+                "deployed_target"
+            ] = rows
+            self.assert_malformed(value, parse_observation_bundle)
+
+    def test_observation_rejects_unknown_fields_and_duplicate_ids(self) -> None:
+        value = observation_bundle()
+        cast("dict[str, object]", value)["unknown"] = True
+        self.assert_malformed(value, parse_observation_bundle)
+        duplicate = observation_bundle()
+        observations = cast("list[object]", duplicate["observations"])
+        observations.append(copy.deepcopy(observations[0]))
+        self.assert_malformed(duplicate, parse_observation_bundle)
+        empty = observation_bundle()
+        empty["observations"] = []
+        parse_observation_bundle(empty)
+
+    def test_observation_rejects_wrong_binding_and_normalization(self) -> None:
+        value = observation_bundle()
+        value["normalization_version"] = "other-v1"
+        self.assert_malformed(value, parse_observation_bundle)
+        value = observation_bundle()
+        value["repository"] = "https://github.com/michaelayoade/other"
+        target = cast(
+            "dict[str, object]", cast("dict[str, object]", value["observations"])[0]
+        )
+        target["deployed_target"] = [{"bad": True}]
+        self.assert_malformed(value, parse_observation_bundle)
+
+    def test_observation_phase_chain_requires_pre_drop_and_increasing_timestamps(
+        self,
+    ) -> None:
+        value = observation_bundle()
+        target = {
+            "kind": "target_retirement_observation",
+            "repository": value["repository"],
+            "commit": value["product_revision"],
+            "governance_revision": value["governance_revision"],
+            "run_id": 1,
+            "run_attempt": 1,
+            "image_digest": "sha256:" + "c" * 64,
+            "target": "staging",
+            "phase": "post_upgrade",
+            "transaction_outcome": None,
+            "refusal_stage": None,
+            "observation_id": "post",
+            "preceding_observation_id": None,
+            "deletion_migration": retirement_migration_source(),
+            "artifact": {
+                "name": "evidence",
+                "sha256": "d" * 64,
+                "path": "evidence.json",
+            },
+            "observed_at": "2026-09-05T10:00:00Z",
+            "refresh_owner": "example-team",
+            "refresh_before": "completion_claim",
+            "catalogue_coverage": "measured",
+            "catalogue_edges": [],
+            "checks": [],
+        }
+        cast("dict[str, object]", cast("dict[str, object]", value["observations"])[0])[
+            "deployed_target"
+        ] = [target]
+        self.assert_malformed(value, parse_observation_bundle)
+
+
+def static_edge(kind: str = "reader", fingerprint: str = "1" * 64) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "path": "example/service.py",
+        "symbol": "example.decide",
+        "target": "example-cache",
+        "fingerprint": fingerprint,
+        "consumer_id": None,
+    }
+
+
+class RetirementEvaluationFixture:
+    def __init__(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+
+    def close(self) -> None:
+        self.directory.cleanup()
+
+    def _commit(self, message: str) -> str:
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+        ).strip()
+
+    def build(
+        self,
+        *,
+        declaration: dict[str, object] | None = None,
+        bundle: dict[str, object] | None = None,
+        extra: dict[str, str] | None = None,
+        product_mutation: object | None = None,
+        target_mutation: object | None = None,
+    ) -> ConformanceReport:
+        base = profile()
+        base["schema_version"] = 10
+        base.pop("compatibility_retirements")
+        base.pop("retirement_history")
+        Fixture(self.root).write(
+            base,
+            extra={
+                ".github/workflows/retirement.yml": "name: retirement\n",
+                "docs/activation.md": "# Activation\n",
+                "migrations/drop_example.py": "def upgrade() -> None:\n    return None\n",
+            },
+        )
+        self._commit("base")
+        base_revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+        ).strip()
+        current = profile()
+        selected = copy.deepcopy(declaration or retirement_declaration())
+        if selected.get("authority_transition", {}).get("state") == "module_active":
+            base_profile = self.root / ".dotmac/standards-profile.json"
+            base_bytes = base_profile.read_bytes()
+            base_sha = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+            ).strip()
+            activation_bytes = (self.root / "docs/activation.md").read_bytes()
+            transition = cast("dict[str, object]", selected["authority_transition"])
+            transition["displaced_authority"] = {
+                "authority_id": "example-owner",
+                "writer": retirement_source(),
+                "historical_profile": {
+                    "repository": str(REPOSITORY),
+                    "commit": base_sha,
+                    "path": ".dotmac/standards-profile.json",
+                    "sha256": hashlib.sha256(base_bytes).hexdigest(),
+                },
+            }
+            transition["activation_record"] = {
+                "repository": str(REPOSITORY),
+                "commit": base_sha,
+                "path": "docs/activation.md",
+                "sha256": hashlib.sha256(activation_bytes).hexdigest(),
+                "retirement_id": selected["retirement_id"],
+                "relation_identity": cast("dict[str, object]", selected["relation"])[
+                    "identity"
+                ],
+            }
+            selected["authority_transition"] = transition
+            module_authority = copy.deepcopy(
+                cast("list[object]", current["authorities"])[0]
+            )
+            cast("dict[str, object]", module_authority).update(
+                authority_id="module-owner",
+                owner_implementation="module/service.py",
+                decision_interface="module.service.decide",
+                canonical_writer_paths=["module/service.py"],
+            )
+            current["authorities"] = [module_authority]
+        current["compatibility_retirements"] = [selected]
+        profile_path = self.root / ".dotmac/standards-profile.json"
+        profile_path.write_text(json.dumps(current), encoding="utf-8")
+        for path, body in (extra or {}).items():
+            target = self.root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+        if selected.get("authority_transition", {}).get("state") == "module_active":
+            module = self.root / "module/service.py"
+            module.parent.mkdir(parents=True, exist_ok=True)
+            module.write_text(
+                "def decide() -> bool:\n    return True\n", encoding="utf-8"
+            )
+        Fixture(self.root).git("add", "-A", "-f")
+        observed_revision = self._commit("current")
+        observation_path = None
+        if bundle is not None:
+            bundle["product_revision"] = observed_revision
+            for raw_observation in cast("list[object]", bundle["observations"]):
+                if not isinstance(raw_observation, dict):
+                    continue
+                product = raw_observation.get("migration_database")
+                if isinstance(product, dict):
+                    product["repository"] = bundle["repository"]
+                    product["commit"] = observed_revision
+                    product["governance_revision"] = "b" * 40
+                    if product_mutation is not None:
+                        cast("object", product_mutation)(product)
+                for target in cast(
+                    "list[object]", raw_observation.get("deployed_target", [])
+                ):
+                    if isinstance(target, dict):
+                        target["repository"] = bundle["repository"]
+                        target["commit"] = observed_revision
+                        target["governance_revision"] = "b" * 40
+                        if target_mutation is not None:
+                            cast("object", target_mutation)(target)
+            observation_path = self.root / "observation.json"
+            observation_path.write_text(json.dumps(bundle), encoding="utf-8")
+        return verify_repository(
+            self.root,
+            profile_path,
+            observed_repository=REPOSITORY,
+            observed_default_branch=BranchName("main"),
+            observed_governance_revision=GitRevision("b" * 40),
+            base_revision=GitRevision(base_revision),
+            observed_revision=GitRevision(observed_revision),
+            retirement_observation_path=observation_path,
+        )
+
+
+class RetirementEvaluationTests(unittest.TestCase):
+    def evaluate(
+        self,
+        *,
+        declaration: dict[str, object] | None = None,
+        bundle: dict[str, object] | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> ConformanceReport:
+        fixture = RetirementEvaluationFixture()
+        try:
+            if bundle is not None:
+                bundle = copy.deepcopy(bundle)
+                bundle["repository"] = str(REPOSITORY)
+            return fixture.build(declaration=declaration, bundle=bundle, extra=extra)
+        finally:
+            fixture.close()
+
+    def test_draining_none_control_passes_with_bundle_and_no_external_evidence(
+        self,
+    ) -> None:
+        report = self.evaluate(
+            bundle=observation_bundle(), extra={"docs/retirement.md": "# Collector\n"}
+        )
+        self.assertTrue(report.conforms, report.to_dict())
+        self.assertEqual(report.repository_contracts, "pass")
+        self.assertEqual(report.product_revision_evidence, "not_supplied")
+        self.assertEqual(report.target_evidence, "not_supplied")
+
+    def test_absent_bundle_keeps_repository_verdict_but_reports_missing_evidence(
+        self,
+    ) -> None:
+        report = self.evaluate(extra={"docs/retirement.md": "# Collector\n"})
+        self.assertFalse(report.conforms, report.to_dict())
+        self.assertEqual(report.repository_contracts, "pass")
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_EVIDENCE_MISSING,
+            {item.code for item in report.diagnostics},
+        )
+
+    def test_empty_bundle_cannot_vacuously_cover_an_enrolled_slice(self) -> None:
+        bundle = observation_bundle()
+        bundle["observations"] = []
+        report = self.evaluate(
+            bundle=bundle, extra={"docs/retirement.md": "# Collector\n"}
+        )
+        codes = {item.code for item in report.diagnostics}
+        self.assertIn(DiagnosticCode.RETIREMENT_SURFACE_DUPLICATE, codes)
+        self.assertIn(DiagnosticCode.RETIREMENT_EVIDENCE_MISSING, codes)
+        self.assertEqual(report.repository_contracts, "pass")
+
+    def test_malformed_supplied_bundle_is_inconsistent_not_absent(self) -> None:
+        bundle = observation_bundle()
+        bundle["unexpected"] = True
+        report = self.evaluate(
+            bundle=bundle, extra={"docs/retirement.md": "# Collector\n"}
+        )
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_EVIDENCE_UNKNOWN,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+        self.assertEqual(report.repository_contracts, "pass")
+        self.assertEqual(report.product_revision_evidence, "inconsistent")
+        self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_static_added_stale_changed_and_equal_count_substitution_are_distinct(
+        self,
+    ) -> None:
+        for mode, expected in (
+            ("added", DiagnosticCode.RETIREMENT_STATIC_ADDED),
+            ("stale", DiagnosticCode.RETIREMENT_STATIC_STALE),
+            ("changed", DiagnosticCode.RETIREMENT_STATIC_CHANGED),
+            ("substitution", DiagnosticCode.RETIREMENT_STATIC_ADDED),
+        ):
+            declaration = retirement_declaration()
+            declaration["static_baseline"] = [static_edge(fingerprint="1" * 64)]
+            bundle = observation_bundle()
+            observed = cast(
+                "dict[str, object]",
+                cast(
+                    "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+                )["source_inventory"],
+            )
+            observed["edges"] = (
+                []
+                if mode == "stale"
+                else [
+                    static_edge(fingerprint="2" * 64 if mode == "changed" else "1" * 64)
+                ]
+            )
+            if mode in {"added", "substitution"}:
+                cast("list[object]", observed["edges"])[0]["target"] = "different-cache"
+            report = self.evaluate(
+                declaration=declaration,
+                bundle=bundle,
+                extra={"docs/retirement.md": "# Collector\n"},
+            )
+            self.assertIn(
+                expected, {item.code for item in report.diagnostics}, report.to_dict()
+            )
+            self.assertEqual(report.repository_contracts, "pass")
+
+    def test_second_canonical_writer_is_an_authority_conflict(self) -> None:
+        bundle = observation_bundle()
+        observed = cast(
+            "dict[str, object]",
+            cast("dict[str, object]", cast("list[object]", bundle["observations"])[0])[
+                "source_inventory"
+            ],
+        )
+        observed["canonical_decision_writers"] = [
+            retirement_source(),
+            {
+                "kind": "python_symbol",
+                "path": "example/other.py",
+                "symbol": "example.decide",
+            },
+        ]
+        report = self.evaluate(
+            bundle=bundle,
+            extra={
+                "docs/retirement.md": "# Collector\n",
+                "example/other.py": "def decide() -> bool:\n    return True\n",
+            },
+        )
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+        self.assertEqual(report.repository_contracts, "pass")
+
+    def test_projection_and_deletion_lineage_semantics_use_stable_diagnostics(
+        self,
+    ) -> None:
+        projection = retirement_declaration()
+        projection["relation"] = {
+            "kind": "table",
+            "identity": "example.cache",
+            "owner_lineage": "example-product",
+        }
+        projection["disposition"] = {
+            "kind": "temporary_projection",
+            "projection": {
+                "kind": "ordinary_view",
+                "derivation": "module owner",
+                "provenance": "typed port",
+                "freshness": "query time",
+                "retirement_condition": "all consumers drain",
+            },
+        }
+        projection["deletion"] = {
+            "migration": retirement_migration_source(),
+            "owner_lineage": "wrong-lineage",
+            "teardown_set": [catalogue_edge("example.cache")],
+            "fence_relations": ["example.cache"],
+        }
+        report = self.evaluate(
+            declaration=projection,
+            bundle=observation_bundle(),
+            extra={"docs/retirement.md": "# Collector\n"},
+        )
+        codes = {item.code for item in report.diagnostics}
+        self.assertIn(DiagnosticCode.RETIREMENT_PROJECTION_INVALID, codes)
+        self.assertIn(DiagnosticCode.RETIREMENT_DELETION_LINEAGE_MISMATCH, codes)
+        self.assertEqual(report.repository_contracts, "fail")
+
+        non_migration = deletion_retirement_declaration()
+        cast("dict[str, object]", non_migration["deletion"])["migration"] = (
+            retirement_source("document_section")
+        )
+        report = self.evaluate(
+            declaration=non_migration,
+            bundle=observation_bundle(),
+            extra={"docs/retirement.md": "# Collector\n"},
+        )
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_DELETION_LINEAGE_MISMATCH,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+        stored_view = copy.deepcopy(projection)
+        cast("dict[str, object]", stored_view["relation"])["kind"] = "view"
+        stored_view["disposition"] = {
+            "kind": "temporary_projection",
+            "projection": {
+                "kind": "stored",
+                "derivation": "module owner",
+                "provenance": "module",
+                "freshness": "eventual",
+                "canonical_writer": retirement_source(),
+                "drift_invariant": "fixed point",
+                "repair_path": "example/service.py",
+                "retirement_condition": "all consumers drain",
+            },
+        }
+        cast("dict[str, object]", stored_view["deletion"])["owner_lineage"] = (
+            "example-product"
+        )
+        report = self.evaluate(
+            declaration=stored_view,
+            bundle=observation_bundle(),
+            extra={"docs/retirement.md": "# Collector\n"},
+        )
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_PROJECTION_INVALID,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+    def test_module_active_reverse_feed_and_fallback_writer_are_forbidden(
+        self,
+    ) -> None:
+        for kind in ("reverse_feed", "fallback_writer"):
+            declaration = module_active_deletion_declaration()
+            declaration["source_state"] = "draining"
+            declaration["requested_gate"] = "none"
+            declaration["static_baseline"] = [static_edge(kind)]
+            bundle = observation_bundle()
+            observation = cast(
+                "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+            )
+            inventory = cast("dict[str, object]", observation["source_inventory"])
+            inventory["edges"] = [static_edge(kind)]
+            inventory["canonical_decision_writers"] = [
+                {
+                    "kind": "python_symbol",
+                    "path": "module/service.py",
+                    "symbol": "module.service.decide",
+                }
+            ]
+            report = self.evaluate(declaration=declaration, bundle=bundle)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_WRITER_FORBIDDEN,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+
+
+def module_active_deletion_declaration() -> dict[str, object]:
+    value = deletion_retirement_declaration()
+    value["source_state"] = "drained"
+    value["requested_gate"] = "post_upgrade"
+    value["authority_transition"] = {
+        "state": "module_active",
+        "current_authority_id": "module-owner",
+        "current_writer": {
+            "kind": "python_symbol",
+            "path": "module/service.py",
+            "symbol": "module.service.decide",
+        },
+        "displaced_authority": {},
+        "activation_record": {},
+    }
+    return value
+
+
+def target_checks(*check_ids: str) -> list[dict[str, str]]:
+    return [check_result(item) for item in check_ids]
+
+
+class TargetEvaluationTests(unittest.TestCase):
+    def build_report(
+        self,
+        bundle: dict[str, object],
+        *,
+        target_mutation: object | None = None,
+        declaration: dict[str, object] | None = None,
+    ) -> ConformanceReport:
+        fixture = RetirementEvaluationFixture()
+        try:
+            return fixture.build(
+                declaration=declaration or module_active_deletion_declaration(),
+                bundle=bundle,
+                target_mutation=target_mutation,
+            )
+        finally:
+            fixture.close()
+
+    def valid_bundle(self) -> dict[str, object]:
+        bundle = observation_bundle()
+        observation = cast(
+            "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+        )
+        observation["migration_database"] = passing_product_evidence()
+        observation["source_inventory"]["canonical_decision_writers"] = [
+            {
+                "kind": "python_symbol",
+                "path": "module/service.py",
+                "symbol": "module.service.decide",
+            }
+        ]
+        checks = target_checks(
+            "source_edges_zero",
+            "consumers_zero",
+            "writers_absent_or_exact_teardown",
+            "catalogue_matches_reviewed_teardown",
+            "deletion_lineage_owned",
+            "archival_exit_settled",
+            "external_clients_exited",
+            "old_processes_drained",
+            "old_process_restart_prevented",
+        )
+        pre = target_evidence(phase="pre_drop", refresh_before="cutover_authorization")
+        pre["checks"] = checks
+        pre["catalogue_edges"] = [catalogue_edge("example.cache")]
+        atomic = target_evidence(
+            phase="atomic_teardown",
+            observation_id="atomic",
+            preceding="pre",
+            observed_at="2026-09-05T10:01:00Z",
+            transaction_outcome="committed",
+            refresh_before="fenced_teardown",
+        )
+        atomic["checks"] = target_checks(
+            "exclusive_nowait_fences_held",
+            "inventory_rechecked_under_fence",
+            "catalogue_matches_reviewed_teardown",
+            "teardown_in_dependency_order",
+            "drop_restrict_used",
+        )
+        atomic["catalogue_edges"] = [catalogue_edge("example.cache")]
+        post = target_evidence(
+            phase="post_upgrade",
+            observation_id="post",
+            preceding="atomic",
+            observed_at="2026-09-05T10:02:00Z",
+            refresh_before="completion_claim",
+        )
+        post["checks"] = target_checks(
+            "post_upgrade_objects_absent",
+            "owner_paths_pass_without_fallback",
+            "intended_revision_running",
+            "old_processes_drained",
+            "old_process_restart_prevented",
+        )
+        observation["deployed_target"] = [pre, atomic, post]
+        bundle["repository"] = str(REPOSITORY)
+        return bundle
+
+    def test_full_target_chain_is_consistent(self) -> None:
+        bundle = observation_bundle()
+        observation = cast(
+            "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+        )
+        observation["migration_database"] = passing_product_evidence()
+        observation["source_inventory"]["canonical_decision_writers"] = [
+            {
+                "kind": "python_symbol",
+                "path": "module/service.py",
+                "symbol": "module.service.decide",
+            }
+        ]
+        checks = target_checks(
+            "source_edges_zero",
+            "consumers_zero",
+            "writers_absent_or_exact_teardown",
+            "catalogue_matches_reviewed_teardown",
+            "deletion_lineage_owned",
+            "archival_exit_settled",
+            "external_clients_exited",
+            "old_processes_drained",
+            "old_process_restart_prevented",
+        )
+        pre = target_evidence(phase="pre_drop", refresh_before="cutover_authorization")
+        pre["checks"] = checks
+        pre["catalogue_edges"] = [catalogue_edge("example.cache")]
+        atomic = target_evidence(
+            phase="atomic_teardown",
+            observation_id="atomic",
+            preceding="pre",
+            observed_at="2026-09-05T10:01:00Z",
+            transaction_outcome="committed",
+            refresh_before="fenced_teardown",
+        )
+        atomic["checks"] = target_checks(
+            "exclusive_nowait_fences_held",
+            "inventory_rechecked_under_fence",
+            "catalogue_matches_reviewed_teardown",
+            "teardown_in_dependency_order",
+            "drop_restrict_used",
+        )
+        atomic["catalogue_edges"] = [catalogue_edge("example.cache")]
+        post = target_evidence(
+            phase="post_upgrade",
+            observation_id="post",
+            preceding="atomic",
+            observed_at="2026-09-05T10:02:00Z",
+            refresh_before="completion_claim",
+        )
+        post["checks"] = target_checks(
+            "post_upgrade_objects_absent",
+            "owner_paths_pass_without_fallback",
+            "intended_revision_running",
+            "old_processes_drained",
+            "old_process_restart_prevented",
+        )
+        observation["deployed_target"] = [pre, atomic, post]
+        bundle["repository"] = str(REPOSITORY)
+        report = self.build_report(bundle)
+        self.assertTrue(report.conforms, report.to_dict())
+        self.assertEqual(report.product_revision_evidence, "consistent")
+        self.assertEqual(report.target_evidence, "consistent")
+
+    def test_target_binding_mismatches_are_evidence_only(self) -> None:
+        for field, value in (
+            ("repository", "https://github.com/michaelayoade/other"),
+            ("commit", "c" * 40),
+            ("governance_revision", "d" * 40),
+            ("target", "other-target"),
+            ("refresh_owner", "other-team"),
+            (
+                "deletion_migration",
+                {
+                    "kind": "python_symbol",
+                    "path": "example/other.py",
+                    "symbol": "example.decide",
+                },
+            ),
+        ):
+            bundle = self.valid_bundle()
+
+            def mutate(
+                target: dict[str, object], field: str = field, value: object = value
+            ) -> None:
+                if target["phase"] == "pre_drop":
+                    target[field] = value
+
+            report = self.build_report(bundle, target_mutation=mutate)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertEqual(report.repository_contracts, "pass")
+            self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_target_stage_missing_fail_unknown_and_extra_checks_are_nonzero(
+        self,
+    ) -> None:
+        stages = {
+            "pre_drop": "source_edges_zero",
+            "atomic_teardown": "exclusive_nowait_fences_held",
+            "post_upgrade": "post_upgrade_objects_absent",
+        }
+        for phase, check in stages.items():
+            for outcome in ("missing", "fail", "unknown", "extra"):
+                bundle = self.valid_bundle()
+
+                def mutate(
+                    target: dict[str, object],
+                    phase: str = phase,
+                    check: str = check,
+                    outcome: str = outcome,
+                ) -> None:
+                    if target["phase"] != phase:
+                        return
+                    checks = cast("list[object]", target["checks"])
+                    if outcome == "missing":
+                        checks[:] = [
+                            item for item in checks if item["check_id"] != check
+                        ]
+                    elif outcome == "extra":
+                        checks.append(check_result("projection_fixed_point"))
+                    else:
+                        next(item for item in checks if item["check_id"] == check)[
+                            "outcome"
+                        ] = outcome
+
+                report = self.build_report(bundle, target_mutation=mutate)
+                self.assertIn(
+                    DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                    {item.code for item in report.diagnostics},
+                    report.to_dict(),
+                )
+                self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_pre_drop_requires_each_exit_check_and_post_repeats_process_guards(
+        self,
+    ) -> None:
+        for check in (
+            "archival_exit_settled",
+            "external_clients_exited",
+            "old_processes_drained",
+            "old_process_restart_prevented",
+        ):
+            bundle = self.valid_bundle()
+
+            def mutate(target: dict[str, object], check: str = check) -> None:
+                if target["phase"] == "pre_drop":
+                    target["checks"] = [
+                        item for item in target["checks"] if item["check_id"] != check
+                    ]
+
+            report = self.build_report(bundle, target_mutation=mutate)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+
+    def test_stored_projection_requires_fixed_point(self) -> None:
+        declaration = module_active_deletion_declaration()
+        declaration["relation"] = {
+            "kind": "table",
+            "identity": "example.cache",
+            "owner_lineage": "example-product",
+        }
+        declaration["disposition"] = {
+            "kind": "temporary_projection",
+            "projection": {
+                "kind": "stored",
+                "derivation": "module source",
+                "provenance": "module",
+                "freshness": "eventual",
+                "canonical_writer": {
+                    "kind": "python_symbol",
+                    "path": "module/service.py",
+                    "symbol": "module.service.decide",
+                },
+                "drift_invariant": "fixed point",
+                "repair_path": "module/repair.py",
+                "retirement_condition": "no consumers",
+            },
+        }
+        bundle = self.valid_bundle()
+        report = self.build_report(bundle, declaration=declaration)
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_GATE_NONZERO,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+    def test_post_upgrade_residual_catalogue_edge_is_inconsistent(self) -> None:
+        bundle = self.valid_bundle()
+        post = cast(
+            "dict[str, object]",
+            cast(
+                "list[object]",
+                cast(
+                    "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+                )["deployed_target"],
+            )[2],
+        )
+        post["catalogue_edges"] = [catalogue_edge("residual")]
+        report = self.build_report(bundle)
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_CATALOGUE_ADDED,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+        self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_post_upgrade_process_and_revision_failures_are_inconsistent(self) -> None:
+        for check in (
+            "old_processes_drained",
+            "old_process_restart_prevented",
+            "intended_revision_running",
+        ):
+            bundle = self.valid_bundle()
+            post = cast(
+                "dict[str, object]",
+                cast(
+                    "list[object]",
+                    cast(
+                        "dict[str, object]",
+                        cast("list[object]", bundle["observations"])[0],
+                    )["deployed_target"],
+                )[2],
+            )
+            next(item for item in post["checks"] if item["check_id"] == check)[
+                "outcome"
+            ] = "fail"
+            report = self.build_report(bundle)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_missing_committed_atomic_predecessor_is_unsupported(self) -> None:
+        bundle = self.valid_bundle()
+        observation = cast(
+            "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+        )
+        targets = cast("list[object]", observation["deployed_target"])
+        targets.pop()
+        report = self.build_report(bundle)
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_COMPLETION_UNSUPPORTED,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+    def refusal_case(self, stage: str) -> tuple[dict[str, object], dict[str, object]]:
+        bundle = self.valid_bundle()
+        observation = cast(
+            "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+        )
+        targets = cast("list[object]", observation["deployed_target"])
+        atomic = cast("dict[str, object]", targets[1])
+        targets.pop()
+        atomic.update(transaction_outcome="rolled_back", refusal_stage=stage)
+        if stage == "fence_acquisition":
+            atomic["catalogue_coverage"] = "unmeasured"
+            atomic["catalogue_edges"] = []
+            atomic["checks"] = target_checks(
+                "failure_rolls_back_without_partial_teardown"
+            )
+        elif stage == "inventory_validation":
+            atomic["catalogue_coverage"] = "measured"
+            atomic["catalogue_edges"] = [catalogue_edge("other")]
+            atomic["checks"] = target_checks(
+                "exclusive_nowait_fences_held",
+                "inventory_rechecked_under_fence",
+                "failure_rolls_back_without_partial_teardown",
+            )
+        else:
+            atomic["catalogue_coverage"] = "measured"
+            atomic["catalogue_edges"] = [catalogue_edge("example.cache")]
+            atomic["checks"] = target_checks(
+                "exclusive_nowait_fences_held",
+                "inventory_rechecked_under_fence",
+                "teardown_in_dependency_order",
+                "drop_restrict_used",
+                "failure_rolls_back_without_partial_teardown",
+            )
+        declaration = module_active_deletion_declaration()
+        declaration["requested_gate"] = "pre_drop"
+        return bundle, declaration
+
+    def test_atomic_refusal_stages_are_consistent_without_completion(self) -> None:
+        for stage in ("fence_acquisition", "inventory_validation", "teardown"):
+            bundle, declaration = self.refusal_case(stage)
+            report = self.build_report(bundle, declaration=declaration)
+            self.assertEqual(report.repository_contracts, "pass", report.to_dict())
+            self.assertEqual(
+                report.product_revision_evidence, "consistent", report.to_dict()
+            )
+            self.assertEqual(report.target_evidence, "consistent", report.to_dict())
+
+    def test_atomic_refusal_missing_rollback_check_is_nonzero(self) -> None:
+        for stage in ("fence_acquisition", "inventory_validation", "teardown"):
+            bundle, declaration = self.refusal_case(stage)
+            observation = cast(
+                "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+            )
+            atomic = cast(
+                "dict[str, object]",
+                cast("list[object]", observation["deployed_target"])[1],
+            )
+            atomic["checks"] = [
+                item
+                for item in atomic["checks"]
+                if item["check_id"] != "failure_rolls_back_without_partial_teardown"
+            ]
+            report = self.build_report(bundle, declaration=declaration)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_atomic_refusal_later_operation_pass_is_nonzero(self) -> None:
+        for stage, later in (
+            ("fence_acquisition", "drop_restrict_used"),
+            ("inventory_validation", "drop_restrict_used"),
+        ):
+            bundle, declaration = self.refusal_case(stage)
+            observation = cast(
+                "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+            )
+            atomic = cast(
+                "dict[str, object]",
+                cast("list[object]", observation["deployed_target"])[1],
+            )
+            cast("list[object]", atomic["checks"]).append(check_result(later))
+            report = self.build_report(bundle, declaration=declaration)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertEqual(report.target_evidence, "inconsistent")
+
+    def test_post_upgrade_request_with_refused_atomic_without_post_is_unsupported(
+        self,
+    ) -> None:
+        bundle, declaration = self.refusal_case("fence_acquisition")
+        report = self.build_report(
+            bundle, declaration=module_active_deletion_declaration()
+        )
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_COMPLETION_UNSUPPORTED,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+
+def deletion_retirement_declaration() -> dict[str, object]:
+    value = retirement_declaration()
+    value["relation"] = {
+        "kind": "table",
+        "identity": "example.cache",
+        "owner_lineage": "example-product",
+    }
+    value["disposition"] = {"kind": "delete"}
+    value["deletion"] = {
+        "migration": retirement_migration_source(),
+        "owner_lineage": "example-product",
+        "teardown_set": [catalogue_edge("example.cache")],
+        "fence_relations": ["example.cache"],
+    }
+    return value
+
+
+def check_result(check_id: str, outcome: str = "pass") -> dict[str, str]:
+    return {
+        "check_id": check_id,
+        "outcome": outcome,
+        "evidence_selector": f"checks:{check_id}",
+    }
+
+
+def passing_product_evidence() -> dict[str, object]:
+    value = product_revision_evidence()
+    value["checks"] = [
+        check_result(item)
+        for item in [
+            "source_edges_zero",
+            "consumers_zero",
+            "writers_absent_or_exact_teardown",
+            "catalogue_matches_reviewed_teardown",
+            "deletion_lineage_owned",
+        ]
+    ]
+    required = {
+        "lock_contention": ["failure_rolls_back_without_partial_teardown"],
+        "inventory_mismatch": [
+            "failure_rolls_back_without_partial_teardown",
+            "exclusive_nowait_fences_held",
+            "inventory_rechecked_under_fence",
+        ],
+        "drop_restrict_dependency": [
+            "failure_rolls_back_without_partial_teardown",
+            "exclusive_nowait_fences_held",
+            "inventory_rechecked_under_fence",
+            "teardown_in_dependency_order",
+            "drop_restrict_used",
+        ],
+    }
+    for attempt in cast("list[object]", value["transaction_attempts"]):
+        row = cast("dict[str, object]", attempt)
+        row["checks"] = [
+            check_result(item) for item in required[cast("str", row["scenario"])]
+        ]
+        row["catalogue_edges"] = (
+            []
+            if row["scenario"] == "lock_contention"
+            else [
+                catalogue_edge("other")
+                if row["scenario"] == "inventory_mismatch"
+                else catalogue_edge("example.cache")
+            ]
+        )
+    value["catalogue_edges"] = [catalogue_edge("example.cache")]
+    return value
+
+
+class ProductEvidenceEvaluationTests(unittest.TestCase):
+    def evaluate(self, *, mutation: object | None = None) -> ConformanceReport:
+        bundle = observation_bundle()
+        observation = cast(
+            "dict[str, object]", cast("list[object]", bundle["observations"])[0]
+        )
+        observation["migration_database"] = passing_product_evidence()
+        bundle["repository"] = str(REPOSITORY)
+        fixture = RetirementEvaluationFixture()
+        try:
+            return fixture.build(
+                declaration=deletion_retirement_declaration(),
+                bundle=bundle,
+                extra={
+                    "docs/retirement.md": "# Collector\n",
+                    "example/migration.py": "def migrate() -> None:\n    return None\n",
+                },
+                product_mutation=mutation,
+            )
+        finally:
+            fixture.close()
+
+    def test_passing_product_evidence_is_consistent(self) -> None:
+        report = self.evaluate()
+        self.assertTrue(report.conforms, report.to_dict())
+        self.assertEqual(report.repository_contracts, "pass")
+        self.assertEqual(report.product_revision_evidence, "consistent")
+
+    def test_product_binding_failures_are_evidence_only(self) -> None:
+        for field in ("repository", "commit", "governance_revision", "collector"):
+
+            def mutate(row: dict[str, object], field: str = field) -> None:
+                row[field] = (
+                    {
+                        "kind": "python_symbol",
+                        "path": "example/other.py",
+                        "symbol": "example.decide",
+                    }
+                    if field == "collector"
+                    else (
+                        "https://github.com/michaelayoade/other"
+                        if field == "repository"
+                        else "c" * 40
+                    )
+                )
+
+            report = self.evaluate(mutation=mutate)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_EVIDENCE_BINDING_MISMATCH,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertEqual(report.repository_contracts, "pass")
+            self.assertEqual(report.product_revision_evidence, "inconsistent")
+
+    def test_admission_check_missing_fail_unknown_or_extra_is_nonzero(self) -> None:
+        for mode in ("missing", "fail", "unknown", "extra"):
+
+            def mutate(row: dict[str, object], mode: str = mode) -> None:
+                checks = cast("list[object]", row["checks"])
+                if mode == "missing":
+                    checks[:] = [
+                        item
+                        for item in checks
+                        if cast("dict[str, object]", item)["check_id"]
+                        != "source_edges_zero"
+                    ]
+                elif mode in {"fail", "unknown"}:
+                    next(
+                        item
+                        for item in checks
+                        if cast("dict[str, object]", item)["check_id"]
+                        == "source_edges_zero"
+                    )["outcome"] = mode
+                else:
+                    checks.append(check_result("owner_paths_pass_without_fallback"))
+
+            report = self.evaluate(mutation=mutate)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertEqual(report.product_revision_evidence, "inconsistent")
+
+    def test_each_sabotage_stage_requires_its_checks(self) -> None:
+        for scenario in (
+            "lock_contention",
+            "inventory_mismatch",
+            "drop_restrict_dependency",
+        ):
+
+            def mutate(row: dict[str, object], scenario: str = scenario) -> None:
+                attempt = next(
+                    item
+                    for item in cast("list[object]", row["transaction_attempts"])
+                    if cast("dict[str, object]", item)["scenario"] == scenario
+                )
+                cast("dict[str, object]", attempt)["checks"] = []
+
+            report = self.evaluate(mutation=mutate)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_GATE_NONZERO,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+
+    def test_inventory_mismatch_equal_teardown_and_drop_catalogue_mismatch_fail(
+        self,
+    ) -> None:
+        def mutate(row: dict[str, object]) -> None:
+            attempt = next(
+                item
+                for item in cast("list[object]", row["transaction_attempts"])
+                if cast("dict[str, object]", item)["scenario"] == "inventory_mismatch"
+            )
+            cast("dict[str, object]", attempt)["catalogue_edges"] = [
+                catalogue_edge("example.cache")
+            ]
+
+        report = self.evaluate(mutation=mutate)
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_TEARDOWN_INVENTORY_MISMATCH,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+        def mutate_drop(row: dict[str, object]) -> None:
+            attempt = next(
+                item
+                for item in cast("list[object]", row["transaction_attempts"])
+                if cast("dict[str, object]", item)["scenario"]
+                == "drop_restrict_dependency"
+            )
+            cast("dict[str, object]", attempt)["catalogue_edges"] = [
+                catalogue_edge("other")
+            ]
+
+        report = self.evaluate(mutation=mutate_drop)
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_CATALOGUE_ADDED,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+    def test_admission_catalogue_added_stale_changed_and_substituted_are_nonzero(
+        self,
+    ) -> None:
+        for mode, expected in (
+            ("added", DiagnosticCode.RETIREMENT_CATALOGUE_ADDED),
+            ("stale", DiagnosticCode.RETIREMENT_CATALOGUE_STALE),
+            ("changed", DiagnosticCode.RETIREMENT_CATALOGUE_CHANGED),
+            ("substitution", DiagnosticCode.RETIREMENT_CATALOGUE_ADDED),
+        ):
+
+            def mutate(row: dict[str, object], mode: str = mode) -> None:
+                if mode == "added":
+                    row["catalogue_edges"] = [
+                        catalogue_edge("example.cache"),
+                        catalogue_edge("other"),
+                    ]
+                elif mode == "stale":
+                    row["catalogue_edges"] = []
+                elif mode == "changed":
+                    row["catalogue_edges"] = [
+                        dict(
+                            catalogue_edge("example.cache"), definition_sha256="a" * 64
+                        )
+                    ]
+                else:
+                    row["catalogue_edges"] = [catalogue_edge("other")]
+
+            report = self.evaluate(mutation=mutate)
+            self.assertIn(
+                expected, {item.code for item in report.diagnostics}, report.to_dict()
+            )
+
+    def test_later_stage_checks_are_forbidden_at_earlier_sabotage_stages(self) -> None:
+        def mutate(row: dict[str, object]) -> None:
+            attempt = next(
+                item
+                for item in cast("list[object]", row["transaction_attempts"])
+                if cast("dict[str, object]", item)["scenario"] == "lock_contention"
+            )
+            cast("dict[str, object]", attempt)["checks"].append(
+                check_result("drop_restrict_used")
+            )
+
+        report = self.evaluate(mutation=mutate)
+        self.assertIn(
+            DiagnosticCode.RETIREMENT_GATE_NONZERO,
+            {item.code for item in report.diagnostics},
+            report.to_dict(),
+        )
+
+
+class TrustedRetirementHistoryFixture:
+    def __init__(self, *, module_source_state: str = "drained") -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.profile_path = self.root / ".dotmac/standards-profile.json"
+
+        legacy_retirement = deletion_retirement_declaration()
+        transition = cast(
+            "dict[str, object]", legacy_retirement["authority_transition"]
+        )
+        transition["target_module_authority_id"] = "module-owner"
+        self.legacy_profile = profile()
+        self.legacy_profile["compatibility_retirements"] = [legacy_retirement]
+        Fixture(self.root).write(
+            self.legacy_profile,
+            extra={
+                ".github/workflows/retirement.yml": "name: retirement\n",
+                "docs/activation.md": "# Activation\n",
+                "migrations/drop_example.py": "def upgrade() -> None:\n    return None\n",
+            },
+        )
+        self.legacy_revision = self.commit("legacy authority")
+        legacy_bytes = self.profile_path.read_bytes()
+        activation_bytes = (self.root / "docs/activation.md").read_bytes()
+
+        module_retirement = module_active_deletion_declaration()
+        module_retirement["source_state"] = module_source_state
+        module_retirement["requested_gate"] = "post_upgrade"
+        module_transition = cast(
+            "dict[str, object]", module_retirement["authority_transition"]
+        )
+        module_transition["displaced_authority"] = {
+            "authority_id": "example-owner",
+            "writer": retirement_source(),
+            "historical_profile": {
+                "repository": str(REPOSITORY),
+                "commit": self.legacy_revision,
+                "path": ".dotmac/standards-profile.json",
+                "sha256": hashlib.sha256(legacy_bytes).hexdigest(),
+            },
+        }
+        module_transition["activation_record"] = {
+            "repository": str(REPOSITORY),
+            "commit": self.legacy_revision,
+            "path": "docs/activation.md",
+            "sha256": hashlib.sha256(activation_bytes).hexdigest(),
+            "retirement_id": module_retirement["retirement_id"],
+            "relation_identity": cast(
+                "dict[str, object]", module_retirement["relation"]
+            )["identity"],
+        }
+        self.module_profile = profile()
+        module_authority = copy.deepcopy(
+            cast("list[object]", self.module_profile["authorities"])[0]
+        )
+        cast("dict[str, object]", module_authority).update(
+            authority_id="module-owner",
+            owner_implementation="module/service.py",
+            decision_interface="module.service.decide",
+            canonical_writer_paths=["module/service.py"],
+        )
+        self.module_profile["authorities"] = [module_authority]
+        self.module_profile["compatibility_retirements"] = [module_retirement]
+        (self.root / "module").mkdir()
+        (self.root / "module/service.py").write_text(
+            "def decide() -> bool:\n    return True\n", encoding="utf-8"
+        )
+        self.write_profile(self.module_profile)
+        self.module_revision = self.commit("module authority")
+
+    def close(self) -> None:
+        self.directory.cleanup()
+
+    def commit(self, message: str) -> str:
+        subprocess.run(
+            ["git", "add", "-A", "-f"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, text=True
+        ).strip()
+
+    def write_profile(self, value: dict[str, object]) -> None:
+        self.profile_path.write_text(json.dumps(value), encoding="utf-8")
+
+    def evaluate_current(
+        self, value: dict[str, object], *, base_revision: str | None = None
+    ) -> ConformanceReport:
+        self.write_profile(value)
+        current_revision = self.commit("current profile")
+        return verify_repository(
+            self.root,
+            self.profile_path,
+            observed_repository=REPOSITORY,
+            observed_default_branch=BranchName("main"),
+            observed_governance_revision=GitRevision("b" * 40),
+            base_revision=GitRevision(base_revision or self.module_revision),
+            observed_revision=GitRevision(current_revision),
+        )
+
+    def evaluate_module_transition(self) -> ConformanceReport:
+        return verify_repository(
+            self.root,
+            self.profile_path,
+            observed_repository=REPOSITORY,
+            observed_default_branch=BranchName("main"),
+            observed_governance_revision=GitRevision("b" * 40),
+            base_revision=GitRevision(self.legacy_revision),
+            observed_revision=GitRevision(self.module_revision),
+        )
+
+    def history_entry(self, retirement: dict[str, object]) -> dict[str, object]:
+        transition = cast("dict[str, object]", retirement["authority_transition"])
+        post = target_evidence(
+            phase="post_upgrade",
+            observation_id="post",
+            preceding="atomic",
+            observed_at="2026-09-05T10:02:00Z",
+            refresh_before="completion_claim",
+        )
+        post["repository"] = str(REPOSITORY)
+        post["commit"] = self.module_revision
+        post["deletion_migration"] = copy.deepcopy(
+            cast("dict[str, object]", retirement["deletion"])["migration"]
+        )
+        post["checks"] = target_checks(
+            "post_upgrade_objects_absent",
+            "owner_paths_pass_without_fallback",
+            "intended_revision_running",
+            "old_processes_drained",
+            "old_process_restart_prevented",
+        )
+        return {
+            "retirement_id": retirement["retirement_id"],
+            "relation_identity": cast("dict[str, object]", retirement["relation"])[
+                "identity"
+            ],
+            "displaced_authority": copy.deepcopy(transition["displaced_authority"]),
+            "current_authority_id": transition["current_authority_id"],
+            "activation_record": copy.deepcopy(transition["activation_record"]),
+            "closure_record": {
+                "kind": "deleted",
+                "post_upgrade_observation": post,
+            },
+        }
+
+
+class TrustedRetirementHistoryTests(unittest.TestCase):
+    def test_legacy_to_module_transition_binds_real_immutable_blobs(self) -> None:
+        fixture = TrustedRetirementHistoryFixture()
+        try:
+            report = fixture.evaluate_module_transition()
+            self.assertNotIn(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertNotIn(
+                DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+        finally:
+            fixture.close()
+
+    def test_final_active_removal_cannot_hide_behind_empty_history(self) -> None:
+        fixture = TrustedRetirementHistoryFixture()
+        try:
+            current = copy.deepcopy(fixture.module_profile)
+            current["compatibility_retirements"] = []
+            report = fixture.evaluate_current(current)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+        finally:
+            fixture.close()
+
+    def test_module_and_drained_transitions_are_one_way(self) -> None:
+        for mutation in ("authority", "source"):
+            fixture = TrustedRetirementHistoryFixture()
+            try:
+                current = copy.deepcopy(fixture.module_profile)
+                retirement = cast(
+                    "dict[str, object]",
+                    cast("list[object]", current["compatibility_retirements"])[0],
+                )
+                if mutation == "authority":
+                    retirement["authority_transition"] = copy.deepcopy(
+                        cast(
+                            "list[object]",
+                            fixture.legacy_profile["compatibility_retirements"],
+                        )[0]["authority_transition"]
+                    )
+                    current["authorities"] = copy.deepcopy(
+                        fixture.legacy_profile["authorities"]
+                    )
+                    retirement["source_state"] = "draining"
+                    retirement["requested_gate"] = "none"
+                else:
+                    retirement["source_state"] = "draining"
+                report = fixture.evaluate_current(current)
+                self.assertIn(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    {item.code for item in report.diagnostics},
+                    report.to_dict(),
+                )
+            finally:
+                fixture.close()
+
+    def test_retirement_and_relation_renames_do_not_evade_history(self) -> None:
+        for field in ("retirement_id", "relation_identity"):
+            fixture = TrustedRetirementHistoryFixture()
+            try:
+                current = copy.deepcopy(fixture.module_profile)
+                retirement = cast(
+                    "dict[str, object]",
+                    cast("list[object]", current["compatibility_retirements"])[0],
+                )
+                activation = cast(
+                    "dict[str, object]",
+                    cast("dict[str, object]", retirement["authority_transition"])[
+                        "activation_record"
+                    ],
+                )
+                if field == "retirement_id":
+                    retirement["retirement_id"] = "renamed-retirement"
+                    activation["retirement_id"] = "renamed-retirement"
+                else:
+                    cast("dict[str, object]", retirement["relation"])["identity"] = (
+                        "renamed.cache"
+                    )
+                    activation["relation_identity"] = "renamed.cache"
+                    deletion = cast("dict[str, object]", retirement["deletion"])
+                    deletion["fence_relations"] = ["renamed.cache"]
+                report = fixture.evaluate_current(current)
+                self.assertIn(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    {item.code for item in report.diagnostics},
+                    report.to_dict(),
+                )
+            finally:
+                fixture.close()
+
+    def test_module_active_removal_requires_matching_history_append(self) -> None:
+        fixture = TrustedRetirementHistoryFixture()
+        try:
+            retirement = cast(
+                "dict[str, object]",
+                cast(
+                    "list[object]", fixture.module_profile["compatibility_retirements"]
+                )[0],
+            )
+            current = copy.deepcopy(fixture.module_profile)
+            current["compatibility_retirements"] = []
+            current["retirement_history"] = [fixture.history_entry(retirement)]
+            report = fixture.evaluate_current(current)
+            self.assertNotIn(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+        finally:
+            fixture.close()
+
+    def test_activation_target_and_deleted_closure_bind_the_prior_record(self) -> None:
+        fixture = TrustedRetirementHistoryFixture()
+        try:
+            current = copy.deepcopy(fixture.module_profile)
+            retirement = cast(
+                "dict[str, object]",
+                cast("list[object]", current["compatibility_retirements"])[0],
+            )
+            cast("dict[str, object]", retirement["authority_transition"])[
+                "current_authority_id"
+            ] = "different-module"
+            cast("dict[str, object]", cast("list[object]", current["authorities"])[0])[
+                "authority_id"
+            ] = "different-module"
+            report = fixture.evaluate_current(
+                current, base_revision=fixture.legacy_revision
+            )
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+        finally:
+            fixture.close()
+
+        fixture = TrustedRetirementHistoryFixture()
+        try:
+            retirement = cast(
+                "dict[str, object]",
+                cast(
+                    "list[object]", fixture.module_profile["compatibility_retirements"]
+                )[0],
+            )
+            history = fixture.history_entry(retirement)
+            closure = cast("dict[str, object]", history["closure_record"])
+            cast("dict[str, object]", closure["post_upgrade_observation"])[
+                "deletion_migration"
+            ] = {
+                "kind": "python_symbol",
+                "path": "example/router.py",
+                "symbol": "example.router.route",
+            }
+            current = copy.deepcopy(fixture.module_profile)
+            current["compatibility_retirements"] = []
+            current["retirement_history"] = [history]
+            report = fixture.evaluate_current(current)
+            self.assertIn(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+        finally:
+            fixture.close()
+
+    def test_deleted_closure_requires_exact_successful_post_upgrade_evidence(
+        self,
+    ) -> None:
+        for mutation in ("missing_check", "residual_catalogue", "wrong_owner"):
+            fixture = TrustedRetirementHistoryFixture()
+            try:
+                retirement = cast(
+                    "dict[str, object]",
+                    cast(
+                        "list[object]",
+                        fixture.module_profile["compatibility_retirements"],
+                    )[0],
+                )
+                history = fixture.history_entry(retirement)
+                closure = cast("dict[str, object]", history["closure_record"])
+                post = cast("dict[str, object]", closure["post_upgrade_observation"])
+                if mutation == "missing_check":
+                    post["checks"] = cast("list[object]", post["checks"])[1:]
+                elif mutation == "residual_catalogue":
+                    post["catalogue_edges"] = [catalogue_edge("residual")]
+                else:
+                    post["refresh_owner"] = "other-team"
+                current = copy.deepcopy(fixture.module_profile)
+                current["compatibility_retirements"] = []
+                current["retirement_history"] = [history]
+                report = fixture.evaluate_current(current)
+                self.assertIn(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    {item.code for item in report.diagnostics},
+                    report.to_dict(),
+                )
+            finally:
+                fixture.close()
+
+    def test_module_active_immutable_coordinates_fail_closed(self) -> None:
+        for mutation in ("historical_hash", "historical_writer", "activation_hash"):
+            fixture = TrustedRetirementHistoryFixture()
+            try:
+                current = copy.deepcopy(fixture.module_profile)
+                retirement = cast(
+                    "dict[str, object]",
+                    cast("list[object]", current["compatibility_retirements"])[0],
+                )
+                transition = cast(
+                    "dict[str, object]", retirement["authority_transition"]
+                )
+                displaced = cast("dict[str, object]", transition["displaced_authority"])
+                if mutation == "historical_hash":
+                    cast("dict[str, object]", displaced["historical_profile"])[
+                        "sha256"
+                    ] = "0" * 64
+                elif mutation == "historical_writer":
+                    displaced["writer"] = {
+                        "kind": "python_symbol",
+                        "path": "example/router.py",
+                        "symbol": "example.missing",
+                    }
+                else:
+                    cast("dict[str, object]", transition["activation_record"])[
+                        "sha256"
+                    ] = "0" * 64
+                report = fixture.evaluate_current(
+                    current, base_revision=fixture.legacy_revision
+                )
+                codes = {item.code for item in report.diagnostics}
+                self.assertTrue(
+                    {
+                        DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                        DiagnosticCode.RETIREMENT_AUTHORITY_CONFLICT,
+                    }
+                    & codes,
+                    report.to_dict(),
+                )
+            finally:
+                fixture.close()
+
+    def test_history_rows_are_append_only_and_new_rows_need_a_base_active(self) -> None:
+        for mutation in ("edit", "remove", "reorder", "invent"):
+            fixture = TrustedRetirementHistoryFixture()
+            try:
+                retirement = cast(
+                    "dict[str, object]",
+                    cast(
+                        "list[object]",
+                        fixture.module_profile["compatibility_retirements"],
+                    )[0],
+                )
+                first = fixture.history_entry(retirement)
+                second = copy.deepcopy(first)
+                second["retirement_id"] = "second-retirement"
+                second["relation_identity"] = "example.second_cache"
+                second_activation = cast(
+                    "dict[str, object]", second["activation_record"]
+                )
+                second_activation["retirement_id"] = "second-retirement"
+                second_activation["relation_identity"] = "example.second_cache"
+                base = copy.deepcopy(fixture.module_profile)
+                base["compatibility_retirements"] = []
+                base["retirement_history"] = [first, second]
+                fixture.write_profile(base)
+                history_base = fixture.commit("history base")
+
+                current = copy.deepcopy(base)
+                rows = cast("list[object]", current["retirement_history"])
+                if mutation == "edit":
+                    closure = cast(
+                        "dict[str, object]",
+                        cast("dict[str, object]", rows[0])["closure_record"],
+                    )
+                    cast("dict[str, object]", closure["post_upgrade_observation"])[
+                        "target"
+                    ] = "other-target"
+                elif mutation == "remove":
+                    rows.pop()
+                elif mutation == "reorder":
+                    rows.reverse()
+                else:
+                    invented = copy.deepcopy(second)
+                    invented["retirement_id"] = "invented-retirement"
+                    invented["relation_identity"] = "example.invented_cache"
+                    activation = cast(
+                        "dict[str, object]", invented["activation_record"]
+                    )
+                    activation["retirement_id"] = "invented-retirement"
+                    activation["relation_identity"] = "example.invented_cache"
+                    rows.append(invented)
+                report = fixture.evaluate_current(current, base_revision=history_base)
+                self.assertIn(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    {item.code for item in report.diagnostics},
+                    report.to_dict(),
+                )
+            finally:
+                fixture.close()

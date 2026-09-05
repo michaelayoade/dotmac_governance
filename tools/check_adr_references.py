@@ -97,6 +97,30 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BASELINE_PATH = Path(".dotmac/adr-reference-baseline.json")
+
+#: Byte-for-byte reproductions of another repository's artefact, held here so a
+#: check can run against the real bytes rather than a paraphrase.
+#:
+#: A citation inside one of these is a fact ABOUT the foreign repository, not a
+#: claim this repository makes, and it cannot be qualified: the bytes are pinned
+#: by a blob-hash assertion and editing them to satisfy this guard would destroy
+#: the property the reproduction exists to prove.
+#:
+#: An explicit set rather than a directory or a suffix, for the same reason
+#: SCANNED_SUFFIXES is explicit -- admitting a new one stays a visible decision.
+#: The baseline is not the place for these: it "holds KNOWN DEBT only", and a
+#: reproduction's citation is correct rather than owed.
+FOREIGN_REPRODUCTIONS = frozenset(
+    {
+        # dotmac_platform_control_plane deploy/product.toml, blob
+        # b7ddf4bfc9141599e3650e4a2b5be722a69ec584. Its line 543 cites
+        # dotmac_platform_control_plane ADR-0010 -- qualified here because this
+        # guard reads its own source, which is the self-reference defect the
+        # BASELINE_PATH note above was written about. Pinned by
+        # test_the_fixture_is_the_real_immutable_blob.
+        Path("tests/fixtures/platform-control-plane-descriptor.toml"),
+    }
+)
 ADR_DIR = Path("docs/adr")
 
 #: Extensions scanned. Declared rather than "every text file" so that adding a
@@ -184,6 +208,10 @@ def corpus(root: Path) -> tuple[Path, ...]:
     paths = []
     for name in result.stdout.splitlines():
         if not name:
+            continue
+        if Path(name) in FOREIGN_REPRODUCTIONS:
+            # Not this repository's citation to make or to qualify. See
+            # FOREIGN_REPRODUCTIONS.
             continue
         if name == str(BASELINE_PATH):
             # The baseline ENUMERATES findings; it does not make citations. A

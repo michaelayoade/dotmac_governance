@@ -34,17 +34,28 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
 
-from standards_control.contracts import Severity
+from standards_control.contracts import (
+    KernelAdoptionApplicability,
+    KernelAdoptionDeclaration,
+    Severity,
+    TransitionalSurfaceDeclaration,
+)
 
 __all__ = [
     "AdoptionReport",
+    "DeclarationMissing",
+    "DeclarationOutcome",
+    "DeclarationPresent",
+    "DeclarationUnreadable",
     "Finding",
     "FindingCode",
+    "KernelAdoptionApplicability",
+    "KernelAdoptionDeclaration",
     "KernelAdoptionInputs",
     "KernelSurfaceCatalogue",
     "PinSite",
     "Severity",
-    "TransitionalSurface",
+    "TransitionalSurfaceDeclaration",
 ]
 
 
@@ -65,6 +76,17 @@ class FindingCode(str, Enum):
     #: No source was scanned at all. Its own verdict, because a sweep over an
     #: empty set passes for the wrong reason.
     INVENTORY_EMPTY = "kernel.inventory.empty"
+
+    #: The declaration was absent. NOT an empty list: "nothing is prohibited"
+    #: and "nobody said" are different facts, and one value must not carry both.
+    DECLARATION_MISSING = "kernel.declaration.missing"
+    #: The declaration existed and could not be understood. Also a refusal, for
+    #: the same reason.
+    DECLARATION_UNREADABLE = "kernel.declaration.unreadable"
+    #: The declaration says `not_applicable` and the repository imports the
+    #: Kernel. An exemption states an ENFORCEABLE premise, and this is the
+    #: enforcement: the value cannot be used to leave the surface unmeasured.
+    DECLARATION_PREMISE_FALSE = "kernel.declaration.premise-false"
 
     PIN_DISAGREES = "kernel.pin.disagrees"
     SURFACE_UNKNOWN = "kernel.surface.unknown"
@@ -145,17 +167,42 @@ class KernelSurfaceCatalogue:
 
 
 @dataclass(frozen=True)
-class TransitionalSurface:
-    """A Kernel surface a product still consumes and has undertaken to stop.
+class DeclarationPresent:
+    """The repository declared its Kernel-surface classifications."""
 
-    `owner` and `expiry` are the whole point. A transitional classification
-    with neither is indistinguishable from a permanent one wearing a temporary
-    word, which is how a migration becomes the architecture.
+    declaration: KernelAdoptionDeclaration
+
+
+@dataclass(frozen=True)
+class DeclarationMissing:
+    """No declaration was found. A refusal, never an empty classification.
+
+    The two sentences a reader must not be allowed to confuse are "this
+    repository prohibits nothing" and "nobody has said what this repository
+    prohibits". An empty list says the first while meaning the second, which is
+    how a check comes to answer a question it cannot answer.
     """
 
-    module: str
-    owner: str | None = None
-    expiry: str | None = None
+    detail: str
+
+
+@dataclass(frozen=True)
+class DeclarationUnreadable:
+    """A declaration existed and could not be understood. Also a refusal.
+
+    Separate from `DeclarationMissing` because the repairs differ — one writes
+    a section, the other fixes one — and a guard that reports the wrong one
+    sends the reader to the wrong file.
+    """
+
+    detail: str
+
+
+#: Three outcomes and no fourth. There is deliberately no "empty" member: an
+#: absent classification is `DeclarationMissing`, and a declaration that says
+#: nothing is prohibited is `DeclarationPresent` carrying an empty tuple, which
+#: is a statement somebody made.
+DeclarationOutcome = DeclarationPresent | DeclarationMissing | DeclarationUnreadable
 
 
 @dataclass(frozen=True)
@@ -180,9 +227,11 @@ class KernelAdoptionInputs:
     #: edit.
     sources: dict[PurePosixPath, str]
     catalogue: KernelSurfaceCatalogue
+    #: The product's own classifications, or the refusal that stands in for
+    #: them. Not defaulted: a caller that forgot to supply one would otherwise
+    #: get the empty classification this type exists to make unrepresentable.
+    declaration: DeclarationOutcome
     pin_sites: tuple[PinSite, ...] = ()
-    prohibited_modules: frozenset[str] = frozenset()
-    transitional_surfaces: tuple[TransitionalSurface, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -395,6 +395,61 @@ class ConnectorScope:
         )
 
 
+class KernelAdoptionApplicability(str, Enum):
+    """Whether a repository adopts `dotmac_kernel` at all.
+
+    Two members and no third, because the third state a reader keeps inventing
+    — "not stated" — is precisely what this section exists to make
+    unrepresentable. An absent section is a REFUSAL at load, not a value here.
+    """
+
+    APPLICABLE = "applicable"
+    NOT_APPLICABLE = "not_applicable"
+
+
+@dataclass(frozen=True)
+class TransitionalSurfaceDeclaration:
+    """A Kernel surface a repository still consumes and has undertaken to stop.
+
+    `owner` and `expiry` are REQUIRED by the parser rather than optional with a
+    later check. A transitional classification with neither is a permanent
+    surface wearing a temporary word: nobody is answerable for removing it, and
+    no date makes its absence noticeable.
+    """
+
+    module: str
+    owner: str
+    expiry: str
+
+
+@dataclass(frozen=True)
+class KernelAdoptionDeclaration:
+    """A repository's own Kernel-surface classifications. Section version 1.
+
+    Owned by Governance as a schema and evaluated by `kernel_adoption_control`;
+    each repository owns only its instance. It is a DECLARATION, never
+    evidence — receipts and runtime-adoption facts stay out of this file, and
+    nothing here asserts that anything was installed, admitted or adopted.
+
+    The section is versioned INDEPENDENTLY of `schema_version`. A profile-wide
+    bump forces every enrolled repository to move; a section version lets this
+    one vocabulary evolve while saying so, and the two numbers answer different
+    questions.
+
+    `NOT_APPLICABLE` carries a reason because an exemption states an
+    ENFORCEABLE premise or the region is unmonitored rather than exempt. The
+    premise here is machine-checkable and is checked: a repository that
+    declares `not_applicable` and then imports `dotmac_kernel` is reported by
+    the evaluator, so the value cannot be used to leave the surface unmeasured.
+    """
+
+    section_version: int
+    applicability: KernelAdoptionApplicability
+    not_applicable_reason: str | None
+    prohibited_surfaces: tuple[str, ...]
+    transitional_surfaces: tuple[TransitionalSurfaceDeclaration, ...]
+
+
 @dataclass(frozen=True)
 class StandardsProfile:
     schema_version: int
@@ -408,6 +463,7 @@ class StandardsProfile:
     testing_kit_boundary: TestingKitBoundary
     external_connector_surface: ExternalConnectorSurface
     deployment_artefact_surfaces: tuple[DeploymentArtefactSurface, ...]
+    kernel_adoption: KernelAdoptionDeclaration
     compatibility_retirements: tuple[CompatibilityRetirement, ...]
     retirement_history: tuple[RetirementHistory, ...]
 

@@ -7,25 +7,41 @@ boundary and ADR 0042 for the decision and its three open blockers.
 
 from .contracts import (
     AdoptionReport,
+    DeclarationMissing,
+    DeclarationOutcome,
+    DeclarationPresent,
+    DeclarationUnreadable,
     Finding,
     FindingCode,
+    KernelAdoptionApplicability,
+    KernelAdoptionDeclaration,
     KernelAdoptionInputs,
     KernelSurfaceCatalogue,
     PinSite,
     Severity,
-    TransitionalSurface,
+    TransitionalSurfaceDeclaration,
 )
+from .declaration import PROFILE_PATH, SECTION_KEY, read_declaration
 from .engine import KERNEL_ROOT, evaluate
 
 __all__ = [
     "KERNEL_ROOT",
+    "PROFILE_PATH",
+    "SECTION_KEY",
     "AdoptionReport",
+    "DeclarationMissing",
+    "DeclarationOutcome",
+    "DeclarationPresent",
+    "DeclarationUnreadable",
     "Finding",
     "FindingCode",
+    "KernelAdoptionApplicability",
+    "KernelAdoptionDeclaration",
     "KernelAdoptionInputs",
     "KernelSurfaceCatalogue",
     "PinSite",
     "Severity",
-    "TransitionalSurface",
+    "TransitionalSurfaceDeclaration",
     "evaluate",
+    "read_declaration",
 ]

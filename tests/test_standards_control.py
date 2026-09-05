@@ -28,6 +28,7 @@ from standards_control.engine import (
     connector_scope,
     verify_repository,
 )
+from standards_control.profile import ProfileError, parse_profile
 from standards_control.retirement import (
     RetirementError,
     parse_observation_bundle,
@@ -1837,7 +1838,7 @@ def deployment_files(
 
 def profile() -> dict[str, object]:
     return {
-        "schema_version": 11,
+        "schema_version": 12,
         "profile_id": "example-standards",
         "repository": {"canonical_url": REPOSITORY, "default_branch": "main"},
         "governance_model": {
@@ -1846,6 +1847,18 @@ def profile() -> dict[str, object]:
             "status": "proposed",
         },
         "enforcement_mode": "candidate",
+        "kernel_adoption": {
+            "section_version": 1,
+            "applicability": "applicable",
+            "prohibited_surfaces": ["dotmac_kernel.db"],
+            "transitional_surfaces": [
+                {
+                    "module": "dotmac_kernel.messaging",
+                    "owner": "Michael Ayoade",
+                    "expiry": "2026-12-01",
+                }
+            ],
+        },
         "authorities": [
             {
                 "authority_id": "example-owner",
@@ -2766,7 +2779,12 @@ class StandardsTests(unittest.TestCase):
             schema["properties"]["enforcement_mode"]["enum"],
             ["candidate", "required"],
         )
-        self.assertEqual(schema["properties"]["schema_version"]["const"], 11)
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 12)
+        # ADR 0042's section is REQUIRED, for the reason ADR 0014's is: an
+        # optional key would let a repository decline to say what it prohibits,
+        # and an absent section reads as "nothing is prohibited" — a check that
+        # answers without being able to refuse.
+        self.assertIn("kernel_adoption", schema["required"])
         self.assertIn("testing_kit_boundary", schema["required"])
         self.assertIn("external_connector_surface", schema["required"])
         # ADR 0014's surface is REQUIRED, not optional. An optional key would
@@ -6468,6 +6486,146 @@ def target_evidence(
         "catalogue_edges": [],
         "checks": [],
     }
+
+
+class KernelAdoptionSectionTests(unittest.TestCase):
+    """The section refuses, and the refusal is the point.
+
+    ADR 0042 and Michael's ruling of 2026-09-05: Governance owns the schema and
+    the evaluator, each product owns its instance. Three states, and the third
+    is why the section is REQUIRED rather than optional — an absent section
+    would read as "nothing is prohibited", and an unreadable one as an empty
+    list. Both are refusals here, because a check that answers without being
+    able to refuse is the defect this programme keeps hitting.
+    """
+
+    def assertRefused(self, value: object, needle: str) -> None:
+        with self.assertRaises(ProfileError) as caught:
+            parse_profile(value)
+        self.assertIn(needle, str(caught.exception))
+
+    # -- the admit controls, first, so a later refusal is attributable --------
+
+    def test_the_applicable_fixture_parses(self) -> None:
+        parsed = parse_profile(profile())
+        self.assertEqual("applicable", parsed.kernel_adoption.applicability.value)
+        self.assertEqual(
+            ("dotmac_kernel.db",), parsed.kernel_adoption.prohibited_surfaces
+        )
+        self.assertEqual(1, len(parsed.kernel_adoption.transitional_surfaces))
+        self.assertEqual(
+            "Michael Ayoade", parsed.kernel_adoption.transitional_surfaces[0].owner
+        )
+
+    def test_an_explicit_typed_absence_parses(self) -> None:
+        """`not_applicable` is a VALUE, not a missing key."""
+        value = profile()
+        value["kernel_adoption"] = {
+            "section_version": 1,
+            "applicability": "not_applicable",
+            "not_applicable_reason": "composes no assembly and imports no Kernel",
+        }
+        parsed = parse_profile(value)
+        self.assertEqual("not_applicable", parsed.kernel_adoption.applicability.value)
+        self.assertEqual((), parsed.kernel_adoption.prohibited_surfaces)
+        self.assertIsNotNone(parsed.kernel_adoption.not_applicable_reason)
+
+    # -- state three: missing and unreadable both refuse ---------------------
+
+    def test_a_missing_section_is_refused_not_read_as_nothing_prohibited(self) -> None:
+        value = profile()
+        del value["kernel_adoption"]
+        self.assertRefused(value, "kernel_adoption")
+
+    def test_an_unreadable_section_is_refused_not_read_as_an_empty_list(self) -> None:
+        for corrupt in ("", "applicable", [], 0, ["dotmac_kernel.db"]):
+            with self.subTest(corrupt=corrupt):
+                value = profile()
+                value["kernel_adoption"] = corrupt
+                self.assertRefused(value, "kernel_adoption")
+
+    def test_an_empty_object_is_refused_rather_than_defaulted(self) -> None:
+        value = profile()
+        value["kernel_adoption"] = {}
+        self.assertRefused(value, "kernel_adoption.section_version")
+
+    # -- the section is versioned independently of schema_version ------------
+
+    def test_an_unknown_section_version_is_refused(self) -> None:
+        value = profile()
+        cast("dict[str, object]", value["kernel_adoption"])["section_version"] = 2
+        self.assertRefused(value, "section_version 2 is not 1")
+
+    def test_schema_version_11_names_the_section_it_is_missing(self) -> None:
+        """The migration message must say WHAT to declare, not only that v11 is old."""
+        value = profile()
+        value["schema_version"] = 11
+        del value["kernel_adoption"]
+        self.assertRefused(value, "kernel_adoption")
+
+    # -- closed per applicability --------------------------------------------
+
+    def test_not_applicable_without_a_reason_is_refused(self) -> None:
+        """An exemption states an enforceable premise or the region is unmonitored."""
+        value = profile()
+        value["kernel_adoption"] = {
+            "section_version": 1,
+            "applicability": "not_applicable",
+        }
+        self.assertRefused(value, "not_applicable_reason")
+
+    def test_not_applicable_carrying_a_prohibited_list_is_refused(self) -> None:
+        """A list nothing will read is worse than no list: it looks measured."""
+        value = profile()
+        value["kernel_adoption"] = {
+            "section_version": 1,
+            "applicability": "not_applicable",
+            "not_applicable_reason": "no Kernel here",
+            "prohibited_surfaces": ["dotmac_kernel.db"],
+        }
+        self.assertRefused(value, "unknown keys")
+
+    def test_a_third_applicability_value_is_refused(self) -> None:
+        value = profile()
+        cast("dict[str, object]", value["kernel_adoption"])["applicability"] = "unknown"
+        self.assertRefused(value, "applicable or not_applicable")
+
+    # -- a transitional surface states an owner AND an expiry ----------------
+
+    def test_a_transitional_surface_missing_its_owner_is_refused(self) -> None:
+        for dropped in ("owner", "expiry"):
+            with self.subTest(dropped=dropped):
+                value = profile()
+                section = cast("dict[str, object]", value["kernel_adoption"])
+                entry = dict(
+                    cast("list[dict[str, object]]", section["transitional_surfaces"])[0]
+                )
+                del entry[dropped]
+                section["transitional_surfaces"] = [entry]
+                self.assertRefused(value, "missing keys")
+
+    def test_a_blank_owner_is_not_an_owner(self) -> None:
+        value = profile()
+        section = cast("dict[str, object]", value["kernel_adoption"])
+        entry = dict(
+            cast("list[dict[str, object]]", section["transitional_surfaces"])[0]
+        )
+        entry["owner"] = "   "
+        section["transitional_surfaces"] = [entry]
+        self.assertRefused(value, "owner")
+
+    def test_one_module_cannot_be_both_prohibited_and_transitional(self) -> None:
+        """Two different undertakings; one module may only carry one of them."""
+        value = profile()
+        section = cast("dict[str, object]", value["kernel_adoption"])
+        section["prohibited_surfaces"] = ["dotmac_kernel.messaging"]
+        self.assertRefused(value, "both prohibited and transitional")
+
+    def test_a_duplicate_prohibited_surface_is_refused(self) -> None:
+        value = profile()
+        section = cast("dict[str, object]", value["kernel_adoption"])
+        section["prohibited_surfaces"] = ["dotmac_kernel.db", "dotmac_kernel.db"]
+        self.assertRefused(value, "duplicate entries")
 
 
 class RetirementContractTests(unittest.TestCase):

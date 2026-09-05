@@ -30,11 +30,14 @@ from pathlib import PurePosixPath
 
 from .contracts import (
     AdoptionReport,
+    DeclarationMissing,
+    DeclarationUnreadable,
     Finding,
     FindingCode,
+    KernelAdoptionApplicability,
     KernelAdoptionInputs,
     Severity,
-    TransitionalSurface,
+    TransitionalSurfaceDeclaration,
 )
 
 __all__ = ["KERNEL_ROOT", "evaluate"]
@@ -223,13 +226,15 @@ def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
     return findings
 
 
-def _check_transitional(surfaces: tuple[TransitionalSurface, ...]) -> list[Finding]:
+def _check_transitional(
+    surfaces: tuple[TransitionalSurfaceDeclaration, ...],
+) -> list[Finding]:
     findings: list[Finding] = []
     for surface in surfaces:
         missing = [
             name
             for name, value in (("owner", surface.owner), ("expiry", surface.expiry))
-            if value is None or not value.strip()
+            if not value.strip()
         ]
         if not missing:
             continue
@@ -246,12 +251,94 @@ def _check_transitional(surfaces: tuple[TransitionalSurface, ...]) -> list[Findi
     return findings
 
 
+def _check_declaration(
+    inputs: KernelAdoptionInputs,
+    kernel_import_sites: list[tuple[PurePosixPath, int, str]],
+) -> list[Finding]:
+    """Arms 4 and 6, and the three states the declaration can be in.
+
+    This is the half that used to be inert. Arms 4 and 6 have a production
+    input now — the `kernel_adoption` section of `.dotmac/standards-profile.json`
+    — and, more importantly, they REFUSE when it is absent or unreadable rather
+    than reporting nothing.
+
+    `not_applicable` is checked, not accepted. An exemption states an
+    enforceable premise or the region is unmonitored rather than exempt, and
+    the premise here is decidable from the same source inventory the arms above
+    already read: a repository that declares it consumes no Kernel and then
+    imports one is named, with the file and line of the import that contradicts
+    it.
+    """
+    outcome = inputs.declaration
+    if isinstance(outcome, DeclarationMissing):
+        return [
+            _error(
+                FindingCode.DECLARATION_MISSING,
+                f"{outcome.detail}. Arms 4 and 6 are therefore UNMONITORED "
+                "rather than clean: no prohibited surface and no transitional "
+                "surface can be reported, and that is a refusal rather than a "
+                "pass",
+            )
+        ]
+    if isinstance(outcome, DeclarationUnreadable):
+        return [
+            _error(
+                FindingCode.DECLARATION_UNREADABLE,
+                f"{outcome.detail}. Arms 4 and 6 are UNMONITORED rather than clean",
+            )
+        ]
+
+    declaration = outcome.declaration
+    if declaration.applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
+        if not kernel_import_sites:
+            return []
+        path, line, module = kernel_import_sites[0]
+        return [
+            _error(
+                FindingCode.DECLARATION_PREMISE_FALSE,
+                f"the declaration states applicability 'not_applicable' — "
+                f"{declaration.not_applicable_reason!r} — but this repository "
+                f"imports {module}, at {path.as_posix()}:{line}, and "
+                f"{len(kernel_import_sites)} Kernel import(s) in total. An "
+                "exemption states an ENFORCEABLE premise; this one is "
+                "contradicted by the repository's own source, so the "
+                "classification cannot stand and arms 4 and 6 do not run",
+                path=path,
+                line=line,
+            )
+        ]
+
+    findings: list[Finding] = []
+    prohibited = frozenset(declaration.prohibited_surfaces)
+    for path, line, module in kernel_import_sites:
+        entry = _prohibited_match(module, prohibited)
+        if entry is None:
+            continue
+        detail = (
+            f"{module} (under the prohibited {entry})" if module != entry else module
+        )
+        findings.append(
+            _error(
+                FindingCode.SURFACE_PROHIBITED,
+                f"imports {detail}, which this repository's own "
+                "`kernel_adoption.prohibited_surfaces` forbids. The "
+                "classification is the repository's; this arm reports the "
+                "import that contradicts it",
+                path=path,
+                line=line,
+            )
+        )
+    findings.extend(_check_transitional(declaration.transitional_surfaces))
+    return findings
+
+
 def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     """Measure Kernel adoption over the supplied product source.
 
     Reads only `inputs`. No filesystem, no network, no profile document.
     """
     findings: list[Finding] = []
+    kernel_import_sites: list[tuple[PurePosixPath, int, str]] = []
 
     if not inputs.sources:
         findings.append(
@@ -288,6 +375,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
 
         for entry in imports:
             module = entry.module
+            kernel_import_sites.append((path, entry.line, module))
 
             private = _private_components(module)
             if private:
@@ -314,24 +402,6 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                         f"{len(inputs.catalogue.internal)} internal names. An "
                         "unpublished surface is either a typo or a module the "
                         "Kernel does not undertake to keep",
-                        path=path,
-                        line=entry.line,
-                    )
-                )
-
-            prohibited = _prohibited_match(module, inputs.prohibited_modules)
-            if prohibited is not None:
-                detail = (
-                    f"{module} (under the prohibited {prohibited})"
-                    if module != prohibited
-                    else module
-                )
-                findings.append(
-                    _error(
-                        FindingCode.SURFACE_PROHIBITED,
-                        f"imports {detail}, which this product classifies "
-                        "prohibited. The classification is the product's own; "
-                        "this arm reports the import that contradicts it",
                         path=path,
                         line=entry.line,
                     )
@@ -372,6 +442,6 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             )
 
     findings.extend(_check_pins(inputs))
-    findings.extend(_check_transitional(inputs.transitional_surfaces))
+    findings.extend(_check_declaration(inputs, kernel_import_sites))
 
     return AdoptionReport(findings=tuple(findings))

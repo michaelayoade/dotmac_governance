@@ -26,6 +26,8 @@ from .contracts import (
     GovernanceModelRef,
     GovernanceSourceKind,
     GovernanceStatus,
+    KernelAdoptionApplicability,
+    KernelAdoptionDeclaration,
     LocalGovernanceModelRef,
     ModuleDeclaredVocabulary,
     PinnedGovernanceModelRef,
@@ -36,6 +38,7 @@ from .contracts import (
     StandardsProfile,
     SurfaceId,
     TestingKitBoundary,
+    TransitionalSurfaceDeclaration,
     TypedContractSurface,
     VocabularyId,
     VocabularyMemberKind,
@@ -574,12 +577,146 @@ def _deployment_artefact_surface(
     )
 
 
+#: The section's own version, independent of `schema_version`. A profile-wide
+#: bump forces every enrolled repository to move; this one lets the
+#: Kernel-adoption vocabulary evolve while saying so.
+KERNEL_ADOPTION_SECTION_VERSION = 1
+
+
+def parse_kernel_adoption(value: object) -> KernelAdoptionDeclaration:
+    """Parse the Kernel-adoption section, refusing every ambiguous shape.
+
+    Three states, and the third is the load-bearing one:
+
+    - **applicable** — prohibited surfaces, and transitional surfaces that each
+      carry an owner AND an expiry.
+    - **not_applicable** — an explicit typed absence with a stated reason.
+    - **missing or unreadable** — a REFUSAL. Absence is refused by
+      `parse_profile`'s closed key set, which requires this section; a
+      malformed one raises here. Neither ever becomes an empty list, because
+      "nothing is prohibited" and "nobody said" are different facts and one
+      value must not carry both.
+
+    The two applicability values admit DIFFERENT keys, so a profile cannot
+    declare `not_applicable` while carrying a prohibited-surface list that
+    nothing will read.
+    """
+    data = _object(value, "kernel_adoption")
+    raw_version = data.get("section_version")
+    if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+        raise ProfileError(
+            "kernel_adoption.section_version must be integer "
+            f"{KERNEL_ADOPTION_SECTION_VERSION}"
+        )
+    if raw_version != KERNEL_ADOPTION_SECTION_VERSION:
+        raise ProfileError(
+            f"kernel_adoption.section_version {raw_version} is not "
+            f"{KERNEL_ADOPTION_SECTION_VERSION}; the section is versioned "
+            "independently of schema_version so a vocabulary change is visible "
+            "rather than silently reinterpreted"
+        )
+
+    raw_applicability = _string(
+        data.get("applicability"), "kernel_adoption.applicability"
+    )
+    try:
+        applicability = KernelAdoptionApplicability(raw_applicability)
+    except ValueError as error:
+        raise ProfileError(
+            "kernel_adoption.applicability must be applicable or not_applicable"
+        ) from error
+
+    if applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
+        _keys(
+            data,
+            frozenset({"section_version", "applicability", "not_applicable_reason"}),
+            "kernel_adoption",
+        )
+        reason = _string(
+            data["not_applicable_reason"], "kernel_adoption.not_applicable_reason"
+        )
+        return KernelAdoptionDeclaration(
+            section_version=KERNEL_ADOPTION_SECTION_VERSION,
+            applicability=applicability,
+            not_applicable_reason=reason,
+            prohibited_surfaces=(),
+            transitional_surfaces=(),
+        )
+
+    _keys(
+        data,
+        frozenset(
+            {
+                "section_version",
+                "applicability",
+                "prohibited_surfaces",
+                "transitional_surfaces",
+            }
+        ),
+        "kernel_adoption",
+    )
+    prohibited = tuple(
+        _string(item, f"kernel_adoption.prohibited_surfaces[{index}]")
+        for index, item in enumerate(
+            _sequence(
+                data["prohibited_surfaces"], "kernel_adoption.prohibited_surfaces"
+            )
+        )
+    )
+    if len(set(prohibited)) != len(prohibited):
+        raise ProfileError("kernel_adoption.prohibited_surfaces has duplicate entries")
+    transitional: list[TransitionalSurfaceDeclaration] = []
+    for index, item in enumerate(
+        _sequence(
+            data["transitional_surfaces"], "kernel_adoption.transitional_surfaces"
+        )
+    ):
+        location = f"kernel_adoption.transitional_surfaces[{index}]"
+        entry = _object(item, location)
+        _keys(entry, frozenset({"module", "owner", "expiry"}), location)
+        transitional.append(
+            TransitionalSurfaceDeclaration(
+                module=_string(entry["module"], f"{location}.module"),
+                owner=_string(entry["owner"], f"{location}.owner"),
+                expiry=_string(entry["expiry"], f"{location}.expiry"),
+            )
+        )
+    modules = [item.module for item in transitional]
+    if len(set(modules)) != len(modules):
+        raise ProfileError("kernel_adoption.transitional_surfaces names a module twice")
+    overlap = sorted(set(modules) & set(prohibited))
+    if overlap:
+        raise ProfileError(
+            "kernel_adoption declares "
+            f"{', '.join(overlap)} both prohibited and transitional; a surface "
+            "being retired on a stated date and a surface that may not be "
+            "imported at all are different undertakings"
+        )
+    return KernelAdoptionDeclaration(
+        section_version=KERNEL_ADOPTION_SECTION_VERSION,
+        applicability=applicability,
+        not_applicable_reason=None,
+        prohibited_surfaces=prohibited,
+        transitional_surfaces=tuple(transitional),
+    )
+
+
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
     version = data.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):
-        raise ProfileError("schema_version must be integer 11")
+        raise ProfileError("schema_version must be integer 12")
+    if version == 11:
+        raise ProfileError(
+            "schema_version 11 is superseded by 12: declare kernel_adoption "
+            "and move to v12. The section is REQUIRED rather than optional, "
+            "because an absent one would read as 'nothing is prohibited' — a "
+            "check that answers without being able to refuse. A repository "
+            'that consumes no Kernel declares applicability "not_applicable" '
+            "with a reason, which is an enforceable premise the evaluator "
+            "checks against the repository's own imports"
+        )
     if version == 10:
         raise ProfileError(
             "schema_version 10 is superseded by 11: declare "
@@ -644,8 +781,8 @@ def parse_profile(value: object) -> StandardsProfile:
             "indistinguishable from a repository that ships none. Add the key "
             "and set schema_version to 10"
         )
-    if version != 11:
-        raise ProfileError("schema_version must be integer 11")
+    if version != 12:
+        raise ProfileError("schema_version must be integer 12")
     _keys(
         data,
         frozenset(
@@ -661,6 +798,7 @@ def parse_profile(value: object) -> StandardsProfile:
                 "testing_kit_boundary",
                 "external_connector_surface",
                 "deployment_artefact_surfaces",
+                "kernel_adoption",
                 "compatibility_retirements",
                 "retirement_history",
             }
@@ -724,7 +862,7 @@ def parse_profile(value: object) -> StandardsProfile:
     except RetirementError as error:
         raise ProfileError(str(error)) from error
     return StandardsProfile(
-        schema_version=11,
+        schema_version=12,
         profile_id=ProfileId(_slug(data["profile_id"], "profile_id")),
         repository=_repository(data["repository"]),
         governance_model=governance,
@@ -735,6 +873,7 @@ def parse_profile(value: object) -> StandardsProfile:
         testing_kit_boundary=_testing_kit_boundary(data["testing_kit_boundary"]),
         external_connector_surface=connector_surface,
         deployment_artefact_surfaces=deployments,
+        kernel_adoption=parse_kernel_adoption(data["kernel_adoption"]),
         compatibility_retirements=retirements,
         retirement_history=retirement_history,
     )

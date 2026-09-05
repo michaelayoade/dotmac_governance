@@ -23,23 +23,36 @@ source, and a pin arm handed too few sites to be capable of disagreeing.
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
 
 from kernel_adoption_control import (
     AdoptionReport,
+    DeclarationMissing,
+    DeclarationOutcome,
+    DeclarationPresent,
+    DeclarationUnreadable,
     Finding,
     FindingCode,
+    KernelAdoptionApplicability,
+    KernelAdoptionDeclaration,
     KernelAdoptionInputs,
     KernelSurfaceCatalogue,
     PinSite,
     Severity,
-    TransitionalSurface,
+    TransitionalSurfaceDeclaration,
     evaluate,
+    read_declaration,
 )
 from kernel_adoption_control.foundation_binding import (
     _MOVING_ALIAS,
+    ABANDONED_VERSIONS,
     FOUNDATION_APPLICATION_PROFILE,
+    AdoptionClaim,
+    AdoptionState,
+    BootstrapOnlyError,
     ContractBinding,
     CoordinateError,
 )
@@ -89,20 +102,39 @@ CLEAN = {
 }
 
 
+def declared(
+    prohibited: frozenset[str] = frozenset(),
+    transitional: tuple[TransitionalSurfaceDeclaration, ...] = (),
+) -> DeclarationOutcome:
+    return DeclarationPresent(
+        KernelAdoptionDeclaration(
+            section_version=1,
+            applicability=KernelAdoptionApplicability.APPLICABLE,
+            not_applicable_reason=None,
+            prohibited_surfaces=tuple(sorted(prohibited)),
+            transitional_surfaces=transitional,
+        )
+    )
+
+
 def evaluate_sources(
     sources: dict[PurePosixPath, str],
     *,
     prohibited: frozenset[str] = frozenset(),
     pins: tuple[PinSite, ...] = (),
-    transitional: tuple[TransitionalSurface, ...] = (),
+    transitional: tuple[TransitionalSurfaceDeclaration, ...] = (),
+    declaration: DeclarationOutcome | None = None,
 ) -> AdoptionReport:
     return evaluate(
         KernelAdoptionInputs(
             sources=sources,
             catalogue=A98,
             pin_sites=pins,
-            prohibited_modules=prohibited,
-            transitional_surfaces=transitional,
+            declaration=(
+                declared(prohibited, transitional)
+                if declaration is None
+                else declaration
+            ),
         )
     )
 
@@ -441,12 +473,26 @@ class LocalFacade(unittest.TestCase):
 
 
 class TransitionalOwnership(unittest.TestCase):
+    """Two layers, and both are proved.
+
+    A transitional entry that OMITS `owner` or `expiry` cannot reach this
+    engine at all: `standards_control.profile.parse_kernel_adoption` refuses
+    the section, proved in `tests/test_standards_control.py`. What this arm
+    catches is the shape that parses and still says nothing — a present field
+    holding whitespace. A guard that only checked for absence would pass a
+    declaration whose owner is a space.
+    """
+
     def test_a_transitional_surface_with_neither_owner_nor_expiry_is_named(
         self,
     ) -> None:
         report = evaluate_sources(
             CLEAN,
-            transitional=(TransitionalSurface(module="dotmac_kernel.db"),),
+            transitional=(
+                TransitionalSurfaceDeclaration(
+                    module="dotmac_kernel.db", owner="", expiry="  "
+                ),
+            ),
         )
         found = codes_of(report, FindingCode.TRANSITIONAL_UNOWNED)
         self.assertEqual(1, len(found))
@@ -458,7 +504,7 @@ class TransitionalOwnership(unittest.TestCase):
         report = evaluate_sources(
             CLEAN,
             transitional=(
-                TransitionalSurface(
+                TransitionalSurfaceDeclaration(
                     module="dotmac_kernel.db", owner="   ", expiry="2026-12-01"
                 ),
             ),
@@ -471,7 +517,7 @@ class TransitionalOwnership(unittest.TestCase):
         report = evaluate_sources(
             CLEAN,
             transitional=(
-                TransitionalSurface(
+                TransitionalSurfaceDeclaration(
                     module="dotmac_kernel.db",
                     owner="Michael Ayoade",
                     expiry="2026-12-01",
@@ -491,11 +537,17 @@ class BoundaryIsStructural(unittest.TestCase):
 
     def test_the_package_declares_no_profile_schema_and_no_digest(self) -> None:
         import kernel_adoption_control
-        from kernel_adoption_control import contracts, engine, foundation_binding
+        from kernel_adoption_control import (
+            contracts,
+            declaration,
+            engine,
+            foundation_binding,
+        )
 
         for module in (
             kernel_adoption_control,
             contracts,
+            declaration,
             engine,
             foundation_binding,
         ):
@@ -633,6 +685,251 @@ class FoundationBinding(unittest.TestCase):
                     bool(_MOVING_ALIAS.fullmatch(word)),
                     f"{word!r} is classified differently by the two lists",
                 )
+
+
+class DeclarationStates(unittest.TestCase):
+    """Three states, and the third is why the section is required.
+
+    Michael's ruling of 2026-09-05: applicable, an explicit typed absence, or a
+    refusal. An absent section must not read as "nothing is prohibited" and an
+    unreadable one must not read as an empty list. Both are planted here and
+    both refuse.
+    """
+
+    PROHIBITED_SOURCE = {
+        PurePosixPath("app/repo.py"): "from dotmac_kernel.db import session\n"
+    }
+
+    def test_a_planted_missing_declaration_refuses_rather_than_passing(self) -> None:
+        report = evaluate_sources(
+            self.PROHIBITED_SOURCE,
+            declaration=DeclarationMissing(
+                "no section in .dotmac/standards-profile.json"
+            ),
+        )
+        found = codes_of(report, FindingCode.DECLARATION_MISSING)
+        self.assertEqual(1, len(found))
+        self.assertIs(Severity.ERROR, found[0].severity)
+        self.assertIn("UNMONITORED", found[0].message)
+        self.assertFalse(report.conforms)
+        # And the arms it gates report nothing, rather than reporting clean.
+        self.assertEqual([], codes_of(report, FindingCode.SURFACE_PROHIBITED))
+
+    def test_a_planted_corrupt_declaration_refuses_rather_than_emptying(self) -> None:
+        report = evaluate_sources(
+            self.PROHIBITED_SOURCE,
+            declaration=DeclarationUnreadable("section_version 2 is not 1"),
+        )
+        found = codes_of(report, FindingCode.DECLARATION_UNREADABLE)
+        self.assertEqual(1, len(found))
+        self.assertIn("UNMONITORED", found[0].message)
+        self.assertFalse(report.conforms)
+
+    def test_an_applicable_declaration_drives_the_prohibited_arm(self) -> None:
+        """The near-miss for both refusals above: a real section, and it works."""
+        report = evaluate_sources(
+            self.PROHIBITED_SOURCE, prohibited=frozenset({"dotmac_kernel.db"})
+        )
+        self.assertEqual([], codes_of(report, FindingCode.DECLARATION_MISSING))
+        self.assertEqual([], codes_of(report, FindingCode.DECLARATION_UNREADABLE))
+        found = codes_of(report, FindingCode.SURFACE_PROHIBITED)
+        self.assertEqual(1, len(found))
+        self.assertEqual(1, found[0].line)
+        self.assertIn("prohibited_surfaces", found[0].message)
+
+    def test_a_declaration_that_prohibits_nothing_is_a_statement_somebody_made(
+        self,
+    ) -> None:
+        """Empty tuples are fine WHEN DECLARED. That is the whole distinction."""
+        report = evaluate_sources(self.PROHIBITED_SOURCE, prohibited=frozenset())
+        self.assertEqual([], codes_of(report, FindingCode.SURFACE_PROHIBITED))
+        self.assertEqual([], codes_of(report, FindingCode.DECLARATION_MISSING))
+
+    def test_not_applicable_is_checked_against_the_repositorys_own_imports(
+        self,
+    ) -> None:
+        """An exemption states an ENFORCEABLE premise. This is the enforcement."""
+        report = evaluate_sources(
+            self.PROHIBITED_SOURCE,
+            declaration=DeclarationPresent(
+                KernelAdoptionDeclaration(
+                    section_version=1,
+                    applicability=KernelAdoptionApplicability.NOT_APPLICABLE,
+                    not_applicable_reason="this repository consumes no Kernel",
+                    prohibited_surfaces=(),
+                    transitional_surfaces=(),
+                )
+            ),
+        )
+        found = codes_of(report, FindingCode.DECLARATION_PREMISE_FALSE)
+        self.assertEqual(1, len(found))
+        self.assertEqual(PurePosixPath("app/repo.py"), found[0].path)
+        self.assertEqual(1, found[0].line)
+        self.assertIn("dotmac_kernel.db", found[0].message)
+        self.assertIn("consumes no Kernel", found[0].message)
+
+    def test_a_true_not_applicable_premise_is_silent(self) -> None:
+        """The near-miss: a repository that really imports no Kernel."""
+        report = evaluate_sources(
+            {PurePosixPath("tools/thing.py"): "import json\n\nprint(json)\n"},
+            declaration=DeclarationPresent(
+                KernelAdoptionDeclaration(
+                    section_version=1,
+                    applicability=KernelAdoptionApplicability.NOT_APPLICABLE,
+                    not_applicable_reason="composes no assembly",
+                    prohibited_surfaces=(),
+                    transitional_surfaces=(),
+                )
+            ),
+        )
+        self.assertEqual([], codes_of(report, FindingCode.DECLARATION_PREMISE_FALSE))
+
+
+class DeclarationReading(unittest.TestCase):
+    """`read_declaration` turns every failure into an outcome and never raises.
+
+    A caller that has to remember a `try` is a caller that will one day report
+    a clean run over a file it could not open.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / ".dotmac").mkdir()
+
+    def write(self, text: str) -> None:
+        (self.root / ".dotmac" / "standards-profile.json").write_text(text)
+
+    def test_an_absent_file_is_missing_not_empty(self) -> None:
+        outcome = read_declaration(self.root)
+        self.assertIsInstance(outcome, DeclarationMissing)
+
+    def test_a_profile_without_the_section_is_missing(self) -> None:
+        self.write(json.dumps({"schema_version": 12}))
+        outcome = read_declaration(self.root)
+        self.assertIsInstance(outcome, DeclarationMissing)
+        self.assertIn("kernel_adoption", str(outcome))
+
+    def test_invalid_json_is_unreadable_not_empty(self) -> None:
+        self.write("{not json")
+        self.assertIsInstance(read_declaration(self.root), DeclarationUnreadable)
+
+    def test_a_section_that_does_not_parse_is_unreadable(self) -> None:
+        self.write(
+            json.dumps(
+                {"kernel_adoption": {"section_version": 1, "applicability": "maybe"}}
+            )
+        )
+        self.assertIsInstance(read_declaration(self.root), DeclarationUnreadable)
+
+    def test_a_valid_section_is_present(self) -> None:
+        self.write(
+            json.dumps(
+                {
+                    "kernel_adoption": {
+                        "section_version": 1,
+                        "applicability": "applicable",
+                        "prohibited_surfaces": ["dotmac_kernel.db"],
+                        "transitional_surfaces": [],
+                    }
+                }
+            )
+        )
+        outcome = read_declaration(self.root)
+        assert isinstance(outcome, DeclarationPresent)
+        self.assertEqual(("dotmac_kernel.db",), outcome.declaration.prohibited_surfaces)
+
+    def test_this_repositorys_own_declaration_reads(self) -> None:
+        """The admit control over the real file, not a fixture."""
+        outcome = read_declaration(Path(__file__).resolve().parent.parent)
+        assert isinstance(outcome, DeclarationPresent)
+        self.assertIs(
+            KernelAdoptionApplicability.NOT_APPLICABLE,
+            outcome.declaration.applicability,
+        )
+
+
+class BootstrapOnlyStates(unittest.TestCase):
+    """A revision-bound binding cannot be made to count. Structurally.
+
+    Michael's ruling of 2026-09-05 permits the immutable source coordinate
+    "only as a temporary, report-only bootstrap" and says it "must never count
+    as installed, admitted, or adopted". This class is the enforcement: the
+    claim cannot be CONSTRUCTED, so there is no later place for someone to
+    decide the bootstrap was good enough.
+    """
+
+    RELEASED = ContractBinding(
+        repository="michaelayoade/dotmac_starter_mt",
+        revision="55750e104df3dd94b6f9f70bf8c8db53986394c7",
+        path=PurePosixPath("a.py"),
+        symbol="S",
+        released_version="0.2.0a2",
+    )
+
+    def test_a_revision_binding_cannot_be_installed_admitted_or_adopted(self) -> None:
+        for state in (
+            AdoptionState.INSTALLED,
+            AdoptionState.ADMITTED,
+            AdoptionState.ADOPTED,
+        ):
+            with self.subTest(state=state):
+                with self.assertRaises(BootstrapOnlyError) as caught:
+                    AdoptionClaim(FOUNDATION_APPLICATION_PROFILE, state)
+                message = str(caught.exception)
+                self.assertIn(state.value, message)
+                self.assertIn("report-only bootstrap", message)
+                self.assertIn(FOUNDATION_APPLICATION_PROFILE.revision, message)
+
+    def test_the_shipped_binding_may_hold_bootstrap(self) -> None:
+        """The admit control. A guard that refused every state would prove nothing."""
+        claim = AdoptionClaim(FOUNDATION_APPLICATION_PROFILE, AdoptionState.BOOTSTRAP)
+        self.assertIs(AdoptionState.BOOTSTRAP, claim.state)
+
+    def test_a_released_binding_may_hold_every_state(self) -> None:
+        """The near-miss that keeps the refusal a property of the COORDINATE KIND.
+
+        If this failed too, the guard would be "AdoptionClaim always raises"
+        rather than "a source revision cannot establish a release fact", and the
+        test above would pass for the wrong reason.
+        """
+        for state in AdoptionState:
+            with self.subTest(state=state):
+                self.assertIs(state, AdoptionClaim(self.RELEASED, state).state)
+
+    def test_the_guard_would_fail_if_a_revision_binding_were_made_to_count(
+        self,
+    ) -> None:
+        """The sensitivity proof stated as the thing that must stay true.
+
+        `requires_release` is the only input to the refusal. If a later change
+        made a revision-bound binding report `requires_release == False`, every
+        release-only state would silently become constructible over it — so the
+        property is asserted directly rather than inferred from the raises
+        above.
+        """
+        self.assertTrue(FOUNDATION_APPLICATION_PROFILE.requires_release)
+        self.assertFalse(self.RELEASED.requires_release)
+
+    def test_the_abandoned_version_is_refused_by_name(self) -> None:
+        """`0.4.0a1` is on `main`, unpublished, and must never be bound."""
+        self.assertIn("0.4.0a1", ABANDONED_VERSIONS)
+        for version in ABANDONED_VERSIONS:
+            with self.subTest(version=version):
+                with self.assertRaises(CoordinateError) as caught:
+                    ContractBinding(
+                        repository="michaelayoade/dotmac_starter_mt",
+                        revision="55750e104df3dd94b6f9f70bf8c8db53986394c7",
+                        path=PurePosixPath("a.py"),
+                        symbol="S",
+                        released_version=version,
+                    )
+                self.assertIn("abandoned", str(caught.exception))
+
+    def test_a_genuinely_published_version_is_not_refused(self) -> None:
+        """The near-miss: `0.2.0a2` is a real tag and must bind cleanly."""
+        self.assertEqual("0.2.0a2", self.RELEASED.released_version)
 
 
 if __name__ == "__main__":

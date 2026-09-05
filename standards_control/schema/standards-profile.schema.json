@@ -15,12 +15,13 @@
     "testing_kit_boundary",
     "external_connector_surface",
     "deployment_artefact_surfaces",
+    "kernel_adoption",
     "compatibility_retirements",
     "retirement_history"
   ],
   "properties": {
     "schema_version": {
-      "const": 11
+      "const": 12
     },
     "profile_id": {
       "$ref": "#/$defs/slug"
@@ -72,6 +73,9 @@
         "$ref": "#/$defs/deployment_artefact_surface"
       }
     },
+    "kernel_adoption": {
+      "$ref": "#/$defs/kernel_adoption"
+    },
     "compatibility_retirements": {
       "type": "array",
       "uniqueItems": true,
@@ -84,6 +88,57 @@
     }
   },
   "$defs": {
+    "kernel_adoption": {
+      "type": "object",
+      "description": "A repository's own Kernel-surface classifications. REQUIRED and closed per applicability: an absent section would read as 'nothing is prohibited' and an unreadable one as an empty list, so both are refused instead of answered. Declarations only — receipts and runtime-adoption evidence are not carried here.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["section_version", "applicability", "not_applicable_reason"],
+          "properties": {
+            "section_version": { "const": 1 },
+            "applicability": { "const": "not_applicable" },
+            "not_applicable_reason": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "section_version",
+            "applicability",
+            "prohibited_surfaces",
+            "transitional_surfaces"
+          ],
+          "properties": {
+            "section_version": { "const": 1 },
+            "applicability": { "const": "applicable" },
+            "prohibited_surfaces": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "transitional_surfaces": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/transitional_surface" }
+            }
+          }
+        }
+      ]
+    },
+    "transitional_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "owner and expiry are REQUIRED. A transitional surface carrying neither is a permanent surface wearing a temporary word.",
+      "required": ["module", "owner", "expiry"],
+      "properties": {
+        "module": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 },
+        "expiry": { "type": "string", "minLength": 1 }
+      }
+    },
     "compatibility_retirement": {
       "type": "object",
       "additionalProperties": false,

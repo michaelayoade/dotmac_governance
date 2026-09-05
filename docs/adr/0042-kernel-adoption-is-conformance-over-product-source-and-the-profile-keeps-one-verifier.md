@@ -131,13 +131,49 @@ Python that a caller supplies and consults no document:
 6. **Unowned transitional surface** — a transitional classification with no
    owner or no expiry.
 
-### 3. The inputs are a function signature, not a file format
+### 3. The classifications live in a closed, versioned profile section
 
-`KernelAdoptionInputs` is a frozen dataclass a caller constructs. It has no
-serialization, no version string and no loader, because deciding where these
-facts live in a product is an ownership question that is OPEN (§ 5), and
-answering it by inventing a file would be the second document this record
-refuses.
+Michael ruled on 2026-09-05: *"Put Kernel-adoption classifications in a
+versioned, closed section of `.dotmac/standards-profile.json`. Governance owns
+the schema and evaluator; each product owns its instance. Do not add them to
+`ApplicationFoundationProfile.v1` and do not create another document."*
+
+That is narrower than the earlier "no adoption evidence in
+`standards-profile.json`", and the distinction is the point: **classifications
+are declarations, not evidence.** Receipts and runtime-adoption facts stay out
+of that file.
+
+Implemented as `schema_version` 12's `kernel_adoption` section, at
+`section_version` 1. The section is versioned INDEPENDENTLY of the profile,
+because a profile-wide bump forces every enrolled repository to move while a
+section version lets one vocabulary evolve and say so.
+
+Three states, and the third is the one this section exists for:
+
+- **applicable** — prohibited surfaces, and transitional surfaces that each
+  carry an owner AND an expiry. The parser requires both; the evaluator
+  additionally rejects a present field holding whitespace, because a guard that
+  only checks for absence passes a declaration whose owner is a space.
+- **not applicable** — an explicit typed absence with a stated reason. It is
+  CHECKED, not accepted: a repository declaring it consumes no Kernel and then
+  importing one is named, with the file and line of the contradicting import.
+  An exemption states an enforceable premise or the region is unmonitored
+  rather than exempt.
+- **missing or unreadable** — a REFUSAL. The section is REQUIRED rather than
+  optional so that absence is refused at load; `read_declaration` turns an
+  unopenable file, invalid JSON and a section that does not parse into typed
+  refusals too. Neither ever becomes an empty list, because "this repository
+  prohibits nothing" and "nobody has said what this repository prohibits" are
+  different facts and one value must not carry both.
+
+`standards_control.profile` remains the ONE parser for that file.
+`kernel_adoption_control` reads the section by key and hands it to
+`parse_kernel_adoption`; it adds no second parser, and it evaluates rather than
+enforcing, so no `standards_control` rule family is created.
+
+`KernelAdoptionInputs` still takes the declaration as a value rather than a
+path, so the engine reads no filesystem and a caller cannot silently pick up a
+working-tree edit.
 
 Two consequences are deliberate. The Kernel's published module lists are an
 INPUT (`KernelSurfaceCatalogue`), carrying the peeled commit they were read at,
@@ -160,7 +196,7 @@ axis.
 
 Runtime-adoption evidence does not go into `.dotmac/standards-profile.json`.
 
-### 5. The Foundation contract is bound by immutable source coordinate
+### 5. The Foundation binding is a bootstrap that cannot be made to count
 
 `kernel_adoption_control.foundation_binding` names the contract Governance
 defers to, and holds nothing else: a repository, a peeled 40-character commit,
@@ -173,10 +209,25 @@ contract's bytes live at, and `released_version` is `None`.
 
 That `None` is a STATED absence. `ContractBinding.requires_release` reports it,
 so a reader sees that this binding is not yet by release without reading a
-docstring, and open decision 50 owns the resolution. When a Foundation release
-carries `application_profile.py`, exactly one literal changes: `released_version`
-becomes that version and `revision` becomes the peeled commit of its tag. The
-coordinate KIND is what changes later, not the shape of everything reading it.
+docstring. When a Foundation release carries `application_profile.py`, exactly
+one literal changes: `released_version` becomes that version and `revision`
+becomes the peeled commit of its tag. The coordinate KIND is what changes
+later, not the shape of everything reading it.
+
+Michael ruled on 2026-09-05 that the source coordinate is permitted *"only as a
+temporary, report-only bootstrap"* and *"must never count as installed,
+admitted, or adopted"*. That is enforced structurally, not documented:
+`AdoptionClaim` REFUSES construction of an `installed`, `admitted` or `adopted`
+claim over a revision-bound binding. There is no flag and no override, because
+the failure being prevented is a later reader deciding the bootstrap was good
+enough. A binding naming a released version may hold every state, which is what
+keeps the refusal a property of the COORDINATE KIND rather than of the class —
+a guard that refused everything would prove nothing about itself.
+
+`0.4.0a1` is abandoned and refused BY NAME, with `0.3.0a5` and `0.3.0a6`, via
+`ABANDONED_VERSIONS`. The replacement waits on a Foundation alpha that is built
+once, published and verified; which alpha, cut by whom, and under which oracle
+is what remains of open decision 50.
 
 `ContractBinding` refuses a moving alias and a non-40-hex revision at
 construction, so an unusable binding cannot sit in the tree waiting to be
@@ -187,32 +238,36 @@ that must match and are never compared are two lists that will not match.
 
 ### 6. What this record does not decide
 
-- **Where the product states its prohibited and transitional classifications.**
-  Arms 4 and 6 above are implemented and proved against supplied inputs, and
-  have no production source of those inputs. Foundation's closed
-  `BINDING_FIELDS` cannot carry them; a new Governance document is refused by
-  the ruling; and a `standards-profile.schema.json` surface changes the schema
-  for every enrolled repository, which is open decisions 26, 29 and 44. This is
-  open decision 49 and it is Michael's.
-- **Whether Governance depends on a released `dotmac-deployment-foundation`
-  at all, and what oracle attests that release.** Until one exists the
-  "require the released contract" half of the ruling is unexecutable, and this
-  record does not pretend otherwise. This is open decision 50.
+- **Which Foundation alpha replaces the bootstrap, cut by whom, and under
+  which oracle.** Michael has ruled that the replacement happens after the next
+  alpha is built once, published and verified; none of those three has
+  happened. This is what remains of open decision 50.
+- **How the three products reach `schema_version` 12.** They are on 9 and must
+  migrate 9 → 10 → 11 → 12; the 9 → 10 half requires an ADR 0014
+  `deployment_artefact_surfaces` declaration each. That is a product-enrolment
+  problem across three repositories and is deliberately not solved here.
 - **Any Kernel-adoption gate.** Activation is a separate, deliberate act, as
   ADR 0039 § 12 requires of its own subject.
 
 ## Consequences
 
 An enrolled repository's Kernel adoption is UNMONITORED rather than exempt
-until open decision 49 is made and a gate is deliberately activated. That is
+until it declares the section and a gate is deliberately activated. That is
 stated plainly because the alternative failure — a package that exists, is
 tested, and is quietly believed to be enforcing something — is the shape this
 repository exists to catch.
 
-The three product enrolment changes that follow this one cannot complete arms 4
-and 6 without decision 49. Arms 1, 2, 3 and 5 need nothing further: their inputs
-are a product's own packaging files, its source inventory, and the Kernel's own
-published module lists.
+The cost of the required section is a migration, and it is stated rather than
+discovered. `dotmac_platform_control_plane`, `dotmac_erp` and `dotmac_sub` are
+all on `schema_version` 9, pinned to Governance revision
+`a19259b10568d29dc0a9617347498fea7f1e7a97`, and none declares
+`deployment_artefact_surfaces` — read 2026-09-05 at each repository's
+`origin/main`. Each must migrate 9 → 10 → 11 → 12, and the 9 → 10 half drags in
+an ADR 0014 deployment-artefact declaration. There is no way to avoid it: the
+loader's top-level key set is CLOSED, so a profile carrying `kernel_adoption`
+under schema 9 is refused for the unknown key before its version is even
+reached. Sequencing the three enrolment changes is Michael's, not this
+record's.
 
 Governance takes on no dependency on `dotmac-deployment-foundation` in this
 change. Adding one before a release exists would pin a moving reference, which

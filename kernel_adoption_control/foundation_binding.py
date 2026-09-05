@@ -44,10 +44,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import PurePosixPath
 
 __all__ = [
+    "ABANDONED_VERSIONS",
     "FOUNDATION_APPLICATION_PROFILE",
+    "AdoptionClaim",
+    "AdoptionState",
+    "BootstrapOnlyError",
     "ContractBinding",
     "CoordinateError",
 ]
@@ -55,6 +60,59 @@ __all__ = [
 
 class CoordinateError(ValueError):
     """A binding was given a coordinate that cannot identify particular bytes."""
+
+
+class BootstrapOnlyError(ValueError):
+    """A revision-bound binding was asked to count as installed or adopted."""
+
+
+#: Versions that must never be bound, with the reason each was abandoned.
+#:
+#: `0.4.0a1` is on `dotmac_starter_mt` `main` and is recorded
+#: `declared-unpublished` in that repository's
+#: `docs/inventories/declared-publication-baseline.json`: "BUILT ONCE;
+#: UNRECORDED AND DRIFTED ... unpublished, untagged and not an admissible
+#: rehearsal or publication coordinate; it must not be rebuilt or published."
+#: A name that appears in a `pyproject.toml` and nowhere else is exactly the
+#: shape ADR 0013 § 3 refuses, so it is refused BY NAME here rather than left
+#: to be caught by whoever remembers.
+#:
+#: The replacement waits on a Foundation alpha that is built once, published
+#: and verified. Until then this binding stays a bootstrap.
+ABANDONED_VERSIONS: dict[str, str] = {
+    "0.4.0a1": (
+        "declared-unpublished in dotmac_starter_mt's "
+        "docs/inventories/declared-publication-baseline.json — built once, "
+        "unrecorded and drifted, and not an admissible publication coordinate"
+    ),
+    "0.3.0a6": "a never-built name",
+    "0.3.0a5": "superseded, publishable=false",
+}
+
+
+class AdoptionState(str, Enum):
+    """What a binding is being asked to count as.
+
+    `BOOTSTRAP` is the only state a revision-bound binding may hold. The other
+    three are claims about a released artifact — that it was installed, that a
+    gate admitted it, that a product adopted it — and none of them is decidable
+    from a source revision, which is why the refusal below is structural rather
+    than a convention.
+    """
+
+    BOOTSTRAP = "bootstrap"
+    INSTALLED = "installed"
+    ADMITTED = "admitted"
+    ADOPTED = "adopted"
+
+
+#: The states a revision-bound binding may never hold. Michael's ruling of
+#: 2026-09-05: the immutable source coordinate is permitted "only as a
+#: temporary, report-only bootstrap"; it "must never count as installed,
+#: admitted, or adopted".
+RELEASE_ONLY_STATES: frozenset[AdoptionState] = frozenset(
+    {AdoptionState.INSTALLED, AdoptionState.ADMITTED, AdoptionState.ADOPTED}
+)
 
 
 #: A peeled commit, and the only accepted revision shape.
@@ -129,6 +187,13 @@ class ContractBinding:
                     f"released_version is {text!r}, which is a floating alias "
                     "rather than a published version"
                 )
+            abandoned = ABANDONED_VERSIONS.get(text)
+            if abandoned is not None:
+                raise CoordinateError(
+                    f"released_version {text!r} is abandoned: {abandoned}. "
+                    "Binding to it would make a published claim out of a name "
+                    "that was never published"
+                )
 
     @property
     def requires_release(self) -> bool:
@@ -161,3 +226,35 @@ FOUNDATION_APPLICATION_PROFILE = ContractBinding(
     symbol="APPLICATION_PROFILE_SCHEMA",
     released_version=None,
 )
+
+
+@dataclass(frozen=True)
+class AdoptionClaim:
+    """A claim that a binding holds some adoption state. Validated at construction.
+
+    This is where Michael's ruling stops being documentation. A revision-bound
+    binding is a REPORT-ONLY BOOTSTRAP, and the three release-only states are
+    not merely discouraged for it — they cannot be constructed. There is no
+    flag, no override and no keyword that relaxes this, because the failure
+    being prevented is a later reader deciding the bootstrap was good enough.
+
+    The guard is not "always raise": a binding that names a released version
+    may hold any state, which is what makes the refusal above a property of the
+    coordinate kind rather than of this class.
+    """
+
+    binding: ContractBinding
+    state: AdoptionState
+
+    def __post_init__(self) -> None:
+        if self.state in RELEASE_ONLY_STATES and self.binding.requires_release:
+            raise BootstrapOnlyError(
+                f"{self.binding.cite()} is bound by source revision and cannot "
+                f"count as {self.state.value!r}. Michael's ruling of "
+                "2026-09-05 permits the immutable source coordinate only as a "
+                "temporary, report-only bootstrap: it must never count as "
+                "installed, admitted or adopted. A source revision says which "
+                "bytes were written, and installation, admission and adoption "
+                "are facts about a released artifact that no revision can "
+                "establish. Bind a published version first — open decision 50"
+            )

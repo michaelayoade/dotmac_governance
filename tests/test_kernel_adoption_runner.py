@@ -24,6 +24,7 @@ could have been `<=` with nobody noticing.
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import tempfile
@@ -396,17 +397,93 @@ class TheExpiryBoundary(RunnerTestCase):
         self.assertEqual(1, len(expired))
         self.assertIn("30 day(s) overdue", expired[0].message)
 
+    #: Every attribute name that yields the current time. Enumerated rather than
+    #: matched loosely: a substring rule cannot tell `date.today()` from a
+    #: sentence about it, and the first version of this test failed on this
+    #: package's own docstring explaining that no clock is read -- the guard
+    #: firing on the prose that documents the guard.
+    CLOCK_ATTRIBUTES = frozenset(
+        {
+            "today",
+            "now",
+            "utcnow",
+            "time",
+            "time_ns",
+            "monotonic",
+            "perf_counter",
+            "fromtimestamp",
+            "utcfromtimestamp",
+            "st_mtime",
+            "st_ctime",
+        }
+    )
+
+    #: Reading the current date out of Git is a clock too. `_git` already shells
+    #: out, so `git log -1 --format=%cI` would satisfy any check that only looks
+    #: for stdlib names.
+    CLOCK_ARGUMENTS = ("%cI", "%ci", "%aI", "%ai", "%cd", "%ad", "%ct", "%at")
+
+    def _package_sources(self) -> list[Path]:
+        """`rglob`, not `glob`: a future subpackage must not escape the sweep."""
+        return sorted((REPO_ROOT / "kernel_adoption_control").rglob("*.py"))
+
+    def _clock_offenders(self, tree: ast.AST, label: str) -> list[str]:
+        found: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in self.CLOCK_ATTRIBUTES:
+                found.append(f"{label}:{node.lineno} .{node.attr}")
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for argument in self.CLOCK_ARGUMENTS:
+                    if argument in node.value:
+                        found.append(f"{label}:{node.lineno} git date {argument!r}")
+        return found
+
     def test_no_clock_is_read_anywhere_in_the_package(self) -> None:
         """The property, asserted structurally rather than promised.
 
         A `date.today()` added later would make every test above pass while the
         verdict silently stopped being reproducible, so the absence is a check.
+
+        Parsed, not grepped. The substring version could not tell a call from a
+        docstring describing one, and an aliased import walked past it.
         """
-        package = REPO_ROOT / "kernel_adoption_control"
-        for path in sorted(package.glob("*.py")):
-            text = path.read_text(encoding="utf-8")
-            for forbidden in ("date.today(", "datetime.now(", "datetime.utcnow("):
-                self.assertNotIn(forbidden, text, f"{path.name} reads a clock")
+        offenders: list[str] = []
+        for path in self._package_sources():
+            offenders.extend(
+                self._clock_offenders(
+                    ast.parse(path.read_text(encoding="utf-8")), path.name
+                )
+            )
+        self.assertEqual([], offenders, "a clock is read in this package")
+
+    def test_the_clock_sweep_bites(self) -> None:
+        """A check over an empty set passes for the wrong reason.
+
+        One plant per route the substring version missed: a plain call, an
+        ALIASED import, a Git date format, and an mtime.
+        """
+        for source in (
+            "from datetime import date\nx = date.today()\n",
+            "from datetime import date as d\nx = d.today()\n",
+            'ARGS = ["git", "log", "-1", "--format=%cI"]\n',
+            "import os\nx = os.stat('.').st_mtime\n",
+        ):
+            with self.subTest(source=source.splitlines()[-1]):
+                self.assertNotEqual(
+                    [],
+                    self._clock_offenders(ast.parse(source), "plant"),
+                    "the sweep cannot see this clock",
+                )
+
+    def test_the_clock_sweep_is_silent_on_prose_about_clocks(self) -> None:
+        """The near-miss, and the reason this test was rewritten.
+
+        The package documents that it reads no clock. That sentence contains
+        the token a substring rule looks for, so the first version of this
+        guard failed on the docstring explaining the property it checks.
+        """
+        source = '"""Nothing here calls date.today() or datetime.utcnow()."""\n'
+        self.assertEqual([], self._clock_offenders(ast.parse(source), "prose"))
 
 
 class ImpossibleDates(unittest.TestCase):

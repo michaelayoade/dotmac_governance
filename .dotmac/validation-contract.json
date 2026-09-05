@@ -49,6 +49,12 @@
       "reason": "Authority-cutover receipt registry validation. Parses checked-in receipts and compares pre-existing ones against the merge base; reads Git history only, never a network."
     },
     {
+      "key": "check_local_action_workspace.py",
+      "aliases": [],
+      "class": "local",
+      "reason": "Workflow-shape validation (ADR 0044). Parses this repository's own workflow files only; reads no network, no other repository and no workflow run. Its claim is narrow by construction and says nothing about `run:` scripts, plugins or build backends."
+    },
+    {
       "key": "check_validation_contract.py",
       "aliases": [],
       "class": "local",

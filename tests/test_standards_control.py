@@ -6944,8 +6944,10 @@ class RetirementEvaluationTests(unittest.TestCase):
     def test_strict_v9_base_can_enroll_directly_in_v11(self) -> None:
         fixture = RetirementEvaluationFixture()
         try:
+            bundle = observation_bundle()
+            bundle["repository"] = str(REPOSITORY)
             report = fixture.build(
-                bundle=observation_bundle(),
+                bundle=bundle,
                 extra={"docs/retirement.md": "# Collector\n"},
                 base_schema_version=9,
             )
@@ -6985,8 +6987,10 @@ class RetirementEvaluationTests(unittest.TestCase):
                     else:
                         body[field] = []
 
+                bundle = observation_bundle()
+                bundle["repository"] = str(REPOSITORY)
                 report = fixture.build(
-                    bundle=observation_bundle(),
+                    bundle=bundle,
                     extra={"docs/retirement.md": "# Collector\n"},
                     base_schema_version=version,
                     base_mutation=mutate,

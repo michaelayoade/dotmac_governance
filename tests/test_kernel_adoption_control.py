@@ -1003,7 +1003,11 @@ class DeclarationStates(unittest.TestCase):
         found = codes_of(report, FindingCode.SURFACE_PROHIBITED)
         self.assertEqual(1, len(found))
         self.assertEqual(1, found[0].line)
-        self.assertIn("prohibited_surfaces", found[0].message)
+        # The message names the offending module and carries the citation.
+        # Asserting the JSON field name instead would tie this test to a
+        # spelling the message deliberately does not use.
+        self.assertIn("dotmac_kernel.db", found[0].message)
+        self.assertIn("ADR 0042", found[0].message)
 
     def test_a_declaration_that_prohibits_nothing_is_a_statement_somebody_made(
         self,

@@ -19,8 +19,21 @@ default CLASSIFICATION: if nothing is there, the outcome is
 The distinction this module exists to hold is between two sentences that a
 single empty list would collapse: "this repository prohibits nothing" and
 "nobody has said what this repository prohibits". The first is
-`DeclarationPresent` carrying empty tuples. The second is
-`DeclarationMissing`, and it is an error.
+`DeclarationPresent` carrying empty tuples. The second is one of FOUR
+refusals, and every one of them is an error:
+
+- **missing** -- no file at the path.
+- **empty** -- the file is there and holds no document at all. Not "missing",
+  because the path exists; not "corrupt", because there are no bytes to fix.
+- **incomplete** -- a JSON object that never states a required key.
+- **corrupt** (`DeclarationUnreadable`) -- anything else that cannot be
+  understood: unreadable bytes, invalid JSON, a non-object, an unknown key, a
+  value stated wrongly.
+
+The middle two are the pair most likely to collapse, so the line between them
+is stated once and held by the parser rather than by a convention: absence of a
+key is INCOMPLETE, wrongness of a stated value is CORRUPT, and absence is
+checked first, so a document exhibiting both reports incomplete.
 """
 
 from __future__ import annotations
@@ -29,12 +42,18 @@ import json
 from pathlib import Path, PurePosixPath
 
 from .contracts import (
+    DeclarationEmpty,
+    DeclarationIncomplete,
     DeclarationMissing,
     DeclarationOutcome,
     DeclarationPresent,
     DeclarationUnreadable,
 )
-from .declaration_contract import DeclarationError, parse_declaration
+from .declaration_contract import (
+    DeclarationError,
+    IncompleteDeclarationError,
+    parse_declaration,
+)
 
 __all__ = ["DECLARATION_PATH", "read_declaration"]
 
@@ -69,6 +88,15 @@ def read_declaration(
             f"{location.as_posix()} could not be read: {error}. Refusing to "
             "report it as an empty classification"
         )
+    if not raw.strip():
+        return DeclarationEmpty(
+            f"{location.as_posix()} exists and holds no document "
+            f"({len(raw)} byte(s), all whitespace). This is reported apart from "
+            "a missing file and apart from a corrupt one because the repair "
+            "differs from both: the path is already there, so there is nothing "
+            "to create and nothing to fix -- write a "
+            "KernelAdoptionDeclaration.v1 document into it"
+        )
     try:
         document: object = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -78,6 +106,12 @@ def read_declaration(
         )
     try:
         return DeclarationPresent(parse_declaration(document))
+    except IncompleteDeclarationError as error:
+        return DeclarationIncomplete(
+            f"{location.as_posix()}: {error}. The document is a declaration "
+            "with an obligation it never states; refusing to read an unstated "
+            "obligation as a discharged one"
+        )
     except DeclarationError as error:
         return DeclarationUnreadable(
             f"{location.as_posix()}: {error}. Refusing to report a declaration "

@@ -31,6 +31,7 @@ record's status.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from pathlib import PurePosixPath
 
@@ -44,6 +45,8 @@ from .declaration_contract import (
 
 __all__ = [
     "AdoptionReport",
+    "DeclarationEmpty",
+    "DeclarationIncomplete",
     "DeclarationMissing",
     "DeclarationOutcome",
     "DeclarationPresent",
@@ -81,9 +84,21 @@ class FindingCode(str, Enum):
     #: The declaration was absent. NOT an empty list: "nothing is prohibited"
     #: and "nobody said" are different facts, and one value must not carry both.
     DECLARATION_MISSING = "kernel.declaration.missing"
-    #: The declaration existed and could not be understood. Also a refusal, for
-    #: the same reason.
+    #: The declaration existed, held bytes, and could not be understood. This
+    #: is the CORRUPT refusal: something was stated and stated wrongly.
     DECLARATION_UNREADABLE = "kernel.declaration.unreadable"
+    #: The declaration file exists and holds no document at all -- zero bytes,
+    #: or nothing but whitespace. Its own code, because an EMPTY FILE is not an
+    #: EMPTY CLASSIFICATION and is not a MISSING file either: "missing" would
+    #: send the reader to create a file that already exists, and "corrupt"
+    #: would send them to fix bytes that are not there.
+    DECLARATION_EMPTY = "kernel.declaration.empty"
+    #: The declaration is a JSON object and a REQUIRED key is absent. Kept
+    #: apart from corrupt on one principled line: an obligation was never
+    #: stated, rather than stated wrongly. The repairs differ -- write the key,
+    #: versus fix the value -- and a diagnostic that names the wrong one sends
+    #: the reader to the wrong edit.
+    DECLARATION_INCOMPLETE = "kernel.declaration.incomplete"
     #: The declaration says `not_applicable` and the repository imports the
     #: Kernel. An exemption states an ENFORCEABLE premise, and this is the
     #: enforcement: the value cannot be used to leave the surface unmeasured.
@@ -100,6 +115,17 @@ class FindingCode(str, Enum):
     #: baseline entry with no use is a list that has stopped describing
     #: anything. Lowering the baseline is a reviewed edit, never a silent one.
     TRANSITIONAL_BASELINE_DRIFT = "kernel.transitional.baseline-drift"
+    #: The stated expiry has passed. Until this code existed the expiry was
+    #: syntax-checked and compared to nothing, which is a date field that
+    #: cannot expire -- the "declared and never read" defect inside the very
+    #: obligation that exists to make a retirement noticeable.
+    TRANSITIONAL_EXPIRED = "kernel.transitional.expired"
+
+    #: A Kernel import was measured and no surface catalogue was supplied, so
+    #: the unknown-surface arm could not run. A refusal rather than silence: a
+    #: caller that supplies no catalogue must not thereby get a clean report
+    #: over every import it made.
+    CATALOGUE_ABSENT = "kernel.catalogue.absent"
 
 
 @dataclass(frozen=True)
@@ -204,11 +230,53 @@ class DeclarationUnreadable:
     detail: str
 
 
-#: Three outcomes and no fourth. There is deliberately no "empty" member: an
-#: absent classification is `DeclarationMissing`, and a declaration that says
-#: nothing is prohibited is `DeclarationPresent` carrying an empty tuple, which
-#: is a statement somebody made.
-DeclarationOutcome = DeclarationPresent | DeclarationMissing | DeclarationUnreadable
+@dataclass(frozen=True)
+class DeclarationEmpty:
+    """The file exists and holds no document. A refusal, and its own one.
+
+    An EMPTY FILE is not an EMPTY CLASSIFICATION, and it is the second half of
+    that sentence this type protects: `DeclarationPresent` carrying empty
+    tuples is a statement somebody made, and this is the absence of any
+    statement at all in a file somebody created.
+
+    It is also not `DeclarationMissing`: the file is there, so "write the
+    declaration at this path" sends the reader to create a path that already
+    exists and leaves them wondering what they did wrong. And it is not
+    `DeclarationUnreadable`: there are no bytes to fix.
+    """
+
+    detail: str
+
+
+@dataclass(frozen=True)
+class DeclarationIncomplete:
+    """A JSON object omitting a required key. A refusal, distinct from corrupt.
+
+    The line between this and `DeclarationUnreadable` is the only one that has
+    to be held in the head of whoever reads a report: an obligation NEVER
+    STATED is incomplete, and an obligation STATED WRONGLY is corrupt. A
+    document can be both, and the diagnostic names the refusal the parser
+    reached FIRST -- absence is checked per object before any value in it is
+    validated, so a document missing a key reports incomplete even when a key
+    it did state is also wrong. That ordering is a property of the parser and
+    is asserted, not left to be inferred.
+    """
+
+    detail: str
+
+
+#: Five outcomes, four of them refusals, and no sixth. There is deliberately no
+#: member meaning "an empty classification": a declaration that says nothing is
+#: prohibited is `DeclarationPresent` carrying an empty tuple, which is a
+#: statement somebody made, and every other shape in which a classification
+#: could turn out to be absent is one of the four refusals below.
+DeclarationOutcome = (
+    DeclarationPresent
+    | DeclarationMissing
+    | DeclarationEmpty
+    | DeclarationIncomplete
+    | DeclarationUnreadable
+)
 
 
 @dataclass(frozen=True)
@@ -232,11 +300,25 @@ class KernelAdoptionInputs:
     #: revision it read, and the engine cannot silently pick up a working-tree
     #: edit.
     sources: dict[PurePosixPath, str]
-    catalogue: KernelSurfaceCatalogue
+    #: The Kernel's published module lists, or an EXPLICIT `None` when the
+    #: caller has none. `None` is not a default and never means "skip": every
+    #: measured Kernel import in a run with no catalogue is reported
+    #: `kernel.catalogue.absent`. It exists so a repository that consumes no
+    #: Kernel can be measured without inventing a catalogue it has no evidence
+    #: for -- a fabricated version and revision would be worse than a stated
+    #: absence, because the report would then carry a coordinate nobody read.
+    catalogue: KernelSurfaceCatalogue | None
     #: The product's own classifications, or the refusal that stands in for
     #: them. Not defaulted: a caller that forgot to supply one would otherwise
     #: get the empty classification this type exists to make unrepresentable.
     declaration: DeclarationOutcome
+    #: The date the run is asked about. Required, and deliberately not a clock
+    #: read: nothing in this package calls `date.today()`, because a check that
+    #: reads a clock inside itself cannot be re-run to the same answer by
+    #: someone who was not present. The caller supplies it and the runner
+    #: records it in the report, which is what makes an expiry verdict
+    #: reproducible rather than merely correct on the day.
+    as_of: date
     pin_sites: tuple[PinSite, ...] = ()
 
 

@@ -579,7 +579,9 @@ class FoundationBinding(unittest.TestCase):
             path=PurePosixPath("a.py"),
             symbol="S",
         )
-        self.assertFalse(binding.requires_release)  # released_version is None
+        # Bound by revision with no released_version, so a release is still
+        # owed: `requires_release` is the stated absence, not a defect.
+        self.assertTrue(binding.requires_release)
         self.assertIn("55750e10", binding.cite())
 
     def test_a_blank_released_version_is_not_a_release(self) -> None:

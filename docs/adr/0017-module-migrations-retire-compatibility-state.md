@@ -731,6 +731,17 @@ acquisition, inventory validation, and teardown refusal. UTC timestamps end in
 `Z`, increase along phase links, and all SHA values are lower-case full digests.
 This is a mechanical serialization clarification of the accepted design.
 
+### Direct adoption clarification — 2026-09-05
+
+Schema versions 9 and 10 both predate the retirement ledger. A product pinned
+to either version may move directly to version 11: the trusted-base check first
+promotes the old body through the strict v11 parser by adding only the fields
+that did not exist at that version, and then treats the necessarily absent
+retirement ledger as empty. Unknown fields, backported retirement fields, or a
+v9 profile that already claims the v10 deployment surface fail closed. This is
+one adoption path for the fleet, not a requirement to merge a throwaway v10
+profile before the real v11 enrollment.
+
 ### 5. First adoption and completion boundary
 
 The first enrollment candidate is `dotmac_sub`, because the programme already

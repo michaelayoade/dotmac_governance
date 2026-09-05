@@ -6798,11 +6798,17 @@ class RetirementEvaluationFixture:
         extra: dict[str, str] | None = None,
         product_mutation: object | None = None,
         target_mutation: object | None = None,
+        base_schema_version: int = 10,
+        base_mutation: object | None = None,
     ) -> ConformanceReport:
         base = profile()
-        base["schema_version"] = 10
+        base["schema_version"] = base_schema_version
         base.pop("compatibility_retirements")
         base.pop("retirement_history")
+        if base_schema_version == 9:
+            base.pop("deployment_artefact_surfaces")
+        if base_mutation is not None:
+            cast("object", base_mutation)(base)
         Fixture(self.root).write(
             base,
             extra={
@@ -6934,6 +6940,64 @@ class RetirementEvaluationTests(unittest.TestCase):
         self.assertEqual(report.repository_contracts, "pass")
         self.assertEqual(report.product_revision_evidence, "not_supplied")
         self.assertEqual(report.target_evidence, "not_supplied")
+
+    def test_strict_v9_base_can_enroll_directly_in_v11(self) -> None:
+        fixture = RetirementEvaluationFixture()
+        try:
+            report = fixture.build(
+                bundle=observation_bundle(),
+                extra={"docs/retirement.md": "# Collector\n"},
+                base_schema_version=9,
+            )
+            self.assertNotIn(
+                DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                {item.code for item in report.diagnostics},
+                report.to_dict(),
+            )
+            self.assertTrue(report.conforms, report.to_dict())
+        finally:
+            fixture.close()
+
+    def test_pre_retirement_base_must_be_strict_and_cannot_backport_fields(
+        self,
+    ) -> None:
+        for version, operation, field in (
+            (9, "add", "compatibility_retirements"),
+            (9, "add", "retirement_history"),
+            (9, "add", "deployment_artefact_surfaces"),
+            (9, "add", "unexpected"),
+            (9, "remove", "authorities"),
+            (10, "add", "compatibility_retirements"),
+            (10, "add", "retirement_history"),
+            (10, "add", "unexpected"),
+            (10, "remove", "authorities"),
+        ):
+            fixture = RetirementEvaluationFixture()
+            try:
+
+                def mutate(
+                    body: dict[str, object],
+                    operation: str = operation,
+                    field: str = field,
+                ) -> None:
+                    if operation == "remove":
+                        body.pop(field)
+                    else:
+                        body[field] = []
+
+                report = fixture.build(
+                    bundle=observation_bundle(),
+                    extra={"docs/retirement.md": "# Collector\n"},
+                    base_schema_version=version,
+                    base_mutation=mutate,
+                )
+                self.assertIn(
+                    DiagnosticCode.RETIREMENT_HISTORY_CHANGED,
+                    {item.code for item in report.diagnostics},
+                    report.to_dict(),
+                )
+            finally:
+                fixture.close()
 
     def test_absent_bundle_keeps_repository_verdict_but_reports_missing_evidence(
         self,

@@ -56,6 +56,12 @@ The first product adoption remains a separate change. Synthetic comparison
 fixtures prove parser and comparator sensitivity only; they do not prove a
 PostgreSQL fence, transaction rollback, or `DROP ... RESTRICT` behavior.
 
+A strict schema-v9 or schema-v10 trusted base may adopt v11 directly. The
+history gate validates the prior shared profile body under v11 after adding
+only the fields introduced later, then starts the retirement ledger empty.
+Later-version fields smuggled into the older profile are refused. Products do
+not merge a v10 bridge solely to reach the v11 retirement contract.
+
 ## Deployment artefact surface (ADR 0014, PROPOSED)
 
 ADR 0014 is `Proposed`. Its carrying revision must merge to canonical `main`

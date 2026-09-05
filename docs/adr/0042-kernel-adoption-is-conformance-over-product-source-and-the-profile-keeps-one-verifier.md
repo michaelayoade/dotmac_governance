@@ -131,57 +131,59 @@ Python that a caller supplies and consults no document:
 6. **Unowned transitional surface** — a transitional classification with no
    owner or no expiry.
 
-### 3. The classifications live in a closed, versioned profile section
+### 3. The declaration is its own document, and the profile carries a pointer
 
-Michael ruled on 2026-09-05: *"Put Kernel-adoption classifications in a
-versioned, closed section of `.dotmac/standards-profile.json`. Governance owns
-the schema and evaluator; each product owns its instance. Do not add them to
-`ApplicationFoundationProfile.v1` and do not create another document."*
+Michael ruled on 2026-09-05 — the third and settled position — that the
+classifications live in a dedicated product-owned file,
+`.dotmac/kernel-adoption.json`, under the Governance-owned
+`KernelAdoptionDeclaration.v1` contract. Ownership is split four ways: the
+PRODUCT owns the instance, GOVERNANCE owns the schema, refusal rules,
+validation and the conformance action, KERNEL owns a provider-neutral
+surface/provenance catalogue, and `standards-profile.json` carries **only a
+typed binding to the declaration path and contract version — not the
+declaration's contents.** The Foundation profile is unchanged.
 
-That is narrower than the earlier "no adoption evidence in
-`standards-profile.json`", and the distinction is the point: **classifications
-are declarations, not evidence.** Receipts and runtime-adoption facts stay out
-of that file.
+Two earlier positions were tried and are recorded because the reasons matter: a
+Governance-owned second document was refused as a duplicate contract, and a
+content-bearing section of `standards-profile.json` was refused because it puts
+classifications where a policy value arrives as a plausible line in a
+conformance-profile diff, and because it forced a `schema_version` bump on
+every enrolled repository.
 
-Implemented as `schema_version` 12's `kernel_adoption` section, at
-`section_version` 1. The section is versioned INDEPENDENTLY of the profile,
-because a profile-wide bump forces every enrolled repository to move while a
-section version lets one vocabulary evolve and say so.
+**The binding is DECLARED-OPTIONAL, and that is what kept the enrolment cost
+flat.** `_keys` now takes an enumerated `optional` set; closedness is unchanged
+because every admissible key is still listed and reviewed, and a key outside
+`required | optional` is refused exactly as before — asserted by
+`test_the_closed_key_discipline_is_unchanged`, which plants an arbitrary key
+and requires the refusal. A required key would have forced a bump, and the
+three products are still at v9.
 
-Three states, and the third is the one this section exists for:
+Optionality is safe ONLY because the refusal that matters moved with the
+contents. `read_declaration` reads the bound path, or
+`.dotmac/kernel-adoption.json` when no binding is stated, and returns one of
+three outcomes:
 
-- **applicable** — prohibited surfaces, and transitional surfaces that each
-  carry an owner AND an expiry. The parser requires both; the evaluator
-  additionally rejects a present field holding whitespace, because a guard that
-  only checks for absence passes a declaration whose owner is a space.
-- **not applicable** — an explicit typed absence with a stated reason. It is
-  CHECKED, not accepted: a repository declaring it consumes no Kernel and then
-  importing one is named, with the file and line of the contradicting import.
-  An exemption states an enforceable premise or the region is unmonitored
-  rather than exempt.
-- **missing or unreadable** — a REFUSAL. The section is REQUIRED rather than
-  optional so that absence is refused at load; `read_declaration` turns an
-  unopenable file, invalid JSON and a section that does not parse into typed
-  refusals too. Neither ever becomes an empty list, because "this repository
-  prohibits nothing" and "nobody has said what this repository prohibits" are
-  different facts and one value must not carry both.
+- **applicable** — required surfaces with their proven floors, prohibited
+  surfaces each carrying the governing citation, and transitional surfaces
+  carrying owner, expiry, retirement issue, replacement and an exact
+  path/symbol baseline.
+- **not applicable** — an explicit typed absence with a reason, CHECKED
+  against the repository's own imports rather than accepted.
+- **missing or unreadable** — a REFUSAL. An absent file, an unopenable one,
+  invalid JSON and a document that does not parse are all errors. None becomes
+  an empty list, because "this product prohibits nothing" and "nobody has said
+  what this product prohibits" are different facts.
 
-`standards_control.profile` remains the ONE parser for that file.
-`kernel_adoption_control` reads the section by key and hands it to
-`parse_kernel_adoption`; it adds no second parser, and it evaluates rather than
-enforcing, so no `standards_control` rule family is created.
+The baseline is a RATCHET rather than a note, and it is two-directional: a use
+outside the baseline is growth in a surface being retired, and a baseline entry
+with no measured use is a list that has stopped describing anything. A
+declaration field nothing compares would be the "declared and never read"
+defect this repository exists to catch.
 
-`KernelAdoptionInputs` still takes the declaration as a value rather than a
-path, so the engine reads no filesystem and a caller cannot silently pick up a
-working-tree edit.
-
-Two consequences are deliberate. The Kernel's published module lists are an
-INPUT (`KernelSurfaceCatalogue`), carrying the peeled commit they were read at,
-so an unknown-surface finding is a fact about the product rather than about how
-stale a hardcoded list in Governance has become. And the source inventory is
-passed in rather than globbed, for the reason
-`standards_control.ConnectorScope` already documents: a product that can name
-what is measured is not measured.
+One format, one parser, one evaluator. Nothing is parameterised by product —
+no product name, no branch, no hook — which is Michael's stated acceptance
+test: *"one build-once validator and one declaration format across every
+product, not a per-product adapter."*
 
 ### 4. Report-only, and not wired into any gate
 
@@ -242,32 +244,34 @@ that must match and are never compared are two lists that will not match.
   which oracle.** Michael has ruled that the replacement happens after the next
   alpha is built once, published and verified; none of those three has
   happened. This is what remains of open decision 50.
-- **How the three products reach `schema_version` 12.** They are on 9 and must
-  migrate 9 → 10 → 11 → 12; the 9 → 10 half requires an ADR 0014
-  `deployment_artefact_surfaces` declaration each. That is a product-enrolment
-  problem across three repositories and is deliberately not solved here.
+- **When the three products clear their pre-existing 9 → 10 → 11 profile
+  debt.** It is unchanged by this record and is not a prerequisite for
+  declaring Kernel adoption.
 - **Any Kernel-adoption gate.** Activation is a separate, deliberate act, as
   ADR 0039 § 12 requires of its own subject.
 
 ## Consequences
 
 An enrolled repository's Kernel adoption is UNMONITORED rather than exempt
-until it declares the section and a gate is deliberately activated. That is
+until it writes the declaration and a gate is deliberately activated. That is
 stated plainly because the alternative failure — a package that exists, is
 tested, and is quietly believed to be enforcing something — is the shape this
 repository exists to catch.
 
-The cost of the required section is a migration, and it is stated rather than
-discovered. `dotmac_platform_control_plane`, `dotmac_erp` and `dotmac_sub` are
-all on `schema_version` 9, pinned to Governance revision
+**This change adds no migration stop, and that is the answer to the sequencing
+question.** Read 2026-09-05 at each `origin/main`:
+`dotmac_platform_control_plane`, `dotmac_erp` and `dotmac_sub` are all on
+`schema_version` 9, pinned to Governance revision
 `a19259b10568d29dc0a9617347498fea7f1e7a97`, and none declares
-`deployment_artefact_surfaces` — read 2026-09-05 at each repository's
-`origin/main`. Each must migrate 9 → 10 → 11 → 12, and the 9 → 10 half drags in
-an ADR 0014 deployment-artefact declaration. There is no way to avoid it: the
-loader's top-level key set is CLOSED, so a profile carrying `kernel_adoption`
-under schema 9 is refused for the unknown key before its version is even
-reached. Sequencing the three enrolment changes is Michael's, not this
-record's.
+`deployment_artefact_surfaces`. That 9 → 10 → 11 debt is pre-existing and this
+record does not touch it.
+
+What matters for enrolment is that **a product can add its declaration today,
+at schema 9, without touching its conformance profile at all** — the file has a
+default path and the reader finds it there. Only the optional binding needs a
+loadable profile, and stating a non-default path is the sole thing it buys.
+Had the binding been required, the Kernel-adoption axis would have become a
+fourth stop and would have blocked the stated merge order.
 
 Governance takes on no dependency on `dotmac-deployment-foundation` in this
 change. Adding one before a release exists would pin a moving reference, which

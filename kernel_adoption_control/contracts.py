@@ -34,11 +34,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
 
-from standards_control.contracts import (
+from standards_control.contracts import Severity
+
+from .declaration_contract import (
     KernelAdoptionApplicability,
     KernelAdoptionDeclaration,
-    Severity,
-    TransitionalSurfaceDeclaration,
+    TransitionalSurface,
 )
 
 __all__ = [
@@ -55,7 +56,7 @@ __all__ = [
     "KernelSurfaceCatalogue",
     "PinSite",
     "Severity",
-    "TransitionalSurfaceDeclaration",
+    "TransitionalSurface",
 ]
 
 
@@ -94,6 +95,11 @@ class FindingCode(str, Enum):
     SURFACE_PROHIBITED = "kernel.surface.prohibited"
     FACADE_LOCAL = "kernel.facade.local"
     TRANSITIONAL_UNOWNED = "kernel.transitional.unowned"
+    #: The declared baseline and the observed sites disagree. Two-directional:
+    #: a use outside the baseline is growth in a surface being retired, and a
+    #: baseline entry with no use is a list that has stopped describing
+    #: anything. Lowering the baseline is a reviewed edit, never a silent one.
+    TRANSITIONAL_BASELINE_DRIFT = "kernel.transitional.baseline-drift"
 
 
 @dataclass(frozen=True)

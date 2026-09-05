@@ -1,0 +1,6 @@
+{
+  "contract": "KernelAdoptionDeclaration.v1",
+  "product_revision": "f8f90aef1467a3d332a650775e667e75d7226f56",
+  "applicability": "not_applicable",
+  "not_applicable_reason": "dotmac_governance composes no Dotmac assembly and imports dotmac_kernel nowhere. Verified 2026-09-05 by an AST sweep of every tracked Python entry point at f8f90aef1467a3d332a650775e667e75d7226f56, which found zero import statements naming the distribution. The premise is machine-checkable and is checked: kernel_adoption_control reports a not_applicable declaration in a repository whose own source imports the Kernel, so this value cannot be used to leave the surface unmeasured."
+}

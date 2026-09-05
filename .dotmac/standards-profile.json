@@ -1,5 +1,5 @@
 {
-  "schema_version": 12,
+  "schema_version": 11,
   "profile_id": "dotmac-governance-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
@@ -71,10 +71,9 @@
     "conserved_exclusions": []
   },
   "deployment_artefact_surfaces": [],
-  "kernel_adoption": {
-    "section_version": 1,
-    "applicability": "not_applicable",
-    "not_applicable_reason": "dotmac_governance composes no Dotmac assembly and imports dotmac_kernel nowhere. Verified 2026-09-05 by an AST sweep of every tracked Python entry point, which found zero import statements naming the distribution. The premise is machine-checkable and is checked: kernel_adoption_control reports a not_applicable declaration in a repository whose own source imports the Kernel, so this value cannot be used to leave the surface unmeasured."
+  "kernel_adoption_binding": {
+    "declaration_path": ".dotmac/kernel-adoption.json",
+    "contract_version": "KernelAdoptionDeclaration.v1"
   },
   "compatibility_retirements": [],
   "retirement_history": []

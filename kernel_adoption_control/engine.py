@@ -37,7 +37,7 @@ from .contracts import (
     KernelAdoptionApplicability,
     KernelAdoptionInputs,
     Severity,
-    TransitionalSurfaceDeclaration,
+    TransitionalSurface,
 )
 
 __all__ = ["KERNEL_ROOT", "evaluate"]
@@ -227,33 +227,80 @@ def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
 
 
 def _check_transitional(
-    surfaces: tuple[TransitionalSurfaceDeclaration, ...],
+    surfaces: tuple[TransitionalSurface, ...],
+    observed: dict[str, frozenset[tuple[PurePosixPath, str]]],
 ) -> list[Finding]:
+    """Arm 6. Owner and expiry, then the baseline ratchet.
+
+    The blankness check below is defence in depth: `parse_declaration` already
+    refuses a blank owner or expiry, so a declaration read from disk cannot
+    reach it. It stays because a caller may construct the dataclass directly,
+    and a guard removed on the grounds that another guard covers it is how a
+    seam becomes unmonitored.
+
+    The ratchet is the arm that bites on real input, and it is TWO-DIRECTIONAL
+    for the reason this fleet already learned once: a baseline that may only
+    grow stops describing anything, and one that may shrink silently hides that
+    the last use was removed and the surface could have been retired. Both
+    directions are the same edit — update the baseline in the change that moves
+    the code.
+    """
     findings: list[Finding] = []
     for surface in surfaces:
-        missing = [
+        blank = [
             name
             for name, value in (("owner", surface.owner), ("expiry", surface.expiry))
             if not value.strip()
         ]
-        if not missing:
-            continue
-        findings.append(
-            _error(
-                FindingCode.TRANSITIONAL_UNOWNED,
-                f"{surface.module} is classified transitional but states no "
-                f"{' and no '.join(missing)}. A transitional surface with no owner "
-                "and no expiry is a permanent surface wearing a temporary word: "
-                "nobody is answerable for removing it and no date makes its "
-                "absence noticeable",
+        if blank:
+            findings.append(
+                _error(
+                    FindingCode.TRANSITIONAL_UNOWNED,
+                    f"{surface.module} is classified transitional but states no "
+                    f"{' and no '.join(blank)}. A transitional surface with no "
+                    "owner and no expiry is a permanent surface wearing a "
+                    "temporary word: nobody is answerable for removing it and "
+                    "no date makes its absence noticeable",
+                )
             )
-        )
+            continue
+
+        declared = {(site.path, site.symbol) for site in surface.baseline}
+        actual = set(observed.get(surface.module, frozenset()))
+        for path, symbol in sorted(actual - declared, key=lambda item: str(item)):
+            findings.append(
+                _error(
+                    FindingCode.TRANSITIONAL_BASELINE_DRIFT,
+                    f"uses {symbol} from the transitional {surface.module}, "
+                    f"which its declared baseline does not list. "
+                    f"{surface.module} is being retired by {surface.owner} on "
+                    f"{surface.expiry} ({surface.retirement_issue}, replaced by "
+                    f"{surface.replacement}); a new use grows the work that "
+                    "retirement has to undo",
+                    path=path,
+                    line=None,
+                )
+            )
+        for path, symbol in sorted(declared - actual, key=lambda item: str(item)):
+            findings.append(
+                _error(
+                    FindingCode.TRANSITIONAL_BASELINE_DRIFT,
+                    f"the declared baseline for the transitional "
+                    f"{surface.module} lists {symbol} at {path.as_posix()}, and "
+                    "no such use was measured. Lower the baseline in the change "
+                    "that removed the use: a baseline that only grows stops "
+                    "describing anything, and one that silently shrinks hides "
+                    "that the surface may now be retirable",
+                    path=path,
+                )
+            )
     return findings
 
 
 def _check_declaration(
     inputs: KernelAdoptionInputs,
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
+    observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
 ) -> list[Finding]:
     """Arms 4 and 6, and the three states the declaration can be in.
 
@@ -309,7 +356,8 @@ def _check_declaration(
         ]
 
     findings: list[Finding] = []
-    prohibited = frozenset(declaration.prohibited_surfaces)
+    citations = {item.module: item.citation for item in declaration.prohibited_surfaces}
+    prohibited = declaration.prohibited_modules
     for path, line, module in kernel_import_sites:
         entry = _prohibited_match(module, prohibited)
         if entry is None:
@@ -320,15 +368,18 @@ def _check_declaration(
         findings.append(
             _error(
                 FindingCode.SURFACE_PROHIBITED,
-                f"imports {detail}, which this repository's own "
-                "`kernel_adoption.prohibited_surfaces` forbids. The "
-                "classification is the repository's; this arm reports the "
-                "import that contradicts it",
+                f"imports {detail}, which this product's own declaration "
+                f"forbids under {citations[entry]}. The classification is the "
+                "product's; this arm reports the import that contradicts it, "
+                "and the citation is carried so the reader knows whether "
+                "removing the prohibition needs a decision or a commit",
                 path=path,
                 line=line,
             )
         )
-    findings.extend(_check_transitional(declaration.transitional_surfaces))
+    findings.extend(
+        _check_transitional(declaration.transitional_surfaces, observed_symbols)
+    )
     return findings
 
 
@@ -339,6 +390,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     """
     findings: list[Finding] = []
     kernel_import_sites: list[tuple[PurePosixPath, int, str]] = []
+    observed_symbols: dict[str, set[tuple[PurePosixPath, str]]] = {}
 
     if not inputs.sources:
         findings.append(
@@ -376,6 +428,9 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
         for entry in imports:
             module = entry.module
             kernel_import_sites.append((path, entry.line, module))
+            observed_symbols.setdefault(module, set()).update(
+                (path, name) for name in entry.bound
+            )
 
             private = _private_components(module)
             if private:
@@ -442,6 +497,12 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             )
 
     findings.extend(_check_pins(inputs))
-    findings.extend(_check_declaration(inputs, kernel_import_sites))
+    findings.extend(
+        _check_declaration(
+            inputs,
+            kernel_import_sites,
+            {key: frozenset(value) for key, value in observed_symbols.items()},
+        )
+    )
 
     return AdoptionReport(findings=tuple(findings))

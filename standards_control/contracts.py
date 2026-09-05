@@ -395,59 +395,30 @@ class ConnectorScope:
         )
 
 
-class KernelAdoptionApplicability(str, Enum):
-    """Whether a repository adopts `dotmac_kernel` at all.
-
-    Two members and no third, because the third state a reader keeps inventing
-    — "not stated" — is precisely what this section exists to make
-    unrepresentable. An absent section is a REFUSAL at load, not a value here.
-    """
-
-    APPLICABLE = "applicable"
-    NOT_APPLICABLE = "not_applicable"
-
-
 @dataclass(frozen=True)
-class TransitionalSurfaceDeclaration:
-    """A Kernel surface a repository still consumes and has undertaken to stop.
+class KernelAdoptionBinding:
+    """Where a repository's Kernel-adoption declaration lives, and which
+    contract it claims. A POINTER, never the declaration itself.
 
-    `owner` and `expiry` are REQUIRED by the parser rather than optional with a
-    later check. A transitional classification with neither is a permanent
-    surface wearing a temporary word: nobody is answerable for removing it, and
-    no date makes its absence noticeable.
+    The declaration is a dedicated product-owned document
+    (`.dotmac/kernel-adoption.json`) under the Governance-owned
+    `KernelAdoptionDeclaration.v1` contract. This profile carries only the
+    binding, so a classification cannot arrive as a plausible line in a diff to
+    the conformance profile, and so the two documents version independently.
+
+    The key is DECLARED-OPTIONAL rather than required, and the reason is
+    stated rather than convenient. A required key would force every enrolled
+    repository through a `schema_version` bump before it could declare
+    anything, and the three products are still at v9 — four migration stops
+    away. Optionality costs nothing here because the refusal that matters lives
+    on the DECLARATION: an absent or unreadable `.dotmac/kernel-adoption.json`
+    is refused by `kernel_adoption_control`, never read as an empty list. What
+    the binding adds is a non-default path and the contract version the
+    repository claims.
     """
 
-    module: str
-    owner: str
-    expiry: str
-
-
-@dataclass(frozen=True)
-class KernelAdoptionDeclaration:
-    """A repository's own Kernel-surface classifications. Section version 1.
-
-    Owned by Governance as a schema and evaluated by `kernel_adoption_control`;
-    each repository owns only its instance. It is a DECLARATION, never
-    evidence — receipts and runtime-adoption facts stay out of this file, and
-    nothing here asserts that anything was installed, admitted or adopted.
-
-    The section is versioned INDEPENDENTLY of `schema_version`. A profile-wide
-    bump forces every enrolled repository to move; a section version lets this
-    one vocabulary evolve while saying so, and the two numbers answer different
-    questions.
-
-    `NOT_APPLICABLE` carries a reason because an exemption states an
-    ENFORCEABLE premise or the region is unmonitored rather than exempt. The
-    premise here is machine-checkable and is checked: a repository that
-    declares `not_applicable` and then imports `dotmac_kernel` is reported by
-    the evaluator, so the value cannot be used to leave the surface unmeasured.
-    """
-
-    section_version: int
-    applicability: KernelAdoptionApplicability
-    not_applicable_reason: str | None
-    prohibited_surfaces: tuple[str, ...]
-    transitional_surfaces: tuple[TransitionalSurfaceDeclaration, ...]
+    declaration_path: PurePosixPath
+    contract_version: str
 
 
 @dataclass(frozen=True)
@@ -463,9 +434,12 @@ class StandardsProfile:
     testing_kit_boundary: TestingKitBoundary
     external_connector_surface: ExternalConnectorSurface
     deployment_artefact_surfaces: tuple[DeploymentArtefactSurface, ...]
-    kernel_adoption: KernelAdoptionDeclaration
     compatibility_retirements: tuple[CompatibilityRetirement, ...]
     retirement_history: tuple[RetirementHistory, ...]
+    #: `None` means "this profile states no binding", which is NOT the same as
+    #: "this repository has no declaration": the declaration is then read from
+    #: its default path, and its absence is refused there rather than here.
+    kernel_adoption_binding: KernelAdoptionBinding | None = None
 
 
 @dataclass(frozen=True)

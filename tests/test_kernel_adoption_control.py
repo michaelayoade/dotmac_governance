@@ -41,10 +41,18 @@ from kernel_adoption_control import (
     KernelAdoptionInputs,
     KernelSurfaceCatalogue,
     PinSite,
+    ProhibitedSurface,
     Severity,
-    TransitionalSurfaceDeclaration,
+    SurfaceSite,
+    TransitionalSurface,
     evaluate,
     read_declaration,
+)
+from kernel_adoption_control.declaration_contract import (
+    KERNEL_ADOPTION_CONTRACT,
+    DeclarationError,
+    KernelCatalogueEvidence,
+    parse_declaration,
 )
 from kernel_adoption_control.foundation_binding import (
     _MOVING_ALIAS,
@@ -102,18 +110,66 @@ CLEAN = {
 }
 
 
+PRODUCT_REVISION = "f8f90aef1467a3d332a650775e667e75d7226f56"
+
+CATALOGUE_EVIDENCE = KernelCatalogueEvidence(
+    version="0.1.0a98",
+    revision="ae7320876ad91d5bf4639d634d65a6e8fd36bb00",
+    artifact_digest="sha256:"
+    + "27405c57c4af395224cdd2f4366c0144207e9df2eab4ca8a8ed1142c1d0859fa"[:64],
+)
+
+
 def declared(
     prohibited: frozenset[str] = frozenset(),
-    transitional: tuple[TransitionalSurfaceDeclaration, ...] = (),
+    transitional: tuple[TransitionalSurface, ...] = (),
 ) -> DeclarationOutcome:
     return DeclarationPresent(
         KernelAdoptionDeclaration(
-            section_version=1,
+            contract=KERNEL_ADOPTION_CONTRACT,
+            product_revision=PRODUCT_REVISION,
             applicability=KernelAdoptionApplicability.APPLICABLE,
             not_applicable_reason=None,
-            prohibited_surfaces=tuple(sorted(prohibited)),
+            catalogue=CATALOGUE_EVIDENCE,
+            required_surfaces=(),
+            prohibited_surfaces=tuple(
+                ProhibitedSurface(module=name, citation="dotmac_governance ADR 0042")
+                for name in sorted(prohibited)
+            ),
             transitional_surfaces=transitional,
         )
+    )
+
+
+def not_applicable(reason: str) -> DeclarationOutcome:
+    return DeclarationPresent(
+        KernelAdoptionDeclaration(
+            contract=KERNEL_ADOPTION_CONTRACT,
+            product_revision=PRODUCT_REVISION,
+            applicability=KernelAdoptionApplicability.NOT_APPLICABLE,
+            not_applicable_reason=reason,
+            catalogue=None,
+            required_surfaces=(),
+            prohibited_surfaces=(),
+            transitional_surfaces=(),
+        )
+    )
+
+
+def transitional_surface(
+    module: str = "dotmac_kernel.db",
+    *,
+    owner: str = "Michael Ayoade",
+    expiry: str = "2026-12-01",
+    baseline: tuple[SurfaceSite, ...] = (),
+) -> TransitionalSurface:
+    return TransitionalSurface(
+        module=module,
+        owner=owner,
+        expiry=expiry,
+        retirement_issue="dotmac_governance#123",
+        replacement="dotmac_kernel.session_runtime",
+        baseline=baseline,
     )
 
 
@@ -122,7 +178,7 @@ def evaluate_sources(
     *,
     prohibited: frozenset[str] = frozenset(),
     pins: tuple[PinSite, ...] = (),
-    transitional: tuple[TransitionalSurfaceDeclaration, ...] = (),
+    transitional: tuple[TransitionalSurface, ...] = (),
     declaration: DeclarationOutcome | None = None,
 ) -> AdoptionReport:
     return evaluate(
@@ -312,7 +368,7 @@ class PrivateSurface(unittest.TestCase):
         self.assertEqual([], codes_of(report, FindingCode.SURFACE_PRIVATE))
 
 
-class ProhibitedSurface(unittest.TestCase):
+class ProhibitedSurfaceArm(unittest.TestCase):
     def test_a_prohibited_import_is_named_with_file_and_line(self) -> None:
         report = evaluate_sources(
             {
@@ -476,11 +532,14 @@ class TransitionalOwnership(unittest.TestCase):
     """Two layers, and both are proved.
 
     A transitional entry that OMITS `owner` or `expiry` cannot reach this
-    engine at all: `standards_control.profile.parse_kernel_adoption` refuses
-    the section, proved in `tests/test_standards_control.py`. What this arm
-    catches is the shape that parses and still says nothing — a present field
-    holding whitespace. A guard that only checked for absence would pass a
-    declaration whose owner is a space.
+    engine at all: `parse_declaration` refuses the document, proved in
+    `DeclarationContract` below. What the blankness arm catches is the shape a
+    caller can still construct directly — a present field holding whitespace —
+    and it stays because a guard removed on the grounds that another guard
+    covers it is how a seam becomes unmonitored.
+
+    The arm that bites on real input is the BASELINE RATCHET, and it is
+    two-directional.
     """
 
     def test_a_transitional_surface_with_neither_owner_nor_expiry_is_named(
@@ -488,11 +547,7 @@ class TransitionalOwnership(unittest.TestCase):
     ) -> None:
         report = evaluate_sources(
             CLEAN,
-            transitional=(
-                TransitionalSurfaceDeclaration(
-                    module="dotmac_kernel.db", owner="", expiry="  "
-                ),
-            ),
+            transitional=(transitional_surface(owner="", expiry="  "),),
         )
         found = codes_of(report, FindingCode.TRANSITIONAL_UNOWNED)
         self.assertEqual(1, len(found))
@@ -502,29 +557,240 @@ class TransitionalOwnership(unittest.TestCase):
 
     def test_a_blank_owner_is_not_an_owner(self) -> None:
         report = evaluate_sources(
-            CLEAN,
-            transitional=(
-                TransitionalSurfaceDeclaration(
-                    module="dotmac_kernel.db", owner="   ", expiry="2026-12-01"
-                ),
-            ),
+            CLEAN, transitional=(transitional_surface(owner="   "),)
         )
         found = codes_of(report, FindingCode.TRANSITIONAL_UNOWNED)
         self.assertEqual(1, len(found))
         self.assertIn("owner", found[0].message)
 
-    def test_a_fully_stated_transitional_surface_is_silent(self) -> None:
+    def test_a_fully_stated_transitional_surface_with_no_uses_is_silent(self) -> None:
+        report = evaluate_sources(CLEAN, transitional=(transitional_surface(),))
+        self.assertEqual([], codes_of(report, FindingCode.TRANSITIONAL_UNOWNED))
+        self.assertEqual([], codes_of(report, FindingCode.TRANSITIONAL_BASELINE_DRIFT))
+
+    def test_a_use_outside_the_baseline_is_growth_and_is_named(self) -> None:
+        """Direction one: a surface being retired must not quietly grow."""
+        report = evaluate_sources(
+            {PurePosixPath("app/new.py"): ("from dotmac_kernel.db import session\n")},
+            transitional=(transitional_surface(),),
+        )
+        found = codes_of(report, FindingCode.TRANSITIONAL_BASELINE_DRIFT)
+        self.assertEqual(1, len(found))
+        self.assertEqual(PurePosixPath("app/new.py"), found[0].path)
+        self.assertIn("session", found[0].message)
+        self.assertIn("dotmac_governance#123", found[0].message)
+        self.assertIn("dotmac_kernel.session_runtime", found[0].message)
+
+    def test_a_baseline_entry_with_no_use_is_named(self) -> None:
+        """Direction two: a list that only grows stops describing anything.
+
+        Removing the last use is the good outcome, and it must be recorded in
+        the same change — otherwise the baseline silently overstates the work
+        remaining and nobody notices the surface became retirable.
+        """
         report = evaluate_sources(
             CLEAN,
             transitional=(
-                TransitionalSurfaceDeclaration(
-                    module="dotmac_kernel.db",
-                    owner="Michael Ayoade",
-                    expiry="2026-12-01",
+                transitional_surface(
+                    baseline=(
+                        SurfaceSite(path=PurePosixPath("app/old.py"), symbol="session"),
+                    )
                 ),
             ),
         )
-        self.assertEqual([], codes_of(report, FindingCode.TRANSITIONAL_UNOWNED))
+        found = codes_of(report, FindingCode.TRANSITIONAL_BASELINE_DRIFT)
+        self.assertEqual(1, len(found))
+        self.assertIn("no such use was measured", found[0].message)
+        self.assertIn("app/old.py", found[0].message)
+
+    def test_a_baseline_that_matches_exactly_is_silent(self) -> None:
+        """The near-miss for both directions: an accurate baseline says nothing."""
+        report = evaluate_sources(
+            {
+                PurePosixPath("app/legacy.py"): (
+                    "from dotmac_kernel.db import session\n"
+                )
+            },
+            transitional=(
+                transitional_surface(
+                    baseline=(
+                        SurfaceSite(
+                            path=PurePosixPath("app/legacy.py"), symbol="session"
+                        ),
+                    )
+                ),
+            ),
+        )
+        self.assertEqual([], codes_of(report, FindingCode.TRANSITIONAL_BASELINE_DRIFT))
+
+
+class DeclarationContract(unittest.TestCase):
+    """`KernelAdoptionDeclaration.v1` refuses every ambiguous document.
+
+    One format for every product. Nothing below is parameterised by product,
+    and a field that had to differ per product would mean the format is wrong.
+    """
+
+    def document(self, **overrides: object) -> dict[str, object]:
+        base: dict[str, object] = {
+            "contract": KERNEL_ADOPTION_CONTRACT,
+            "product_revision": PRODUCT_REVISION,
+            "applicability": "applicable",
+            "kernel_catalogue": {
+                "version": "0.1.0a98",
+                "revision": "ae7320876ad91d5bf4639d634d65a6e8fd36bb00",
+                "artifact_digest": "sha256:" + "a" * 64,
+            },
+            "required_surfaces": [
+                {
+                    "module": "dotmac_kernel.messaging",
+                    "floor": "0.1.0a98",
+                    "proven_by": "tests/architecture/test_kernel_compatibility.py",
+                }
+            ],
+            "prohibited_surfaces": [
+                {
+                    "module": "dotmac_kernel.db",
+                    "citation": "dotmac_erp tests/architecture/test_kernel_import_boundary.py",
+                }
+            ],
+            "transitional_surfaces": [
+                {
+                    "module": "dotmac_kernel.planes",
+                    "owner": "Michael Ayoade",
+                    "expiry": "2026-12-01",
+                    "retirement_issue": "dotmac_governance#123",
+                    "replacement": "dotmac_kernel.namespaces",
+                    "baseline": [{"path": "app/x.py", "symbol": "Plane"}],
+                }
+            ],
+        }
+        base.update(overrides)
+        return base
+
+    def assertRefused(self, document: object, needle: str) -> None:
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration(document)
+        self.assertIn(needle, str(caught.exception))
+
+    def test_the_admit_control_parses(self) -> None:
+        parsed = parse_declaration(self.document())
+        self.assertEqual(KERNEL_ADOPTION_CONTRACT, parsed.contract)
+        self.assertEqual(frozenset({"dotmac_kernel.db"}), parsed.prohibited_modules)
+        self.assertEqual(1, len(parsed.transitional_surfaces))
+        self.assertIsNotNone(parsed.catalogue)
+
+    def test_a_not_applicable_document_parses_and_carries_no_surfaces(self) -> None:
+        parsed = parse_declaration(
+            {
+                "contract": KERNEL_ADOPTION_CONTRACT,
+                "product_revision": PRODUCT_REVISION,
+                "applicability": "not_applicable",
+                "not_applicable_reason": "composes no assembly",
+            }
+        )
+        self.assertEqual((), parsed.prohibited_surfaces)
+        self.assertIsNone(parsed.catalogue)
+
+    def test_a_foreign_contract_is_refused_rather_than_read_leniently(self) -> None:
+        self.assertRefused(
+            self.document(contract="ApplicationFoundationProfile.v1"),
+            "this parser reads",
+        )
+
+    def test_a_moving_product_revision_is_refused(self) -> None:
+        for value in ("main", "HEAD", "v1.2.3", "deadbeef"):
+            with self.subTest(value=value):
+                self.assertRefused(
+                    self.document(product_revision=value),
+                    "peeled 40-character commit",
+                )
+
+    def test_a_surface_outside_the_kernel_namespace_is_refused(self) -> None:
+        """A name that is classified and never measured is worse than none."""
+        self.assertRefused(
+            self.document(
+                prohibited_surfaces=[
+                    {"module": "sqlalchemy.orm", "citation": "house style"}
+                ]
+            ),
+            "not a dotmac_kernel module path",
+        )
+
+    def test_a_prohibition_without_a_citation_is_refused(self) -> None:
+        self.assertRefused(
+            self.document(prohibited_surfaces=[{"module": "dotmac_kernel.db"}]),
+            "missing keys: citation",
+        )
+
+    def test_a_transitional_surface_missing_any_obligation_is_refused(self) -> None:
+        for dropped in (
+            "owner",
+            "expiry",
+            "retirement_issue",
+            "replacement",
+            "baseline",
+        ):
+            with self.subTest(dropped=dropped):
+                entry = dict(self.document()["transitional_surfaces"][0])  # type: ignore[index]
+                del entry[dropped]
+                self.assertRefused(
+                    self.document(transitional_surfaces=[entry]),
+                    f"missing keys: {dropped}",
+                )
+
+    def test_an_unorderable_expiry_is_refused(self) -> None:
+        entry = dict(self.document()["transitional_surfaces"][0])  # type: ignore[index]
+        entry["expiry"] = "soon"
+        self.assertRefused(
+            self.document(transitional_surfaces=[entry]), "cannot expire"
+        )
+
+    def test_a_module_cannot_hold_two_undertakings(self) -> None:
+        self.assertRefused(
+            self.document(
+                required_surfaces=[
+                    {
+                        "module": "dotmac_kernel.db",
+                        "floor": "0.1.0a98",
+                        "proven_by": "tests/x.py",
+                    }
+                ]
+            ),
+            "declared both required and prohibited",
+        )
+
+    def test_not_applicable_carrying_surfaces_is_refused(self) -> None:
+        """A list nothing will read is worse than no list: it looks measured."""
+        self.assertRefused(
+            {
+                "contract": KERNEL_ADOPTION_CONTRACT,
+                "product_revision": PRODUCT_REVISION,
+                "applicability": "not_applicable",
+                "not_applicable_reason": "none",
+                "prohibited_surfaces": [],
+            },
+            "unknown keys",
+        )
+
+    def test_a_catalogue_without_an_immutable_digest_is_refused(self) -> None:
+        self.assertRefused(
+            self.document(
+                kernel_catalogue={
+                    "version": "0.1.0a98",
+                    "revision": "ae7320876ad91d5bf4639d634d65a6e8fd36bb00",
+                    "artifact_digest": "latest",
+                }
+            ),
+            "adopts BY DIGEST",
+        )
+
+    def test_an_absolute_baseline_path_is_refused(self) -> None:
+        entry = dict(self.document()["transitional_surfaces"][0])  # type: ignore[index]
+        entry["baseline"] = [{"path": "/etc/passwd", "symbol": "x"}]
+        self.assertRefused(
+            self.document(transitional_surfaces=[entry]), "repository-relative"
+        )
 
 
 class BoundaryIsStructural(unittest.TestCase):
@@ -704,7 +970,7 @@ class DeclarationStates(unittest.TestCase):
         report = evaluate_sources(
             self.PROHIBITED_SOURCE,
             declaration=DeclarationMissing(
-                "no section in .dotmac/standards-profile.json"
+                ".dotmac/kernel-adoption.json does not exist"
             ),
         )
         found = codes_of(report, FindingCode.DECLARATION_MISSING)
@@ -718,7 +984,9 @@ class DeclarationStates(unittest.TestCase):
     def test_a_planted_corrupt_declaration_refuses_rather_than_emptying(self) -> None:
         report = evaluate_sources(
             self.PROHIBITED_SOURCE,
-            declaration=DeclarationUnreadable("section_version 2 is not 1"),
+            declaration=DeclarationUnreadable(
+                ".dotmac/kernel-adoption.json: declaration.contract is 'v0'"
+            ),
         )
         found = codes_of(report, FindingCode.DECLARATION_UNREADABLE)
         self.assertEqual(1, len(found))
@@ -751,15 +1019,7 @@ class DeclarationStates(unittest.TestCase):
         """An exemption states an ENFORCEABLE premise. This is the enforcement."""
         report = evaluate_sources(
             self.PROHIBITED_SOURCE,
-            declaration=DeclarationPresent(
-                KernelAdoptionDeclaration(
-                    section_version=1,
-                    applicability=KernelAdoptionApplicability.NOT_APPLICABLE,
-                    not_applicable_reason="this repository consumes no Kernel",
-                    prohibited_surfaces=(),
-                    transitional_surfaces=(),
-                )
-            ),
+            declaration=not_applicable("this repository consumes no Kernel"),
         )
         found = codes_of(report, FindingCode.DECLARATION_PREMISE_FALSE)
         self.assertEqual(1, len(found))
@@ -772,15 +1032,7 @@ class DeclarationStates(unittest.TestCase):
         """The near-miss: a repository that really imports no Kernel."""
         report = evaluate_sources(
             {PurePosixPath("tools/thing.py"): "import json\n\nprint(json)\n"},
-            declaration=DeclarationPresent(
-                KernelAdoptionDeclaration(
-                    section_version=1,
-                    applicability=KernelAdoptionApplicability.NOT_APPLICABLE,
-                    not_applicable_reason="composes no assembly",
-                    prohibited_surfaces=(),
-                    transitional_surfaces=(),
-                )
-            ),
+            declaration=not_applicable("composes no assembly"),
         )
         self.assertEqual([], codes_of(report, FindingCode.DECLARATION_PREMISE_FALSE))
 
@@ -799,46 +1051,81 @@ class DeclarationReading(unittest.TestCase):
         (self.root / ".dotmac").mkdir()
 
     def write(self, text: str) -> None:
-        (self.root / ".dotmac" / "standards-profile.json").write_text(text)
+        (self.root / ".dotmac" / "kernel-adoption.json").write_text(text)
 
     def test_an_absent_file_is_missing_not_empty(self) -> None:
         outcome = read_declaration(self.root)
         self.assertIsInstance(outcome, DeclarationMissing)
 
-    def test_a_profile_without_the_section_is_missing(self) -> None:
-        self.write(json.dumps({"schema_version": 12}))
-        outcome = read_declaration(self.root)
-        self.assertIsInstance(outcome, DeclarationMissing)
-        self.assertIn("kernel_adoption", str(outcome))
+    def test_a_document_that_is_not_an_object_is_unreadable(self) -> None:
+        self.write(json.dumps(["not", "a", "declaration"]))
+        self.assertIsInstance(read_declaration(self.root), DeclarationUnreadable)
 
     def test_invalid_json_is_unreadable_not_empty(self) -> None:
         self.write("{not json")
         self.assertIsInstance(read_declaration(self.root), DeclarationUnreadable)
 
-    def test_a_section_that_does_not_parse_is_unreadable(self) -> None:
+    def test_a_document_that_does_not_parse_is_unreadable(self) -> None:
         self.write(
             json.dumps(
-                {"kernel_adoption": {"section_version": 1, "applicability": "maybe"}}
+                {
+                    "contract": KERNEL_ADOPTION_CONTRACT,
+                    "product_revision": PRODUCT_REVISION,
+                    "applicability": "maybe",
+                }
             )
         )
         self.assertIsInstance(read_declaration(self.root), DeclarationUnreadable)
 
-    def test_a_valid_section_is_present(self) -> None:
+    def test_a_valid_declaration_is_present(self) -> None:
         self.write(
             json.dumps(
                 {
-                    "kernel_adoption": {
-                        "section_version": 1,
-                        "applicability": "applicable",
-                        "prohibited_surfaces": ["dotmac_kernel.db"],
-                        "transitional_surfaces": [],
-                    }
+                    "contract": KERNEL_ADOPTION_CONTRACT,
+                    "product_revision": PRODUCT_REVISION,
+                    "applicability": "not_applicable",
+                    "not_applicable_reason": "composes no assembly",
                 }
             )
         )
         outcome = read_declaration(self.root)
         assert isinstance(outcome, DeclarationPresent)
-        self.assertEqual(("dotmac_kernel.db",), outcome.declaration.prohibited_surfaces)
+        self.assertIs(
+            KernelAdoptionApplicability.NOT_APPLICABLE,
+            outcome.declaration.applicability,
+        )
+
+    def test_a_bound_non_default_path_is_honoured(self) -> None:
+        """The binding names WHERE; it never carries the contents."""
+        (self.root / "elsewhere").mkdir()
+        (self.root / "elsewhere" / "adoption.json").write_text(
+            json.dumps(
+                {
+                    "contract": KERNEL_ADOPTION_CONTRACT,
+                    "product_revision": PRODUCT_REVISION,
+                    "applicability": "not_applicable",
+                    "not_applicable_reason": "composes no assembly",
+                }
+            )
+        )
+        outcome = read_declaration(self.root, PurePosixPath("elsewhere/adoption.json"))
+        self.assertIsInstance(outcome, DeclarationPresent)
+
+    def test_a_bound_path_that_is_absent_is_missing_not_defaulted(self) -> None:
+        """A binding to nothing must not silently fall back to the default."""
+        self.write(
+            json.dumps(
+                {
+                    "contract": KERNEL_ADOPTION_CONTRACT,
+                    "product_revision": PRODUCT_REVISION,
+                    "applicability": "not_applicable",
+                    "not_applicable_reason": "composes no assembly",
+                }
+            )
+        )
+        outcome = read_declaration(self.root, PurePosixPath("elsewhere/adoption.json"))
+        self.assertIsInstance(outcome, DeclarationMissing)
+        self.assertIn("elsewhere/adoption.json", str(outcome))
 
     def test_this_repositorys_own_declaration_reads(self) -> None:
         """The admit control over the real file, not a fixture."""

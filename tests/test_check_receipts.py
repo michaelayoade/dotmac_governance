@@ -241,6 +241,65 @@ class ReceiptRegistryTestCase(unittest.TestCase):
         )
         self.assertFires("a branch name or floating alias")
 
+    def test_a_channel_alias_is_named_as_the_alias_it_is(self) -> None:
+        """`stable` and `edge` are refused BY NAME, not merely by hex length.
+
+        Both were already refused by the 40-hex rule, so a run over the
+        registry could not tell whether they were described or only rejected.
+        The proof is therefore the MESSAGE: `dotmac-deployment-foundation`'s
+        `_MOVING_REFERENCE` names `latest|main|master|HEAD|stable|edge`, and a
+        refusal that says only "not 40 hex" leaves the author guessing which
+        mistake they made.
+        """
+        for alias in ("stable", "edge"):
+            with self.subTest(alias=alias):
+                self.fixture.write(
+                    "sub-chat-authority-to-selfcare.json",
+                    receipt(
+                        coordinates={
+                            "old": {
+                                "repository": "michaelayoade/dotmac_crm",
+                                "commit": alias,
+                            },
+                            "new": {
+                                "repository": "michaelayoade/dotmac_sub",
+                                "commit": COMMIT_B,
+                            },
+                        }
+                    ),
+                )
+                self.assertFires("a branch name or floating alias")
+
+    def test_a_word_that_merely_resembles_a_channel_is_not_called_one(self) -> None:
+        """The near-miss. `mainline` is refused, and NOT as a branch alias.
+
+        Widening the alias list is only safe if it did not become a substring
+        match. `mainline` and `stables` are still refused — they are not 40 hex
+        — but describing them as branch aliases would be an invented diagnosis,
+        and a guard that names the wrong mistake is worse than one that names
+        none.
+        """
+        self.fixture.write(
+            "sub-chat-authority-to-selfcare.json",
+            receipt(
+                coordinates={
+                    "old": {
+                        "repository": "michaelayoade/dotmac_crm",
+                        "commit": "mainline",
+                    },
+                    "new": {
+                        "repository": "michaelayoade/dotmac_sub",
+                        "commit": COMMIT_B,
+                    },
+                }
+            ),
+        )
+        result, errors = self.verdict(None)
+        self.assertIs(result, GateVerdict.EXECUTED_FAILED, f"errors: {errors}")
+        joined = "\n".join(errors)
+        self.assertIn("not a peeled 40-character commit", joined)
+        self.assertNotIn("a branch name or floating alias", joined)
+
     def test_an_unpeeled_tag_is_not_a_coordinate(self) -> None:
         self.fixture.write(
             "sub-chat-authority-to-selfcare.json",

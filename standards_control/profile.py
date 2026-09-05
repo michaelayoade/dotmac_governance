@@ -26,6 +26,7 @@ from .contracts import (
     GovernanceModelRef,
     GovernanceSourceKind,
     GovernanceStatus,
+    KernelAdoptionBinding,
     LocalGovernanceModelRef,
     ModuleDeclaredVocabulary,
     PinnedGovernanceModelRef,
@@ -65,9 +66,22 @@ def _object(value: object, location: str) -> Mapping[str, object]:
     return value
 
 
-def _keys(data: Mapping[str, object], required: frozenset[str], location: str) -> None:
+def _keys(
+    data: Mapping[str, object],
+    required: frozenset[str],
+    location: str,
+    optional: frozenset[str] = frozenset(),
+) -> None:
+    """Refuse a missing required key and any key outside the declared sets.
+
+    `optional` does NOT loosen the closed-key discipline, which exists so a
+    policy value cannot arrive as a plausible line in a diff. Every admissible
+    key is still enumerated here and reviewed; an optional one is simply
+    enumerated as admissible-without-being-mandatory. A key outside
+    `required | optional` is refused exactly as before.
+    """
     missing = sorted(required - data.keys())
-    unknown = sorted(data.keys() - required)
+    unknown = sorted(data.keys() - required - optional)
     if missing:
         raise ProfileError(f"{location} missing keys: {', '.join(missing)}")
     if unknown:
@@ -574,6 +588,48 @@ def _deployment_artefact_surface(
     )
 
 
+#: The contract this profile's binding may claim. One value today; a second
+#: would be a reviewed change here rather than a string a product invents.
+KERNEL_ADOPTION_CONTRACT_VERSIONS = frozenset({"KernelAdoptionDeclaration.v1"})
+
+#: Where the declaration lives when a profile states no binding.
+DEFAULT_KERNEL_ADOPTION_PATH = PurePosixPath(".dotmac/kernel-adoption.json")
+
+#: The profile's declared-optional top-level keys. Enumerated, so the closed
+#: discipline is unchanged; optional, so adding the Kernel-adoption axis does
+#: not force every enrolled repository through a `schema_version` bump first.
+OPTIONAL_PROFILE_KEYS = frozenset({"kernel_adoption_binding"})
+
+
+def parse_kernel_adoption_binding(value: object) -> KernelAdoptionBinding:
+    """Parse the pointer to a repository's Kernel-adoption declaration.
+
+    A pointer and nothing else. There is deliberately no key here for a
+    prohibited surface, a transitional surface or a floor: those live in the
+    declaration the binding points AT, under a contract that versions
+    independently, so a classification cannot arrive as a line in a diff to the
+    conformance profile.
+    """
+    data = _object(value, "kernel_adoption_binding")
+    _keys(
+        data,
+        frozenset({"declaration_path", "contract_version"}),
+        "kernel_adoption_binding",
+    )
+    path = _path(data["declaration_path"], "kernel_adoption_binding.declaration_path")
+    contract = _string(
+        data["contract_version"], "kernel_adoption_binding.contract_version"
+    )
+    if contract not in KERNEL_ADOPTION_CONTRACT_VERSIONS:
+        raise ProfileError(
+            f"kernel_adoption_binding.contract_version {contract!r} is not a "
+            "contract this repository publishes; expected one of "
+            f"{', '.join(sorted(KERNEL_ADOPTION_CONTRACT_VERSIONS))}. A binding "
+            "to a contract nobody owns points at nothing"
+        )
+    return KernelAdoptionBinding(declaration_path=path, contract_version=contract)
+
+
 def parse_profile(value: object) -> StandardsProfile:
     """Parse untrusted JSON-compatible data into an immutable profile."""
     data = _object(value, "profile")
@@ -666,6 +722,7 @@ def parse_profile(value: object) -> StandardsProfile:
             }
         ),
         "profile",
+        OPTIONAL_PROFILE_KEYS,
     )
     raw_mode = _string(data["enforcement_mode"], "enforcement_mode")
     try:
@@ -737,6 +794,11 @@ def parse_profile(value: object) -> StandardsProfile:
         deployment_artefact_surfaces=deployments,
         compatibility_retirements=retirements,
         retirement_history=retirement_history,
+        kernel_adoption_binding=(
+            parse_kernel_adoption_binding(data["kernel_adoption_binding"])
+            if "kernel_adoption_binding" in data
+            else None
+        ),
     )
 
 

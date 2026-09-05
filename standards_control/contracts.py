@@ -396,6 +396,32 @@ class ConnectorScope:
 
 
 @dataclass(frozen=True)
+class KernelAdoptionBinding:
+    """Where a repository's Kernel-adoption declaration lives, and which
+    contract it claims. A POINTER, never the declaration itself.
+
+    The declaration is a dedicated product-owned document
+    (`.dotmac/kernel-adoption.json`) under the Governance-owned
+    `KernelAdoptionDeclaration.v1` contract. This profile carries only the
+    binding, so a classification cannot arrive as a plausible line in a diff to
+    the conformance profile, and so the two documents version independently.
+
+    The key is DECLARED-OPTIONAL rather than required, and the reason is
+    stated rather than convenient. A required key would force every enrolled
+    repository through a `schema_version` bump before it could declare
+    anything, and the three products are still at v9 — four migration stops
+    away. Optionality costs nothing here because the refusal that matters lives
+    on the DECLARATION: an absent or unreadable `.dotmac/kernel-adoption.json`
+    is refused by `kernel_adoption_control`, never read as an empty list. What
+    the binding adds is a non-default path and the contract version the
+    repository claims.
+    """
+
+    declaration_path: PurePosixPath
+    contract_version: str
+
+
+@dataclass(frozen=True)
 class StandardsProfile:
     schema_version: int
     profile_id: ProfileId
@@ -410,6 +436,10 @@ class StandardsProfile:
     deployment_artefact_surfaces: tuple[DeploymentArtefactSurface, ...]
     compatibility_retirements: tuple[CompatibilityRetirement, ...]
     retirement_history: tuple[RetirementHistory, ...]
+    #: `None` means "this profile states no binding", which is NOT the same as
+    #: "this repository has no declaration": the declaration is then read from
+    #: its default path, and its absence is refused there rather than here.
+    kernel_adoption_binding: KernelAdoptionBinding | None = None
 
 
 @dataclass(frozen=True)

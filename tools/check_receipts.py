@@ -103,9 +103,16 @@ POINTER = re.compile(r"^(?:bao|knowledge|github|s3)://[A-Za-z0-9][A-Za-z0-9._/#@
 
 #: The shapes ADR 0013 § 3 names as *not* coordinates, matched so the error can
 #: say which one was used rather than only that the value was not 40 hex.
+#:
+#: `stable` and `edge` were added on 2026-09-05 to match
+#: `dotmac-deployment-foundation`'s `_MOVING_REFERENCE`, which names
+#: `latest|main|master|HEAD|stable|edge`. Both were ALREADY refused here by the
+#: 40-hex rule, so this changes how precisely the refusal names the mistake and
+#: not what the registry admits — a message that says only "not 40 hex" leaves
+#: the author guessing whether the value was a branch, a tag or a typo.
 NON_COORDINATES = (
     (
-        re.compile(r"^(?:latest|current|head|main|master)$", re.IGNORECASE),
+        re.compile(r"^(?:latest|current|head|main|master|stable|edge)$", re.IGNORECASE),
         "a branch name or floating alias",
     ),
     (

@@ -71,6 +71,10 @@
     "conserved_exclusions": []
   },
   "deployment_artefact_surfaces": [],
+  "kernel_adoption_binding": {
+    "declaration_path": ".dotmac/kernel-adoption.json",
+    "contract_version": "KernelAdoptionDeclaration.v1"
+  },
   "compatibility_retirements": [],
   "retirement_history": []
 }

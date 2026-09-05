@@ -239,6 +239,13 @@ def _trusted_retirement_transitions(
             "compatibility_retirements" in promoted
             or "retirement_history" in promoted
             or (base_version == 9 and "deployment_artefact_surfaces" in promoted)
+            # The Kernel-adoption binding is declared-optional at v11 and did
+            # not exist when v9 or v10 was current, so a base at either version
+            # cannot honestly carry one. Refused for the same reason a
+            # backported retirement row is: a base claiming a field its version
+            # could not have is corrupt, not old. It is NOT refused at v11,
+            # where a base may legitimately carry it.
+            or "kernel_adoption_binding" in promoted
         ):
             return [
                 _finding(

@@ -28,6 +28,7 @@ from standards_control.engine import (
     connector_scope,
     verify_repository,
 )
+from standards_control.profile import ProfileError, parse_profile
 from standards_control.retirement import (
     RetirementError,
     parse_observation_bundle,
@@ -2773,6 +2774,12 @@ class StandardsTests(unittest.TestCase):
         # let a repository ship a deployment and decline to name it, which is
         # the vacuous pass the family exists to prevent.
         self.assertIn("deployment_artefact_surfaces", schema["required"])
+        # ADR 0042's binding is admissible and NOT required, unlike the surface
+        # above. The asymmetry is deliberate and is the reason the enrolment
+        # cost did not become a fourth migration stop: the refusal that matters
+        # lives on the declaration file, not on this pointer.
+        self.assertIn("kernel_adoption_binding", schema["properties"])
+        self.assertNotIn("kernel_adoption_binding", schema["required"])
         deployment_schema = schema["$defs"]["deployment_artefact_surface"]
         self.assertIs(deployment_schema["additionalProperties"], False)
         self.assertEqual(
@@ -6470,6 +6477,87 @@ def target_evidence(
     }
 
 
+class KernelAdoptionBindingTests(unittest.TestCase):
+    """The profile carries a POINTER to the declaration, never its contents.
+
+    Michael's ruling of 2026-09-05: the declaration is a dedicated
+    product-owned document under the Governance-owned
+    `KernelAdoptionDeclaration.v1` contract, and `standards-profile.json`
+    carries "only a typed binding to the declaration path and contract
+    version".
+
+    The key is DECLARED-OPTIONAL. That is what kept the enrolment cost at three
+    migration stops instead of four: a required key would force every enrolled
+    repository through a `schema_version` bump before it could declare
+    anything, and the three products are still at v9. Optionality is safe here
+    only because the refusal that matters lives on the declaration file, which
+    `kernel_adoption_control` refuses when absent or corrupt.
+    """
+
+    def assertRefused(self, value: object, needle: str) -> None:
+        with self.assertRaises(ProfileError) as caught:
+            parse_profile(value)
+        self.assertIn(needle, str(caught.exception))
+
+    def test_a_profile_without_a_binding_still_parses(self) -> None:
+        """The optionality itself, asserted rather than assumed."""
+        parsed = parse_profile(profile())
+        self.assertIsNone(parsed.kernel_adoption_binding)
+
+    def test_a_profile_with_a_binding_parses(self) -> None:
+        value = profile()
+        value["kernel_adoption_binding"] = {
+            "declaration_path": ".dotmac/kernel-adoption.json",
+            "contract_version": "KernelAdoptionDeclaration.v1",
+        }
+        parsed = parse_profile(value)
+        binding = parsed.kernel_adoption_binding
+        assert binding is not None
+        self.assertEqual(
+            PurePosixPath(".dotmac/kernel-adoption.json"), binding.declaration_path
+        )
+
+    def test_the_closed_key_discipline_is_unchanged(self) -> None:
+        """The sensitivity proof for making `_keys` accept an optional set.
+
+        Optionality must admit exactly the enumerated key and nothing else. If
+        widening `_keys` had accidentally opened the object, this is the test
+        that would go quiet — so an arbitrary key is planted and must still be
+        refused.
+        """
+        value = profile()
+        value["kernel_adoption"] = {"applicability": "applicable"}
+        self.assertRefused(value, "unknown keys: kernel_adoption")
+
+    def test_a_binding_to_a_contract_nobody_owns_is_refused(self) -> None:
+        value = profile()
+        value["kernel_adoption_binding"] = {
+            "declaration_path": ".dotmac/kernel-adoption.json",
+            "contract_version": "KernelAdoptionDeclaration.v2",
+        }
+        self.assertRefused(value, "points at nothing")
+
+    def test_the_binding_carries_no_classification(self) -> None:
+        """A prohibited surface may not arrive as a line in the profile."""
+        value = profile()
+        value["kernel_adoption_binding"] = {
+            "declaration_path": ".dotmac/kernel-adoption.json",
+            "contract_version": "KernelAdoptionDeclaration.v1",
+            "prohibited_surfaces": ["dotmac_kernel.db"],
+        }
+        self.assertRefused(value, "unknown keys: prohibited_surfaces")
+
+    def test_an_escaping_declaration_path_is_refused(self) -> None:
+        for bad in ("/etc/passwd", "../elsewhere/adoption.json"):
+            with self.subTest(bad=bad):
+                value = profile()
+                value["kernel_adoption_binding"] = {
+                    "declaration_path": bad,
+                    "contract_version": "KernelAdoptionDeclaration.v1",
+                }
+                self.assertRefused(value, "repository-relative")
+
+
 class RetirementContractTests(unittest.TestCase):
     def assert_malformed(self, value: object, parser: object) -> None:
         with self.assertRaises(RetirementError):
@@ -6973,6 +7061,12 @@ class RetirementEvaluationTests(unittest.TestCase):
             (10, "add", "retirement_history"),
             (10, "add", "unexpected"),
             (10, "remove", "authorities"),
+            # A base at v9 or v10 predates the Kernel-adoption binding
+            # entirely, so one appearing there is a base claiming a field its
+            # version could not have. Corrupt, not old — the same two-sided
+            # shape v9 already uses for `deployment_artefact_surfaces`.
+            (9, "add", "kernel_adoption_binding"),
+            (10, "add", "kernel_adoption_binding"),
         ):
             fixture = RetirementEvaluationFixture()
             try:

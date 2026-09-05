@@ -72,6 +72,9 @@
         "$ref": "#/$defs/deployment_artefact_surface"
       }
     },
+    "kernel_adoption_binding": {
+      "$ref": "#/$defs/kernel_adoption_binding"
+    },
     "compatibility_retirements": {
       "type": "array",
       "uniqueItems": true,
@@ -84,6 +87,16 @@
     }
   },
   "$defs": {
+    "kernel_adoption_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A POINTER to this repository's Kernel-adoption declaration, never the declaration itself. Declared-optional, not required: a required key would force every enrolled repository through a schema_version bump before it could declare anything, and the refusal that matters lives on the declaration file, whose absence or corruption kernel_adoption_control refuses rather than reading as an empty list.",
+      "required": ["declaration_path", "contract_version"],
+      "properties": {
+        "declaration_path": { "$ref": "#/$defs/path" },
+        "contract_version": { "const": "KernelAdoptionDeclaration.v1" }
+      }
+    },
     "compatibility_retirement": {
       "type": "object",
       "additionalProperties": false,

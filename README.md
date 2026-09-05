@@ -6,7 +6,8 @@ control interpretations, and evidence mappings for the Dotmac management system.
 **Status: governance source of truth. ADR 0001 was accepted by Michael Ayoade
 effective 2026-07-25. ADR 0005 is accepted only for the
 `michael-workstation` non-production agent pilot. ADR 0002 (development model)
-and ADR 0003 (repository visibility) remain `Proposed` and non-normative.
+remains `Proposed` and non-normative. ADR 0003 (repository visibility) is
+accepted effective 2026-09-05.
 ADR 0006 (engineering conformance) is accepted effective 2026-08-03; its
 profile runs in required mode. ADR 0007 (module-declared vocabularies) and ADR
 0008 (kernel testing-kit import locality) are accepted amendments to that
@@ -107,12 +108,11 @@ not reproduce standard text and does not itself establish conformity.
 4. **`main` changes by review.** Every substantive change arrives as a pull
    request with a named human approver.
 5. **Classification, not visibility.** Hosted-CI availability is never a reason
-   to change this repository's visibility. Validation runs on the
-   repository-scoped Seabone self-hosted runner. Material classified
+   to change this repository's visibility. Validation runs on a disposable
+   GitHub-hosted runner. Material classified
    `Confidential` or `Restricted` does not belong here and is referenced from
-   the system that holds it. ADR 0003 (`Proposed`) narrows this rule from the
-   private-by-default form stated in ADR 0001; until it is approved, that form
-   stands.
+   the system that holds it. Accepted ADR 0003 narrows this rule from the
+   private-by-default form stated in ADR 0001.
 
 ## Layout
 

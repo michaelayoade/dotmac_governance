@@ -3,7 +3,7 @@
   "statement": "Known unresolvable ADR citations in this repository, as exact path:line:number keys. The set is two-directional: tools/check_adr_references.py fails when an entry appears that is not listed here, AND when a listed entry stops firing without being removed in the same change.",
   "not_an_exemption_mechanism": "This file holds KNOWN DEBT only. A reference that is reviewed and correct is excluded structurally instead - a fenced code block is a specimen and a blockquote is a reproduction - so that 'grandfathered' and 'reviewed and correct' cannot be confused (dotmac_starter_mt ADR-0018 rule 4).",
   "known_unresolvable_references": [
-    "README.md:16:ADR-0010",
+    "README.md:17:ADR-0010",
     "docs/adr/0011-external-connector-surface-ratchet.md:1458:ADR-0010",
     "docs/adr/0011-external-connector-surface-ratchet.md:1459:ADR-0010"
   ],

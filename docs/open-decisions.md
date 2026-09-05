@@ -11,12 +11,12 @@ scaffold and deliberately did not infer scope, identity, or evidence claims.
 | 4 | Evidence schema, retention, freshness, and tamper-evident export | Deliberately deferred. Under ADR 0002 this is derived from adopted processes and their information items, so it cannot be designed until the six processes exist. | Control owners |
 | 5 | Human/agent identity separation in GitHub and Knowledge | An agent operating through Michael's account is not distinguishable from Michael's own action. Under ADR 0002 this blocks the agent-participation process being verifiable, so it moves ahead of the process definitions. | Michael |
 | 6 | Relationship to `dotmac_sub`'s source-of-truth standard | Under ADR 0002 this becomes the architecture-and-design process definition rather than a standalone policy. Confirm that framing. | Michael |
-| 7 | Enforced branch protection | Directed 2026-07-26: closed by publishing the repository. ADR 0003 records the decision and its conditions; the item stays open until protected `main` is verified by API. | Michael |
+| 7 | ~~Enforced branch protection~~ | Resolved when this acceptance change merges: protected `main` was re-verified by API on 2026-09-05 with strict required check `Governance record validation`, admin enforcement, linear history, and no force pushes or deletions. Accepted ADR 0003 records the public-repository decision. | Michael |
 | 8 | Managed Codex/Claude policy rollout and cutover | Partially resolved for one endpoint only: on 2026-07-31 Michael accepted ADR 0005 for `agent:michael-workstation`, designated the local sudo-backed installer, and authorized backup-backed guidance migration. Organization-wide rollout remains gated on decision 5. Adding endpoints, retiring the old Knowledge-bootstrap guidance writer, or broadening policy requires a separate decision after this pilot is verified. | Michael |
 | 9 | Governed scope beyond the initial six repositories | `dotmac_academy_app`, `dotmac_voice`, `dotmac_mobile`, `dotmac_vtu`, `dotmac_starter_mt`, `dotmac_data`, and `flutter-xcode-cloud-starter` are active but out of initial scope. In or out, deliberately. | Michael |
 | 10 | Canonical location of `dotmac_field` | Referenced in operational practice, but not found under this account or any organization it belongs to. Scope cannot include a repository whose canonical URL is unknown. | Michael |
 | 11 | Public default branches for governed repositories | `dotmac_sub`, `dotmac_crm`, `dotmac_erp`, and `dotmac-integration-client` are public. ADR 0003 resolves this for `dotmac_governance` only; whether public default branches are compatible with the configuration-and-secrets process across the governed set is still undecided. | Michael |
-| 12 | Self-hosted runner exposure on a public repository | `governance-checks.yml` runs on `pull_request` against the Seabone self-hosted runner. Public forks can execute code on it unless Actions requires approval for all outside contributors. ADR 0003 makes this a condition of publication; it must be verified, not assumed. | Michael |
+| 12 | Self-hosted runner exposure on a public repository | Transition in progress under the 2026-09-05 ADR 0003 amendment: this candidate moves required validation to `ubuntu-latest`, but the exposure remains until canonical-main CI passes, runner id 21 is deregistered, and the Seabone agent is removed under explicit host authorization. The Actions policy was re-verified as `all_external_contributors`; it is not inferred from the workflow. | Michael |
 | 13 | ~~Coordinated Dotmac ISP construction and Sub cutover programme~~ | Resolved 2026-08-20: Michael explicitly accepted ADR 0012 and authorized its acceptance amendment. Acceptance approves the two-track programme boundary but moves no production authority; every cohort remains blocked by its own evidence controls. | Michael |
 | 14 | Production deployment ownership for the canonical ISP target | Michael assigned `michaelayoade/dotmac-isp`, its independent thin runtime and independent database boundary in the 2026-08-20 working session. The production deployment owner and any target host remain deliberately unassigned. | Michael |
 | 15 | Enforceable legacy Sub transition rule | The intended exception classes are containment, evidence repair, migration or shadow adapters, and bounded in-place module adoption that retires one local writer without claiming target cutover. The enforcement owner, detector, exception approval and sensitivity proof must be approved before the programme relies on the rule. | Michael |
@@ -65,9 +65,9 @@ Michael has already directed:
 - `dotmac_governance` owns organization-wide policies, control definitions,
   global ADRs, templates, and generated indexes. It was private at bootstrap;
   Michael directed on 2026-07-26 that it become public so branch protection is
-  technically enforceable. ADR 0003 records that decision, narrows hard rule 5
-  from visibility to classification, and makes an Actions fork-approval policy
-  a condition of publication.
+  technically enforceable. Accepted ADR 0003 records that decision, narrows
+  hard rule 5 from visibility to classification, and requires disposable
+  hosted CI plus a separately verified Actions fork-approval policy.
 - Initial standards scope is ISO/IEC 27001 and ISO/IEC 42001, with
   ISO/IEC/IEEE 12207:2026 and ISO/IEC/IEEE 15289:2019 as engineering
   references. ADR 0002 proposes inverting this — 12207 and 15289 as the spine,
@@ -81,7 +81,7 @@ Michael has already directed:
   ADR was explicitly accepted by Michael on 2026-07-25 and becomes effective
   when its accepted revision merges to `main`.
 
-## Resolved operational control: private CI
+## Historical operational control: private CI
 
 The repository had been made public as a workaround for unavailable hosted
 Actions. That conflicted with the directed private boundary and was corrected on
@@ -94,3 +94,14 @@ The run selected the Seabone runner, exercised the known-good and known-bad ADR
 controls, and validated the production record set. This closes CI availability;
 it does not close open decision 7 because the current plan still cannot require
 that check before merge.
+
+## Transitioning operational control: public CI isolation
+
+ADR 0003's 2026-09-05 amendment moves required validation to GitHub's
+disposable `ubuntu-latest` runner. The workflow carries read-only repository
+permissions and no repository-scoped host or long-lived credential. The
+`all_external_contributors` Actions approval policy remains a separately
+verified platform setting rather than a claim inferred from YAML. Decision 12
+remains open until the hosted workflow passes on canonical `main`, GitHub
+reports no registered Governance runner, and the authorized Seabone agent
+removal is recorded. A workflow edit alone is not retirement evidence.

@@ -1,16 +1,33 @@
 {
  "_comment": [
   "Measured Kernel-surface facts for michaelayoade/dotmac_platform_control_plane.",
-  "MEASURED, not copied: an AST sweep over `git show origin/main:<path>` for every",
-  "tracked *.py and *.pyprogram outside tests/, taken 2026-09-06 at the peeled",
-  "revision below. The .pyprogram entry is included deliberately -- it imports",
-  "dotmac_kernel.db and is invisible to a suffix-based sweep.",
+  "MEASURED, not copied: an AST sweep over `git show <revision>:<path>` for every",
+  "tracked *.py and *.pyprogram outside tests/, at the peeled revision below,",
+  "using this repository's own `engine._kernel_imports` so the fixture and the",
+  "engine cannot disagree about what an import binds. The .pyprogram entry is",
+  "included deliberately -- it imports dotmac_kernel.db and is invisible to a",
+  "suffix-based sweep.",
+  "",
+  "REGENERATED 2026-09-06 (second time), for `dmg-kernel-surface-v2`. Each fact",
+  "now carries `bindings`: the Kernel's own name for a symbol and the local name",
+  "the file bound it to, kept apart. `symbols` is the sorted distinct KERNEL half",
+  "of `bindings` -- a projection, not a second record -- so the v1-shaped arms",
+  "read exactly what they read before.",
+  "",
+  "The first regeneration, earlier the same day, was INCOMPLETE and this file",
+  "said otherwise. It claimed every symbol was recorded as the Kernel spells it,",
+  "and two of the three aliases were still stored under their LOCAL names:",
+  "dotmac_kernel.messaging `models` was stored as `messaging_models`, and",
+  "dotmac_kernel.migrations `versions_dir` as `kernel_versions_dir`. Only the",
+  "root-facade alias was found, because the test that checked the convention",
+  "only looked at facts whose module is the bare `dotmac_kernel`. Both are",
+  "corrected here and both are in `known_aliases`.",
   "",
   "This is a FIXTURE and is labelled one. It carries Platform's measured Kernel",
-  "surface and NOT Platform's source; the test synthesises one import statement",
-  "per fact so the engine has something to parse. Platform's own declaration is",
-  "Platform's to write and does not exist yet -- see the test module's docstring",
-  "for exactly what this can and cannot demonstrate."
+  "surface and NOT Platform's source; the test synthesises import statements from",
+  "`bindings`, so an aliased fact synthesises an ALIASED statement. Platform's own",
+  "declaration is Platform's to write -- see the test module's docstring for",
+  "exactly what this can and cannot demonstrate."
  ],
  "repository": "michaelayoade/dotmac_platform_control_plane",
  "revision": "f8865b1a43a6d6769d5fa3a3ab3eddfdf296cffb",
@@ -18,8 +35,23 @@
  "inventory_rule": "every tracked *.py and *.pyprogram outside tests/",
  "module_count": 17,
  "symbol_count": 85,
- "symbol_name_convention": "CANONICAL Kernel-side names: a symbol is recorded as the Kernel spells it, before any `as`. Regenerated 2026-09-06. This file previously recorded LOCAL bound names, so an aliased import was stored under the name it was bound to and could not be told apart from a name the Kernel does not publish.",
+ "symbol_name_convention": "`bindings` is authoritative and holds both halves: `kernel` is the name as the Kernel spells it, before any `as`; `local` is the name this file bound it to. `symbols` is the sorted distinct set of `kernel` values. A previous revision of this file recorded LOCAL bound names in `symbols`, so an aliased import was stored under a name the Kernel does not publish and could not be told apart from one it does.",
+ "alias_count": 3,
  "known_aliases": [
+  {
+   "path": "alembic/env.py",
+   "module": "dotmac_kernel.messaging",
+   "kernel_name": "models",
+   "local_name": "messaging_models",
+   "note": "`from dotmac_kernel.messaging import models as messaging_models` on line 25, immediately above `from dotmac_kernel.models import Base` on line 26. The alias disambiguates the messaging package's `models` submodule from the Kernel's top-level `models`; both are names the Kernel publishes and neither is `messaging_models`."
+  },
+  {
+   "path": "src/vendor_cp/migrations.py",
+   "module": "dotmac_kernel.migrations",
+   "kernel_name": "versions_dir",
+   "local_name": "kernel_versions_dir",
+   "note": "`from dotmac_kernel.migrations import versions_dir as kernel_versions_dir` on line 31. SEVEN distributions in that file each publish `versions_dir` and Platform prefixes every one with its distribution, so the local name is Platform's naming scheme rather than anything the Kernel published. This is the sharpest instance of the defect v2 closes: stored as `kernel_versions_dir`, the fact was indistinguishable from any other distribution's `versions_dir` aliased the same way."
+  },
   {
    "path": "src/vendor_cp/offers/catalog.py",
    "module": "dotmac_kernel",
@@ -36,13 +68,33 @@
     "audit",
     "models_platform",
     "settings_models"
+   ],
+   "bindings": [
+    {
+     "kernel": "audit",
+     "local": "audit"
+    },
+    {
+     "kernel": "models_platform",
+     "local": "models_platform"
+    },
+    {
+     "kernel": "settings_models",
+     "local": "settings_models"
+    }
    ]
   },
   {
    "path": "alembic/env.py",
    "module": "dotmac_kernel.messaging",
    "symbols": [
-    "messaging_models"
+    "models"
+   ],
+   "bindings": [
+    {
+     "kernel": "models",
+     "local": "messaging_models"
+    }
    ]
   },
   {
@@ -50,6 +102,12 @@
    "module": "dotmac_kernel.models",
    "symbols": [
     "Base"
+   ],
+   "bindings": [
+    {
+     "kernel": "Base",
+     "local": "Base"
+    }
    ]
   },
   {
@@ -57,6 +115,12 @@
    "module": "dotmac_kernel.planes",
    "symbols": [
     "install_module_plane_selections"
+   ],
+   "bindings": [
+    {
+     "kernel": "install_module_plane_selections",
+     "local": "install_module_plane_selections"
+    }
    ]
   },
   {
@@ -64,6 +128,12 @@
    "module": "dotmac_kernel.prerequisites",
    "symbols": [
     "install_prerequisite_bindings"
+   ],
+   "bindings": [
+    {
+     "kernel": "install_prerequisite_bindings",
+     "local": "install_prerequisite_bindings"
+    }
    ]
   },
   {
@@ -71,6 +141,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "ModuleManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "ModuleManifest",
+     "local": "ModuleManifest"
+    }
    ]
   },
   {
@@ -78,6 +154,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -87,6 +169,20 @@
     "Base",
     "TimestampMixin",
     "uuid_pk"
+   ],
+   "bindings": [
+    {
+     "kernel": "Base",
+     "local": "Base"
+    },
+    {
+     "kernel": "TimestampMixin",
+     "local": "TimestampMixin"
+    },
+    {
+     "kernel": "uuid_pk",
+     "local": "uuid_pk"
+    }
    ]
   },
   {
@@ -95,6 +191,16 @@
    "symbols": [
     "NotFoundError",
     "PlatformAdmin"
+   ],
+   "bindings": [
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    },
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    }
    ]
   },
   {
@@ -102,6 +208,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -109,6 +221,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -117,6 +235,16 @@
    "symbols": [
     "ConflictError",
     "write_platform_audit_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    },
+    {
+     "kernel": "write_platform_audit_event",
+     "local": "write_platform_audit_event"
+    }
    ]
   },
   {
@@ -124,6 +252,12 @@
    "module": "dotmac_kernel.messaging",
    "symbols": [
     "process_once_platform"
+   ],
+   "bindings": [
+    {
+     "kernel": "process_once_platform",
+     "local": "process_once_platform"
+    }
    ]
   },
   {
@@ -131,6 +265,12 @@
    "module": "dotmac_kernel.messaging",
    "symbols": [
     "ClaimedPlatformEvent"
+   ],
+   "bindings": [
+    {
+     "kernel": "ClaimedPlatformEvent",
+     "local": "ClaimedPlatformEvent"
+    }
    ]
   },
   {
@@ -138,6 +278,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -145,6 +291,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "PlatformAdmin"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    }
    ]
   },
   {
@@ -152,6 +304,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -159,6 +317,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -166,6 +330,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -173,6 +343,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "ConflictError"
+   ],
+   "bindings": [
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    }
    ]
   },
   {
@@ -180,6 +356,12 @@
    "module": "dotmac_kernel.messaging",
    "symbols": [
     "process_once_platform"
+   ],
+   "bindings": [
+    {
+     "kernel": "process_once_platform",
+     "local": "process_once_platform"
+    }
    ]
   },
   {
@@ -187,6 +369,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -194,6 +382,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "PlatformAdmin"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    }
    ]
   },
   {
@@ -201,6 +395,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -208,6 +408,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -216,6 +422,16 @@
    "symbols": [
     "ROLE_TABLE_PRIVILEGES_SQL",
     "TABLE_PRIVILEGES"
+   ],
+   "bindings": [
+    {
+     "kernel": "ROLE_TABLE_PRIVILEGES_SQL",
+     "local": "ROLE_TABLE_PRIVILEGES_SQL"
+    },
+    {
+     "kernel": "TABLE_PRIVILEGES",
+     "local": "TABLE_PRIVILEGES"
+    }
    ]
   },
   {
@@ -225,6 +441,20 @@
     "FeatureManifest",
     "ModuleManifest",
     "ProductAssemblySpec"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    },
+    {
+     "kernel": "ModuleManifest",
+     "local": "ModuleManifest"
+    },
+    {
+     "kernel": "ProductAssemblySpec",
+     "local": "ProductAssemblySpec"
+    }
    ]
   },
   {
@@ -232,6 +462,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "platform_session"
+   ],
+   "bindings": [
+    {
+     "kernel": "platform_session",
+     "local": "platform_session"
+    }
    ]
   },
   {
@@ -242,6 +478,24 @@
     "ModuleManifest",
     "WebNavItem",
     "WebSurfaceContribution"
+   ],
+   "bindings": [
+    {
+     "kernel": "LocalizedText",
+     "local": "LocalizedText"
+    },
+    {
+     "kernel": "ModuleManifest",
+     "local": "ModuleManifest"
+    },
+    {
+     "kernel": "WebNavItem",
+     "local": "WebNavItem"
+    },
+    {
+     "kernel": "WebSurfaceContribution",
+     "local": "WebSurfaceContribution"
+    }
    ]
   },
   {
@@ -252,6 +506,24 @@
     "ConflictError",
     "DomainError",
     "NotFoundError"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    },
+    {
+     "kernel": "DomainError",
+     "local": "DomainError"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    }
    ]
   },
   {
@@ -259,6 +531,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -267,6 +545,16 @@
    "symbols": [
     "NotFoundError",
     "PlatformAdmin"
+   ],
+   "bindings": [
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    },
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    }
    ]
   },
   {
@@ -274,6 +562,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -281,6 +575,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -288,6 +588,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "NotFoundError"
+   ],
+   "bindings": [
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    }
    ]
   },
   {
@@ -297,6 +603,20 @@
     "BadRequestError",
     "ConflictError",
     "NotFoundError"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    }
    ]
   },
   {
@@ -304,6 +624,12 @@
    "module": "dotmac_kernel.licensing",
    "symbols": [
     "LicenceKeyRing"
+   ],
+   "bindings": [
+    {
+     "kernel": "LicenceKeyRing",
+     "local": "LicenceKeyRing"
+    }
    ]
   },
   {
@@ -313,6 +639,20 @@
     "Base",
     "TimestampMixin",
     "uuid_pk"
+   ],
+   "bindings": [
+    {
+     "kernel": "Base",
+     "local": "Base"
+    },
+    {
+     "kernel": "TimestampMixin",
+     "local": "TimestampMixin"
+    },
+    {
+     "kernel": "uuid_pk",
+     "local": "uuid_pk"
+    }
    ]
   },
   {
@@ -320,6 +660,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -329,6 +675,20 @@
     "Base",
     "TimestampMixin",
     "uuid_pk"
+   ],
+   "bindings": [
+    {
+     "kernel": "Base",
+     "local": "Base"
+    },
+    {
+     "kernel": "TimestampMixin",
+     "local": "TimestampMixin"
+    },
+    {
+     "kernel": "uuid_pk",
+     "local": "uuid_pk"
+    }
    ]
   },
   {
@@ -338,6 +698,20 @@
     "BadRequestError",
     "NotFoundError",
     "write_platform_audit_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    },
+    {
+     "kernel": "write_platform_audit_event",
+     "local": "write_platform_audit_event"
+    }
    ]
   },
   {
@@ -345,6 +719,12 @@
    "module": "dotmac_kernel.messaging",
    "symbols": [
     "enqueue_platform_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "enqueue_platform_event",
+     "local": "enqueue_platform_event"
+    }
    ]
   },
   {
@@ -352,6 +732,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "PlatformAdmin"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    }
    ]
   },
   {
@@ -359,6 +745,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -366,6 +758,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -375,6 +773,20 @@
     "BadRequestError",
     "ConflictError",
     "NotFoundError"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    }
    ]
   },
   {
@@ -382,6 +794,12 @@
    "module": "dotmac_kernel.audit",
    "symbols": [
     "write_platform_audit_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "write_platform_audit_event",
+     "local": "write_platform_audit_event"
+    }
    ]
   },
   {
@@ -391,6 +809,20 @@
     "BadRequestError",
     "NotFoundError",
     "write_platform_audit_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    },
+    {
+     "kernel": "write_platform_audit_event",
+     "local": "write_platform_audit_event"
+    }
    ]
   },
   {
@@ -398,6 +830,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "create_app"
+   ],
+   "bindings": [
+    {
+     "kernel": "create_app",
+     "local": "create_app"
+    }
    ]
   },
   {
@@ -406,6 +844,16 @@
    "symbols": [
     "ModulePlane",
     "ModulePlaneSelection"
+   ],
+   "bindings": [
+    {
+     "kernel": "ModulePlane",
+     "local": "ModulePlane"
+    },
+    {
+     "kernel": "ModulePlaneSelection",
+     "local": "ModulePlaneSelection"
+    }
    ]
   },
   {
@@ -418,13 +866,45 @@
     "PLATFORM_AUDIT_LOG_V1",
     "PrerequisiteBinding",
     "TENANT_SCOPE_CATALOG_V1"
+   ],
+   "bindings": [
+    {
+     "kernel": "IDEMPOTENCY_LEDGER_V1",
+     "local": "IDEMPOTENCY_LEDGER_V1"
+    },
+    {
+     "kernel": "MODULE_DATABASE_ROLES_V1",
+     "local": "MODULE_DATABASE_ROLES_V1"
+    },
+    {
+     "kernel": "OUTBOX_RELAY_V1",
+     "local": "OUTBOX_RELAY_V1"
+    },
+    {
+     "kernel": "PLATFORM_AUDIT_LOG_V1",
+     "local": "PLATFORM_AUDIT_LOG_V1"
+    },
+    {
+     "kernel": "PrerequisiteBinding",
+     "local": "PrerequisiteBinding"
+    },
+    {
+     "kernel": "TENANT_SCOPE_CATALOG_V1",
+     "local": "TENANT_SCOPE_CATALOG_V1"
+    }
    ]
   },
   {
    "path": "src/vendor_cp/migrations.py",
    "module": "dotmac_kernel.migrations",
    "symbols": [
-    "kernel_versions_dir"
+    "versions_dir"
+   ],
+   "bindings": [
+    {
+     "kernel": "versions_dir",
+     "local": "kernel_versions_dir"
+    }
    ]
   },
   {
@@ -432,6 +912,12 @@
    "module": "dotmac_kernel.planes",
    "symbols": [
     "MODULE_PLANES_ENV_VAR"
+   ],
+   "bindings": [
+    {
+     "kernel": "MODULE_PLANES_ENV_VAR",
+     "local": "MODULE_PLANES_ENV_VAR"
+    }
    ]
   },
   {
@@ -439,6 +925,12 @@
    "module": "dotmac_kernel.prerequisites",
    "symbols": [
     "BINDINGS_ENV_VAR"
+   ],
+   "bindings": [
+    {
+     "kernel": "BINDINGS_ENV_VAR",
+     "local": "BINDINGS_ENV_VAR"
+    }
    ]
   },
   {
@@ -453,6 +945,40 @@
     "ProductManifestError",
     "ProductManifestSnapshot",
     "UndeclaredCapabilityError"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "CapabilityCatalogue",
+     "local": "CapabilityCatalogue"
+    },
+    {
+     "kernel": "DomainError",
+     "local": "DomainError"
+    },
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    },
+    {
+     "kernel": "ProductManifestError",
+     "local": "ProductManifestError"
+    },
+    {
+     "kernel": "ProductManifestSnapshot",
+     "local": "ProductManifestSnapshot"
+    },
+    {
+     "kernel": "UndeclaredCapabilityError",
+     "local": "KernelUndeclaredCapabilityError"
+    }
    ]
   },
   {
@@ -460,6 +986,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -469,6 +1001,20 @@
     "Base",
     "TimestampMixin",
     "uuid_pk"
+   ],
+   "bindings": [
+    {
+     "kernel": "Base",
+     "local": "Base"
+    },
+    {
+     "kernel": "TimestampMixin",
+     "local": "TimestampMixin"
+    },
+    {
+     "kernel": "uuid_pk",
+     "local": "uuid_pk"
+    }
    ]
   },
   {
@@ -481,6 +1027,32 @@
     "NotFoundError",
     "PlatformAdmin",
     "currency"
+   ],
+   "bindings": [
+    {
+     "kernel": "BadRequestError",
+     "local": "BadRequestError"
+    },
+    {
+     "kernel": "Money",
+     "local": "Money"
+    },
+    {
+     "kernel": "MoneyError",
+     "local": "MoneyError"
+    },
+    {
+     "kernel": "NotFoundError",
+     "local": "NotFoundError"
+    },
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    },
+    {
+     "kernel": "currency",
+     "local": "currency"
+    }
    ]
   },
   {
@@ -488,6 +1060,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -495,6 +1073,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -505,6 +1089,24 @@
     "Money",
     "currency",
     "write_platform_audit_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    },
+    {
+     "kernel": "Money",
+     "local": "Money"
+    },
+    {
+     "kernel": "currency",
+     "local": "currency"
+    },
+    {
+     "kernel": "write_platform_audit_event",
+     "local": "write_platform_audit_event"
+    }
    ]
   },
   {
@@ -512,6 +1114,12 @@
    "module": "dotmac_kernel.messaging",
    "symbols": [
     "process_once_platform"
+   ],
+   "bindings": [
+    {
+     "kernel": "process_once_platform",
+     "local": "process_once_platform"
+    }
    ]
   },
   {
@@ -520,6 +1128,16 @@
    "symbols": [
     "PlatformAdmin",
     "hash_password"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    },
+    {
+     "kernel": "hash_password",
+     "local": "hash_password"
+    }
    ]
   },
   {
@@ -527,6 +1145,12 @@
    "module": "dotmac_kernel.providers.provisioning",
    "symbols": [
     "ProvisioningProvider"
+   ],
+   "bindings": [
+    {
+     "kernel": "ProvisioningProvider",
+     "local": "ProvisioningProvider"
+    }
    ]
   },
   {
@@ -534,6 +1158,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -550,6 +1180,48 @@
     "ProvisioningStatus",
     "ProvisioningStep",
     "StepStatus"
+   ],
+   "bindings": [
+    {
+     "kernel": "ApplyResult",
+     "local": "ApplyResult"
+    },
+    {
+     "kernel": "CompensationDisposition",
+     "local": "CompensationDisposition"
+    },
+    {
+     "kernel": "CompensationResult",
+     "local": "CompensationResult"
+    },
+    {
+     "kernel": "ObserveResult",
+     "local": "ObserveResult"
+    },
+    {
+     "kernel": "PlanResult",
+     "local": "PlanResult"
+    },
+    {
+     "kernel": "ProvisioningPlanError",
+     "local": "ProvisioningPlanError"
+    },
+    {
+     "kernel": "ProvisioningRequest",
+     "local": "ProvisioningRequest"
+    },
+    {
+     "kernel": "ProvisioningStatus",
+     "local": "ProvisioningStatus"
+    },
+    {
+     "kernel": "ProvisioningStep",
+     "local": "ProvisioningStep"
+    },
+    {
+     "kernel": "StepStatus",
+     "local": "StepStatus"
+    }
    ]
   },
   {
@@ -557,6 +1229,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "PlatformAdmin"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformAdmin",
+     "local": "PlatformAdmin"
+    }
    ]
   },
   {
@@ -564,6 +1242,12 @@
    "module": "dotmac_kernel.platform_auth",
    "symbols": [
     "require_platform_admin"
+   ],
+   "bindings": [
+    {
+     "kernel": "require_platform_admin",
+     "local": "require_platform_admin"
+    }
    ]
   },
   {
@@ -574,6 +1258,24 @@
     "ObserveResult",
     "PlanResult",
     "ProvisioningStep"
+   ],
+   "bindings": [
+    {
+     "kernel": "ApplyResult",
+     "local": "ApplyResult"
+    },
+    {
+     "kernel": "ObserveResult",
+     "local": "ObserveResult"
+    },
+    {
+     "kernel": "PlanResult",
+     "local": "PlanResult"
+    },
+    {
+     "kernel": "ProvisioningStep",
+     "local": "ProvisioningStep"
+    }
    ]
   },
   {
@@ -581,6 +1283,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "PlatformScope"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformScope",
+     "local": "PlatformScope"
+    }
    ]
   },
   {
@@ -592,6 +1300,28 @@
     "PlanResult",
     "ProvisioningProvider",
     "ProvisioningRequest"
+   ],
+   "bindings": [
+    {
+     "kernel": "ApplyResult",
+     "local": "ApplyResult"
+    },
+    {
+     "kernel": "ObserveResult",
+     "local": "ObserveResult"
+    },
+    {
+     "kernel": "PlanResult",
+     "local": "PlanResult"
+    },
+    {
+     "kernel": "ProvisioningProvider",
+     "local": "ProvisioningProvider"
+    },
+    {
+     "kernel": "ProvisioningRequest",
+     "local": "ProvisioningRequest"
+    }
    ]
   },
   {
@@ -599,6 +1329,12 @@
    "module": "dotmac_kernel.features",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -606,6 +1342,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "get_platform_db"
+   ],
+   "bindings": [
+    {
+     "kernel": "get_platform_db",
+     "local": "get_platform_db"
+    }
    ]
   },
   {
@@ -614,6 +1356,16 @@
    "symbols": [
     "OutboxStatus",
     "PlatformOutboxEvent"
+   ],
+   "bindings": [
+    {
+     "kernel": "OutboxStatus",
+     "local": "OutboxStatus"
+    },
+    {
+     "kernel": "PlatformOutboxEvent",
+     "local": "PlatformOutboxEvent"
+    }
    ]
   },
   {
@@ -621,6 +1373,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "Base"
+   ],
+   "bindings": [
+    {
+     "kernel": "Base",
+     "local": "Base"
+    }
    ]
   },
   {
@@ -628,6 +1386,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "runtime"
+   ],
+   "bindings": [
+    {
+     "kernel": "runtime",
+     "local": "runtime"
+    }
    ]
   },
   {
@@ -635,6 +1399,12 @@
    "module": "dotmac_kernel.messaging",
    "symbols": [
     "RelayPolicy"
+   ],
+   "bindings": [
+    {
+     "kernel": "RelayPolicy",
+     "local": "RelayPolicy"
+    }
    ]
   },
   {
@@ -644,6 +1414,20 @@
     "PlatformDeliveryTransport",
     "SessionFactory",
     "run_once"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformDeliveryTransport",
+     "local": "PlatformDeliveryTransport"
+    },
+    {
+     "kernel": "SessionFactory",
+     "local": "SessionFactory"
+    },
+    {
+     "kernel": "run_once",
+     "local": "run_once"
+    }
    ]
   },
   {
@@ -651,6 +1435,12 @@
    "module": "dotmac_kernel.session_runtime",
    "symbols": [
     "DatabaseRuntime"
+   ],
+   "bindings": [
+    {
+     "kernel": "DatabaseRuntime",
+     "local": "DatabaseRuntime"
+    }
    ]
   },
   {
@@ -658,6 +1448,12 @@
    "module": "dotmac_kernel",
    "symbols": [
     "FeatureManifest"
+   ],
+   "bindings": [
+    {
+     "kernel": "FeatureManifest",
+     "local": "FeatureManifest"
+    }
    ]
   },
   {
@@ -668,6 +1464,24 @@
     "ProductManifestError",
     "ProductManifestSnapshot",
     "write_platform_audit_event"
+   ],
+   "bindings": [
+    {
+     "kernel": "ConflictError",
+     "local": "ConflictError"
+    },
+    {
+     "kernel": "ProductManifestError",
+     "local": "ProductManifestError"
+    },
+    {
+     "kernel": "ProductManifestSnapshot",
+     "local": "ProductManifestSnapshot"
+    },
+    {
+     "kernel": "write_platform_audit_event",
+     "local": "write_platform_audit_event"
+    }
    ]
   },
   {
@@ -675,6 +1489,12 @@
    "module": "dotmac_kernel.db",
    "symbols": [
     "conflict_savepoint"
+   ],
+   "bindings": [
+    {
+     "kernel": "conflict_savepoint",
+     "local": "conflict_savepoint"
+    }
    ]
   },
   {
@@ -684,6 +1504,20 @@
     "IdempotentOutcome",
     "execute_once_platform",
     "fingerprint_of"
+   ],
+   "bindings": [
+    {
+     "kernel": "IdempotentOutcome",
+     "local": "IdempotentOutcome"
+    },
+    {
+     "kernel": "execute_once_platform",
+     "local": "execute_once_platform"
+    },
+    {
+     "kernel": "fingerprint_of",
+     "local": "fingerprint_of"
+    }
    ]
   },
   {
@@ -692,6 +1526,16 @@
    "symbols": [
     "decode_access_token",
     "hash_token"
+   ],
+   "bindings": [
+    {
+     "kernel": "decode_access_token",
+     "local": "decode_access_token"
+    },
+    {
+     "kernel": "hash_token",
+     "local": "hash_token"
+    }
    ]
   },
   {
@@ -702,6 +1546,24 @@
     "SessionLocal",
     "engine",
     "platform_engine"
+   ],
+   "bindings": [
+    {
+     "kernel": "PlatformSessionLocal",
+     "local": "PlatformSessionLocal"
+    },
+    {
+     "kernel": "SessionLocal",
+     "local": "SessionLocal"
+    },
+    {
+     "kernel": "engine",
+     "local": "engine"
+    },
+    {
+     "kernel": "platform_engine",
+     "local": "platform_engine"
+    }
    ]
   }
  ]

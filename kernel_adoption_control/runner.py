@@ -664,6 +664,21 @@ def _declaration_summary(outcome: DeclarationOutcome) -> dict[str, object]:
             summary["declared_at"] = declaration.declared_at.isoformat()
             summary["source_predecessor"] = declaration.source_predecessor
             summary["required_surfaces"] = len(declaration.required_surfaces)
+            # WHICH source-surface canonicalization this run compared under.
+            # Since the contract admits both `dmg-kernel-surface-v1` and
+            # `dmg-kernel-surface-v2`, the declared algorithm SELECTS the
+            # evaluation, and a reader holding only this artifact could not
+            # otherwise tell which of the two ran. Same reason
+            # `catalogue_digest_algorithm` is recorded below, and the same
+            # standing rule behind it: a v1 receipt is never v2 evidence.
+            # `None` when the declaration states no coordinate, which is a
+            # `not_applicable` document -- reported rather than omitted, so
+            # "no coordinate" and "key absent" are not the same reading.
+            summary["source_surface_algorithm"] = (
+                None
+                if declaration.source_surface is None
+                else declaration.source_surface.algorithm
+            )
         else:
             summary["declared_product_revision"] = declaration.product_revision
         return summary

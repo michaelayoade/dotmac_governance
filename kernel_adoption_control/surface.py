@@ -96,13 +96,27 @@ relies on, and it is why a later canonicalization is always a new name here.
 - The merge and exclusion rules are unchanged: no line numbers, and multiple
   imports of one module in one file are merged into one fact. Reordering
   imports, reformatting, or adding a comment moves neither digest.
-- **No document contract reads it yet.** `declaration_contract_v2._source_surface`
-  admits `dmg-kernel-surface-v1` and nothing else, so a product cannot today
-  DECLARE a v2 digest. Widening it is an edit to what the v2 document contract
-  admits, which is out of this change's scope and is stated here rather than
-  left to be discovered. `observed_surface_identity` exists so the value can be
-  derived — a product migrating needs it from the runner rather than from a
-  hand-rolled second implementation.
+- **Not a new document schema.** `KernelAdoptionDeclaration.v2` is unchanged.
+  `declaration_contract_v2` admits `source_surface.algorithm` from a CLOSED set
+  of exactly two — `ACCEPTED_SOURCE_SURFACE_ALGORITHMS` — and the declared name
+  SELECTS which canonicalization `engine._check_source_surface` re-derives.
+  Compatible vocabulary widening: an existing v1 declaration parses and
+  evaluates exactly as it did, and migrating is a product's own edit.
+  `observed_surface_identity` derives the value a migrating product declares,
+  from the runner rather than from a hand-rolled second implementation.
+- **Not a defence against a relabelled digest at PARSE time, and it does not
+  need to be.** A digest is 64 opaque hex characters; nothing in it records the
+  rendering that produced it, and a document parser has no source to re-derive
+  from. So a v1 digest labelled `dmg-kernel-surface-v2` parses, and the RUN
+  refuses it: the re-derived v2 value is taken over different bytes and cannot
+  equal a v1 one. The refusal comes from the structure of the two digests, not
+  from a check that could be forgotten.
+- **Not interchangeable inputs.** `SurfaceFact` and `SurfaceIdentityFact` do
+  not share a render method name (`render` vs `render_identity`), so neither
+  renderer can walk the other's facts. A mismatched set raises instead of
+  producing a hybrid digest nobody defined. `render_surface_identity` says so
+  in a message; `render_surface` raises `AttributeError`, a worse message and a
+  deliberate one — improving it means editing v1.
 
 ## `catalogue_digest` — which Kernel the surfaces were classified against
 
@@ -286,7 +300,17 @@ class SurfaceIdentityFact:
     bindings: tuple[SurfaceBinding, ...]
     star: bool
 
-    def render(self) -> str:
+    def render_identity(self) -> str:
+        """NOT called `render`, and the difference is the refusal.
+
+        `SurfaceFact.render` and this method would otherwise be one duck-typed
+        name over two canonicalizations, and `render_surface_identity` would
+        happily walk a set of v1 facts: v1 lines under a v2 header, a hybrid
+        digest nobody defined, produced silently. Distinct method names make
+        each renderer reach for something the other shape does not have, so a
+        mismatched set raises instead of coercing. There is no check here to
+        delete -- the absence of the method IS the refusal.
+        """
         star = "*" if self.star else "-"
         return _FIELD.join(
             (
@@ -309,7 +333,20 @@ def render_surface_identity(facts: frozenset[SurfaceIdentityFact]) -> str:
     is what makes the two domains separate by construction rather than by a
     check: no fact set renders to the same bytes under both.
     """
-    lines = sorted(fact.render() for fact in facts)
+    wrong = sorted(
+        type(fact).__name__
+        for fact in facts
+        if not isinstance(fact, SurfaceIdentityFact)
+    )
+    if wrong:
+        raise TypeError(
+            f"{SOURCE_SURFACE_IDENTITY_ALGORITHM} renders SurfaceIdentityFact "
+            f"and was handed {', '.join(wrong)}. A v1 fact carries no "
+            "canonical Kernel name, so rendering one here would produce a "
+            "digest labelled v2 over a surface that never recorded the "
+            "identity v2 exists to bind. Refusing rather than coercing"
+        )
+    lines = sorted(fact.render_identity() for fact in facts)
     return SOURCE_SURFACE_IDENTITY_ALGORITHM + _RECORD + _RECORD.join(lines) + _RECORD
 
 

@@ -47,6 +47,7 @@ cannot establish about itself.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -82,7 +83,10 @@ from kernel_adoption_control.declaration_contract_v2 import (
     KernelAdoptionDeclarationV2,
     parse_declaration_v2,
 )
-from kernel_adoption_control.engine import surface_identity_facts
+from kernel_adoption_control.engine import (
+    observed_surface_identity,
+    surface_identity_facts,
+)
 from kernel_adoption_control.runner import _predecessor_observation
 from kernel_adoption_control.surface import (
     SOURCE_SURFACE_ALGORITHM,
@@ -1228,26 +1232,50 @@ class ThePlatformSubject(Base):
         `(path, module, symbols)` facts; the statements are the smallest source
         that reproduces it.
 
-        `symbols` holds CANONICAL Kernel-side names -- the name before any
-        `as` -- so this synthesis reproduces the surface the Kernel sees. The
-        file previously recorded LOCAL bound names, which made an aliased
-        import indistinguishable from a name the Kernel does not publish; it
-        was regenerated on 2026-09-06 and carries the one known alias
-        separately, in `known_aliases`.
+        Synthesised from `bindings`, which carries BOTH halves of each import:
+        the name as the Kernel spells it and the name the file bound it to. So
+        an aliased fact synthesises an ALIASED statement, and the surface these
+        sources reproduce is the one Platform actually wrote -- canonical
+        identity and local alias together.
 
-        What is therefore NOT reproduced here is the alias itself. The synthesis
-        emits the Kernel's name unaliased, so the aliased shape needs its own
-        subject -- see `test_the_platform_alias_is_admitted_on_the_kernels_name`.
+        That is a change from the first regeneration, which emitted every name
+        unaliased and so could not reproduce the aliased shape at all. Three of
+        Platform's imports are aliased; under the old synthesis all three came
+        out as plain imports, which is precisely the flattening
+        `dmg-kernel-surface-v2` exists to stop.
         """
         by_path: dict[PurePosixPath, list[str]] = {}
         for fact in fixture["facts"]:
-            statement = f"from {fact['module']} import " + ", ".join(
-                sorted(fact["symbols"])
+            names = ", ".join(
+                binding["kernel"]
+                if binding["kernel"] == binding["local"]
+                else f"{binding['kernel']} as {binding['local']}"
+                for binding in sorted(
+                    fact["bindings"], key=lambda item: (item["kernel"], item["local"])
+                )
             )
+            statement = f"from {fact['module']} import {names}"
             by_path.setdefault(PurePosixPath(fact["path"]), []).append(statement)
         return {
             path: "\n".join(sorted(lines)) + "\n" for path, lines in by_path.items()
         }
+
+    def root_alias(self, fixture: dict[str, Any]) -> dict[str, Any]:
+        """The one alias on the bare `dotmac_kernel`, chosen by MODULE.
+
+        Not `known_aliases[0]`. The list now holds three, and an index would
+        silently start naming a different alias the next time the fixture is
+        regenerated -- a test that goes on passing about something else. The
+        "exactly one" assertion is the non-vacuity half: if a second root alias
+        ever appears, this fails rather than picking one.
+        """
+        found = [
+            alias
+            for alias in fixture["known_aliases"]
+            if alias["module"] == "dotmac_kernel"
+        ]
+        self.assertEqual(1, len(found), found)
+        return dict(found[0])
 
     def test_the_fixture_still_carries_the_facts_it_was_measured_for(self) -> None:
         """A fixture nobody checks is a number somebody typed, one level out.
@@ -1427,17 +1455,17 @@ class ThePlatformSubject(Base):
         `UndeclaredCapabilityError` at the a102 root and publishes no
         `Kernel`-prefixed name at all.
 
-        This is exercised on the REAL aliased statement rather than on the
-        fixture's unaliased synthesis, because the synthesis cannot carry an
-        alias. It is the one shape the admit control above structurally cannot
-        reach, so it gets its own subject rather than being assumed covered.
+        Kept as its own subject even though the synthesis now carries aliases:
+        it drives the single statement in isolation with a `required_surfaces`
+        floor proven by that file, which the whole-fixture admit control does
+        not do.
 
         The refusal was NOT weakened to get here and no name was added to the
         Kernel: the fixture was recording local names, and it now records
         canonical ones.
         """
         kernel = self.kernel()
-        alias = self.load()["known_aliases"][0]
+        alias = self.root_alias(self.load())
         self.assertEqual("UndeclaredCapabilityError", alias["kernel_name"])
         self.assertEqual("KernelUndeclaredCapabilityError", alias["local_name"])
         self.assertIn(alias["kernel_name"], kernel["root_exports"])
@@ -1474,7 +1502,7 @@ class ThePlatformSubject(Base):
         the Kernel, is not.
         """
         kernel = self.kernel()
-        alias = self.load()["known_aliases"][0]
+        alias = self.root_alias(self.load())
         item = self.catalogue_of(kernel)
         sources = {
             PurePosixPath("x.py"): f"from dotmac_kernel import {alias['local_name']}\n"
@@ -1492,7 +1520,17 @@ class ThePlatformSubject(Base):
     def test_the_fixture_records_canonical_kernel_names(self) -> None:
         """The property the regeneration established, asserted rather than
         assumed: every recorded root symbol is one the a102 root actually
-        publishes, under one of its two authorities."""
+        publishes, under one of its two authorities.
+
+        NOTE what this arm can and cannot see, because the gap is why the first
+        regeneration shipped wrong. It filters to `module == "dotmac_kernel"`,
+        so it only ever judged the ROOT façade -- the only surface with a
+        published name list to judge against. Two of Platform's three aliases
+        are on SUBMODULES, whose exports no catalogue list enumerates, and both
+        stayed recorded under their local names while this test passed. The
+        arm below is the one that covers them, and it does not need a name list
+        to do it.
+        """
         fixture = self.load()
         kernel = self.kernel()
         unresolved = sorted(
@@ -1507,6 +1545,143 @@ class ThePlatformSubject(Base):
         )
         self.assertEqual([], unresolved)
         self.assertIn("symbol_name_convention", fixture)
+
+    def test_the_regeneration_preserved_every_alias_rather_than_flattening_it(
+        self,
+    ) -> None:
+        """Two-directional, and that is the whole point of it.
+
+        A regeneration that recorded canonical names and DROPPED the aliases
+        would satisfy every arm above and leave the fixture unable to express
+        the defect `dmg-kernel-surface-v2` closes -- Platform's surface would
+        look, to this fixture, like a product that aliases nothing.
+
+        So: every aliased binding inline in `facts` is listed in
+        `known_aliases`, AND every entry in `known_aliases` is a binding that
+        really appears inline. An allowlist that may only grow stops describing
+        the file; one that is only checked inward-out cannot catch an alias
+        that was flattened away.
+        """
+        fixture = self.load()
+        inline = {
+            (fact["path"], fact["module"], binding["kernel"], binding["local"])
+            for fact in fixture["facts"]
+            for binding in fact["bindings"]
+            if binding["kernel"] != binding["local"]
+        }
+        listed = {
+            (alias["path"], alias["module"], alias["kernel_name"], alias["local_name"])
+            for alias in fixture["known_aliases"]
+        }
+        self.assertEqual(listed, inline)
+        # Non-vacuity: an empty set equals an empty set, and would pass this
+        # while proving the file carries no alias information at all.
+        self.assertEqual(3, len(inline), sorted(inline))
+        self.assertEqual(fixture["alias_count"], len(inline))
+
+    def test_the_two_aliases_the_first_regeneration_missed_are_recorded(
+        self,
+    ) -> None:
+        """Named individually, because "three aliases" is a count and these are
+        the two that were WRONG.
+
+        Both were stored under the name Platform bound them to rather than the
+        name the Kernel publishes: `dotmac_kernel.messaging` `models` as
+        `messaging_models`, and `dotmac_kernel.migrations` `versions_dir` as
+        `kernel_versions_dir`. The second is the sharpest instance of the
+        defect -- seven distributions in that one file publish `versions_dir`
+        and Platform prefixes every one of them -- so `kernel_versions_dir` was
+        a fact about Platform's naming scheme filed as a fact about the Kernel.
+        """
+        by_key = {
+            (fact["path"], fact["module"]): fact["bindings"]
+            for fact in self.load()["facts"]
+        }
+        self.assertIn(
+            {"kernel": "models", "local": "messaging_models"},
+            by_key[("alembic/env.py", "dotmac_kernel.messaging")],
+        )
+        self.assertIn(
+            {"kernel": "versions_dir", "local": "kernel_versions_dir"},
+            by_key[("src/vendor_cp/migrations.py", "dotmac_kernel.migrations")],
+        )
+
+    def test_symbols_is_a_projection_of_bindings_and_not_a_second_record(
+        self,
+    ) -> None:
+        """`bindings` is authoritative; `symbols` is derived from it.
+
+        Two independently authored lists in one file drift, and the drift is
+        invisible because each half looks right on its own. This asserts there
+        is only one record: `symbols` is exactly the sorted distinct KERNEL
+        half of `bindings`, which is what lets the v1-shaped arms keep reading
+        `symbols` unchanged.
+        """
+        for fact in self.load()["facts"]:
+            self.assertEqual(
+                sorted({binding["kernel"] for binding in fact["bindings"]}),
+                fact["symbols"],
+                fact["path"],
+            )
+
+    def test_the_synthesis_reproduces_platforms_aliases(self) -> None:
+        """The synthesis carries the alias, proved on the emitted source.
+
+        `sources()` is what every admit control in this class measures. If it
+        emitted unaliased statements -- as it did before this regeneration --
+        the whole class would be exercising a surface Platform does not have.
+        """
+        fixture = self.load()
+        emitted = self.sources(fixture)
+        self.assertIn(
+            "versions_dir as kernel_versions_dir",
+            emitted[PurePosixPath("src/vendor_cp/migrations.py")],
+        )
+        self.assertIn(
+            "models as messaging_models",
+            emitted[PurePosixPath("alembic/env.py")],
+        )
+        self.assertIn(
+            "UndeclaredCapabilityError as KernelUndeclaredCapabilityError",
+            emitted[PurePosixPath("src/vendor_cp/offers/catalog.py")],
+        )
+
+    def test_a_kernel_symbol_swap_behind_the_same_alias_moves_only_v2(self) -> None:
+        """The defect and its closure, on a real product's real imports.
+
+        Platform's three aliased statements, each rewritten so a DIFFERENT
+        Kernel symbol hides behind the unchanged local name. v1 records local
+        names, and no local name moved, so v1's digest does not move -- the
+        declaration would go on matching a surface that changed. v2's does.
+
+        The obvious probe -- flattening the aliases away -- proves the wrong
+        thing and was measured before being discarded: flattening changes the
+        LOCAL names too, so v1 moves as well and the comparison shows nothing.
+        Holding the local name fixed is what isolates the defect.
+        """
+        aliased = self.sources(self.load())
+        swapped = {
+            path: re.sub(r"(\w+) as (\w+)", r"Other\1 as \2", text)
+            for path, text in aliased.items()
+        }
+        self.assertNotEqual(aliased, swapped)
+        # Non-vacuity: the rewrite really touched Platform's three aliases.
+        self.assertEqual(
+            3,
+            sum(
+                line.count(" as ")
+                for text in swapped.values()
+                for line in text.splitlines()
+                if "Other" in line
+            ),
+        )
+        self.assertEqual(
+            surface_digest(facts_of(aliased)), surface_digest(facts_of(swapped))
+        )
+        self.assertNotEqual(
+            surface_identity_digest(surface_identity_facts(aliased)),
+            surface_identity_digest(surface_identity_facts(swapped)),
+        )
 
     # ── the collision the second publication authority created ──────────────
     #
@@ -2081,7 +2256,7 @@ ALIASED_A = {PurePosixPath("a.py"): "from dotmac_kernel import A as Y\n"}
 ALIASED_B = {PurePosixPath("a.py"): "from dotmac_kernel import B as Y\n"}
 
 
-class CanonicalKernelIdentity(unittest.TestCase):
+class CanonicalKernelIdentity(Base):
     """`dmg-kernel-surface-v2`: the Kernel's name and the local one, kept apart.
 
     v1 records the names an import BINDS LOCALLY, so `A as Y` and `B as Y`
@@ -2232,23 +2407,228 @@ class CanonicalKernelIdentity(unittest.TestCase):
             self.digest({PurePosixPath("b.py"): "import dotmac_kernel.db as j\n"}),
         )
 
-    def test_no_document_contract_admits_the_new_algorithm_yet(self) -> None:
-        """Stated as a test so the boundary cannot be assumed away.
+    # ── the contract admits BOTH algorithms, and the label SELECTS one ──────
+    #
+    # `test_no_document_contract_admits_the_new_algorithm_yet` stood here and
+    # was true when it was written. It is now false and is DELETED rather than
+    # skipped or inverted: a test whose name asserts a state that no longer
+    # exists is a contradicting comment with a green tick on it.
+    #
+    # `_source_surface` accepts exactly `{v1, v2}` -- a closed set of two, each
+    # with an evaluation behind it -- and `engine._check_source_surface`
+    # dispatches on the declared name. `KernelAdoptionDeclaration.v2` is
+    # unchanged: this is vocabulary widening, not a schema version.
 
-        `dmg-kernel-surface-v2` is derivable and nothing DECLARES it: the v2
-        document contract admits `dmg-kernel-surface-v1` only. Widening it is
-        an edit to what that contract accepts and was deliberately not made
-        here. When it is made, this test fails and is the place the change is
-        recorded.
-        """
-        document = v2_document(ONE_IMPORT, ONE_MODULE)
-        document["source_surface"] = {
-            "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
-            "digest": surface_identity_digest(surface_identity_facts(ONE_IMPORT)),
+    def aliased(self) -> dict[PurePosixPath, str]:
+        """A source whose two digests DISAGREE, which is what makes the admit
+        control below discriminating rather than decorative."""
+        return {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish as send\n"
+            )
         }
+
+    def test_a_v2_coordinate_from_the_real_runner_is_admitted_end_to_end(
+        self,
+    ) -> None:
+        """Admit control, and its non-vacuity is the whole design of it.
+
+        The declared value is derived by `engine.observed_surface_identity` --
+        the seam a migrating product actually calls -- not hand-built, so a
+        renderer that drifted from the runner could not produce a passing
+        document here.
+
+        The discriminator: the source is ALIASED, so its v1 and v2 digests
+        differ. The second half proves the v2 evaluation really ran, by showing
+        that the value v1 would have derived is REFUSED under the v2 label. An
+        implementation that admitted the document and then evaluated it as v1
+        would pass the first assertion and fail this one.
+        """
+        sources = self.aliased()
+        v2_digest, _ = observed_surface_identity(surface_identity_facts(sources))
+        v1_digest = surface_digest(facts_of(sources))
+        self.assertNotEqual(v1_digest, v2_digest)
+
+        document = v2_document(
+            sources,
+            ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": v2_digest,
+            },
+        )
+        parsed = parse_declaration_v2(document)
+        self.assertEqual(
+            SOURCE_SURFACE_IDENTITY_ALGORITHM,
+            None if parsed.source_surface is None else parsed.source_surface.algorithm,
+        )
+        self.assertClean(report(document, sources, ONE_MODULE))
+
+        evaluated_as_v1 = v2_document(
+            sources,
+            ONE_MODULE,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": v1_digest,
+            },
+        )
+        self.assertNamed(
+            report(evaluated_as_v1, sources, ONE_MODULE),
+            FindingCode.SOURCE_SURFACE_DRIFT,
+        )
+
+    def test_a_v1_declaration_still_parses_and_still_evaluates_to_its_old_value(
+        self,
+    ) -> None:
+        """v1 preserved THROUGH the contract, against bytes from `298eaad`.
+
+        `V1_GOLDEN_DIGEST` was produced by v1's own code at the revision before
+        `dmg-kernel-surface-v2` existed. Here it is declared literally in a
+        document and the run is asked to accept it over source chosen to
+        reproduce `V1_GOLDEN_FACTS`. So the parser, the dispatch, the merge and
+        the renderer are all in the path: any of them moving v1's value fails,
+        not just an edit to `render_surface`.
+
+        """
+        sources = {
+            PurePosixPath("a.py"): "from dotmac_kernel import Y\n",
+            PurePosixPath("b.py"): (
+                "from dotmac_kernel.db import Session, get_session\n"
+            ),
+        }
+        # Non-vacuity: these sources really do measure to the golden fact set.
+        self.assertEqual(V1_GOLDEN_FACTS, facts_of(sources))
+
+        item = catalogue(frozenset({"dotmac_kernel.db"}), root_exports=frozenset({"Y"}))
+        document = v2_document(
+            sources,
+            item,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_ALGORITHM,
+                "digest": V1_GOLDEN_DIGEST,
+            },
+        )
+        parsed = parse_declaration_v2(document)
+        self.assertEqual(
+            SOURCE_SURFACE_ALGORITHM,
+            None if parsed.source_surface is None else parsed.source_surface.algorithm,
+        )
+        self.assertClean(report(document, sources, item))
+
+    def test_an_unknown_algorithm_and_a_relabelled_v1_digest_are_both_refused(
+        self,
+    ) -> None:
+        """Two refusals, and they happen in two different places on purpose.
+
+        An UNKNOWN name is refused by the CONTRACT: the accepted set is closed
+        at two, so a third name never reaches an arm.
+
+        A v1 digest RELABELLED `dmg-kernel-surface-v2` PARSES, and that is not
+        a hole -- it is what a digest is. Sixty-four hex characters carry no
+        record of the rendering that produced them, and a document parser has
+        no source to re-derive from, so no parser could tell. It is refused by
+        the RUN, because the two algorithms take their digests over different
+        bytes and the re-derived v2 value cannot equal a v1 one. That is
+        precisely what domain separation is for: the refusal comes from the
+        structure of the digests, not from a check somebody remembered to
+        write. The standing rule -- a v1 receipt is never v2 evidence -- holds
+        here by construction.
+        """
+        sources = self.aliased()
         with self.assertRaises(DeclarationError) as caught:
-            parse_declaration_v2(document)
-        self.assertIn(SOURCE_SURFACE_ALGORITHM, str(caught.exception))
+            parse_declaration_v2(
+                v2_document(
+                    sources,
+                    ONE_MODULE,
+                    source_surface={
+                        "algorithm": "somebody-elses-rendering-v1",
+                        "digest": surface_digest(facts_of(sources)),
+                    },
+                )
+            )
+        message = str(caught.exception)
+        self.assertIn(SOURCE_SURFACE_ALGORITHM, message)
+        self.assertIn(SOURCE_SURFACE_IDENTITY_ALGORITHM, message)
+
+        relabelled = v2_document(
+            sources,
+            ONE_MODULE,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": surface_digest(facts_of(sources)),
+            },
+        )
+        parse_declaration_v2(relabelled)
+        self.assertNamed(
+            report(relabelled, sources, ONE_MODULE), FindingCode.SOURCE_SURFACE_DRIFT
+        )
+
+    def test_a_kernel_symbol_swap_behind_one_alias_is_refused_under_v2_only(
+        self,
+    ) -> None:
+        """The original defect, proved through the document rather than the
+        renderer.
+
+        Declare a surface for `publish as send`, then measure `emit as send`:
+        the local name is untouched and the Kernel symbol behind it changed.
+        Under v2 the declaration no longer describes the source and the run
+        says so. Under v1 the same swap is CLEAN -- which is the defect, kept
+        as a live assertion rather than a paragraph, and the reason v1 is not
+        the algorithm a product should migrate to.
+        """
+        declared = self.aliased()
+        swapped = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import emit as send\n"
+            )
+        }
+        v2_declared = v2_document(
+            declared,
+            ONE_MODULE,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": surface_identity_digest(surface_identity_facts(declared)),
+            },
+        )
+        self.assertNamed(
+            report(v2_declared, swapped, ONE_MODULE), FindingCode.SOURCE_SURFACE_DRIFT
+        )
+
+        v1_declared = v2_document(
+            declared,
+            ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_ALGORITHM,
+                "digest": surface_digest(facts_of(declared)),
+            },
+        )
+        self.assertClean(report(v1_declared, swapped, ONE_MODULE))
+
+    def test_a_v2_label_over_v1_shaped_facts_refuses_rather_than_coercing(
+        self,
+    ) -> None:
+        """The shape confusion, refused structurally.
+
+        `SurfaceFact` and `SurfaceIdentityFact` do not share a render method
+        name -- `render` and `render_identity` -- so neither renderer can walk
+        the other's facts. Handed the wrong shape, `render_surface_identity`
+        raises with a message that names the confusion; `render_surface` raises
+        `AttributeError`, which is a refusal with a poor message.
+
+        The asymmetry is deliberate and is stated rather than tidied: giving
+        v1's renderer a friendlier guard means editing v1, and v1 is frozen.
+        The missing method is the refusal, and there is nothing to delete.
+        """
+        v1_facts = facts_of(self.aliased())
+        with self.assertRaises(TypeError) as caught:
+            render_surface_identity(v1_facts)  # type: ignore[arg-type]
+        self.assertIn("SurfaceFact", str(caught.exception))
+
+        v2_facts = surface_identity_facts(self.aliased())
+        with self.assertRaises(AttributeError):
+            render_surface(v2_facts)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

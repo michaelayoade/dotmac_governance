@@ -58,6 +58,8 @@ from .contracts import (
     TransitionalSurface,
 )
 from .surface import (
+    SOURCE_SURFACE_ALGORITHM,
+    SOURCE_SURFACE_IDENTITY_ALGORITHM,
     SurfaceBinding,
     SurfaceFact,
     SurfaceIdentityFact,
@@ -717,12 +719,28 @@ def _check_predecessor(inputs: KernelAdoptionInputs) -> list[Finding]:
 
 
 def _check_source_surface(
-    declaration: KernelAdoptionDeclarationV2, facts: frozenset[SurfaceFact]
+    declaration: KernelAdoptionDeclarationV2,
+    facts: frozenset[SurfaceFact],
+    identity_facts: frozenset[SurfaceIdentityFact],
 ) -> list[Finding]:
     """Decision 52 (A), the half that is re-derived rather than named.
 
     See `surface.surface_digest` for exactly what the digest is taken over,
     what it proves and the five things it does not.
+
+    The declared `algorithm` SELECTS which canonicalization is re-derived.
+    Both fact sets come from the same sweep over the same measured source
+    (`_SurfaceAccumulator`), so the two are always consistent with each other
+    and the label chooses between two derivations rather than being trusted
+    about one. A label this engine has no derivation for REFUSES: the parser
+    admits exactly `ACCEPTED_SOURCE_SURFACE_ALGORITHMS`, so the branch is
+    unreachable through a parsed document, and a caller building the dataclass
+    directly must not get a silently skipped arm.
+
+    A digest RELABELLED from one algorithm to the other parses -- a parser
+    cannot tell two 64-hex strings apart -- and is refused HERE, because the
+    two algorithms digest different bytes and the re-derived value will not
+    match. That is the refusal domain separation buys, and it needs no oracle.
     """
     coordinate = declaration.source_surface
     if coordinate is None:
@@ -752,7 +770,24 @@ def _check_source_surface(
                 "source",
             )
         ]
-    derived = surface_digest(facts)
+    if coordinate.algorithm == SOURCE_SURFACE_ALGORITHM:
+        derived = surface_digest(facts)
+    elif coordinate.algorithm == SOURCE_SURFACE_IDENTITY_ALGORITHM:
+        derived = surface_identity_digest(identity_facts)
+    else:
+        return [
+            _error(
+                FindingCode.SOURCE_SURFACE_DRIFT,
+                f"the declaration states source_surface algorithm "
+                f"{coordinate.algorithm!r}, which this engine has no "
+                "derivation for, so the coordinate cannot be re-derived and "
+                "cannot be compared. Refusing rather than falling back to "
+                "another canonicalization: a digest compared under a rendering "
+                "rule nobody declared is a comparison whose result means "
+                "nothing. Unreachable through the document contract, which "
+                "admits only the algorithms this arm implements",
+            )
+        ]
     if derived == coordinate.digest:
         return []
     return [
@@ -1196,6 +1231,7 @@ def _check_declaration(
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
     observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
     facts: frozenset[SurfaceFact],
+    identity_facts: frozenset[SurfaceIdentityFact],
 ) -> list[Finding]:
     """Arms 4, 6 and 7, and the five states the declaration can be in.
 
@@ -1239,7 +1275,12 @@ def _check_declaration(
     declaration: AnyKernelAdoptionDeclaration = outcome.declaration
     if isinstance(declaration, KernelAdoptionDeclarationV2):
         return _check_v2(
-            inputs, declaration, kernel_import_sites, observed_symbols, facts
+            inputs,
+            declaration,
+            kernel_import_sites,
+            observed_symbols,
+            facts,
+            identity_facts,
         )
 
     #: `product_revision` is REQUIRED of every declaration, `not_applicable`
@@ -1354,6 +1395,7 @@ def _check_v2(
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
     observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
     facts: frozenset[SurfaceFact],
+    identity_facts: frozenset[SurfaceIdentityFact],
 ) -> list[Finding]:
     """Everything a `KernelAdoptionDeclaration.v2` document is measured against.
 
@@ -1394,7 +1436,7 @@ def _check_v2(
         return findings
 
     observed_modules = frozenset(fact.module for fact in facts)
-    findings.extend(_check_source_surface(declaration, facts))
+    findings.extend(_check_source_surface(declaration, facts, identity_facts))
     findings.extend(_check_catalogue_binding(declaration, inputs.catalogue))
     findings.extend(
         _check_required_surfaces(
@@ -1555,6 +1597,11 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             )
 
     facts = accumulated.facts()
+    # Both fact sets, from the ONE sweep above. The declaration's own
+    # `source_surface.algorithm` selects which is compared; deriving both
+    # unconditionally is what keeps the label a CHOICE between two
+    # measurements rather than an assertion about one.
+    identity_facts = accumulated.identity_facts()
 
     findings.extend(_check_pins(inputs))
     findings.extend(_pin_sufficiency(inputs))
@@ -1564,6 +1611,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             kernel_import_sites,
             {key: frozenset(value) for key, value in observed_symbols.items()},
             facts,
+            identity_facts,
         )
     )
 

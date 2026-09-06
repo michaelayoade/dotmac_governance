@@ -759,7 +759,12 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
         if not isinstance(item, Mapping):
             return reject(f"findings[{index}] is not an object")
         severity = item.get("severity")
-        if severity not in known:
+        #: `in` on a set hashes its operand, so a severity carried as a dict or
+        #: a list raised TypeError here and the predicate CRASHED rather than
+        #: refusing -- a malformed report escaping through the arm written to
+        #: refuse malformed reports. Narrow to a string first: anything else is
+        #: unrecognised by construction.
+        if not isinstance(severity, str) or severity not in known:
             return reject(
                 f"findings[{index}] states severity {severity!r}, which is not "
                 f"one of {sorted(known)}. An unrecognised severity must not "

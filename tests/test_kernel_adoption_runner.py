@@ -294,7 +294,11 @@ class ProductFixture:
 
 class RunnerTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self._stack = tempfile.TemporaryDirectory()
+        #: `ignore_cleanup_errors` because these fixtures run `git`, and a git
+        #: subprocess can still hold a descriptor under `.git/` when rmtree
+        #: walks it -- Errno 39 on teardown, reported as an ERROR against a
+        #: test that passed. Seen twice today in two different files.
+        self._stack = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self._stack.cleanup)
         self.product = ProductFixture(self._stack)
 

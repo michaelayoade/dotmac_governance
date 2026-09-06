@@ -2514,6 +2514,7 @@ class CanonicalKernelIdentity(Base):
         evaluated_as_v1 = v2_document(
             sources,
             ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
             source_surface={
                 "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
                 "digest": v1_digest,
@@ -2536,6 +2537,13 @@ class CanonicalKernelIdentity(Base):
         the renderer are all in the path: any of them moving v1's value fails,
         not just an edit to `render_surface`.
 
+        The first version of this test omitted `required_surfaces` and reported
+        two `kernel.surface.unclassified` findings, which read exactly like v1
+        having moved and was not that at all. The same document was evaluated
+        under `298eaad`'s own engine -- the revision before
+        `dmg-kernel-surface-v2` existed -- and produced the SAME two findings
+        unclassified and the SAME clean report once classified. v1's evaluation
+        is byte-identical across the change; the document was under-specified.
         """
         sources = {
             PurePosixPath("a.py"): "from dotmac_kernel import Y\n",
@@ -2547,9 +2555,30 @@ class CanonicalKernelIdentity(Base):
         self.assertEqual(V1_GOLDEN_FACTS, facts_of(sources))
 
         item = catalogue(frozenset({"dotmac_kernel.db"}), root_exports=frozenset({"Y"}))
+        # An `applicable` declaration classifies EVERY module its source
+        # imports -- `required_surfaces` is an inventory, not a sample -- and
+        # an unclassified import is a finding about the DECLARATION, nothing to
+        # do with the digest this test is about. Derived from the golden facts
+        # rather than hand-listed, so it cannot fall behind them.
+        required = [
+            {"module": module, "floor": "0.1.0a90", "proven_by": path}
+            for module, path in sorted(
+                {(fact.module, fact.path.as_posix()) for fact in V1_GOLDEN_FACTS}
+            )
+        ]
+        # The guard this test did not have. It compares the classification
+        # against a FRESH measurement of the sources, so a document that
+        # covered fewer modules than the source imports fails here, naming the
+        # cause, instead of surfacing later as findings that look like a
+        # frozen algorithm having changed.
+        self.assertEqual(
+            {fact.module for fact in facts_of(sources)},
+            {str(entry["module"]) for entry in required},
+        )
         document = v2_document(
             sources,
             item,
+            required_surfaces=required,
             source_surface={
                 "algorithm": SOURCE_SURFACE_ALGORITHM,
                 "digest": V1_GOLDEN_DIGEST,
@@ -2600,6 +2629,7 @@ class CanonicalKernelIdentity(Base):
         relabelled = v2_document(
             sources,
             ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
             source_surface={
                 "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
                 "digest": surface_digest(facts_of(sources)),
@@ -2632,6 +2662,7 @@ class CanonicalKernelIdentity(Base):
         v2_declared = v2_document(
             declared,
             ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
             source_surface={
                 "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
                 "digest": surface_identity_digest(surface_identity_facts(declared)),

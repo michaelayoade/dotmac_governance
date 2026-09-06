@@ -856,6 +856,14 @@ PACKAGE_OWNED_DIGEST_NAMES: dict[str, frozenset[str]] = {
     ),
     # Imported, not defined: the engine is where the coordinates are compared.
     "engine": frozenset({"catalogue_digest", "surface_digest"}),
+    # Imported, not defined. The runner RECORDS which canonicalization the run
+    # compared under, on the report -- the artifact that is the evidence.
+    # `kernel_catalogue` carries no `algorithm` field, so without this a stored
+    # receipt could not say whether its catalogue digest was a v1 or a v2
+    # value, and Michael's ruling of 2026-09-06 requires it be recorded. Still
+    # a KERNEL catalogue coordinate and still not a Foundation profile, which
+    # is the boundary this ratchet holds.
+    "runner": frozenset({"CATALOGUE_DIGEST_ALGORITHM"}),
     "__init__": frozenset(
         {"CATALOGUE_DIGEST_ALGORITHM", "catalogue_digest", "surface_digest"}
     ),

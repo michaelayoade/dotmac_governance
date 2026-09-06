@@ -664,16 +664,40 @@ def _declaration_summary(outcome: DeclarationOutcome) -> dict[str, object]:
             summary["declared_at"] = declaration.declared_at.isoformat()
             summary["source_predecessor"] = declaration.source_predecessor
             summary["required_surfaces"] = len(declaration.required_surfaces)
-            # WHICH source-surface canonicalization this run compared under.
-            # Since the contract admits both `dmg-kernel-surface-v1` and
-            # `dmg-kernel-surface-v2`, the declared algorithm SELECTS the
-            # evaluation, and a reader holding only this artifact could not
-            # otherwise tell which of the two ran. Same reason
+            # THE ALGORITHM SELECTED BY THE PARSED DECLARATION. That is its
+            # exact meaning and the whole of it.
+            #
+            # It does NOT say the evaluation completed, does not say it
+            # passed, and is not an input to any verdict. A drifted run
+            # records a perfectly legitimate `dmg-kernel-surface-v2` here and
+            # still fails; `citability` and the exit code are where a pass
+            # lives. Anything that starts reading this as evidence of a passed
+            # evaluation has changed what the field means and needs the report
+            # contract versioned.
+            #
+            # It is recorded because the contract admits BOTH
+            # `dmg-kernel-surface-v1` and `dmg-kernel-surface-v2`, so the
+            # declared name selects which evaluation ran, and a reader holding
+            # only this artifact could not otherwise tell which. Same reason
             # `catalogue_digest_algorithm` is recorded below, and the same
             # standing rule behind it: a v1 receipt is never v2 evidence.
+            #
+            # Taken off the SAME parsed declaration the engine dispatched on
+            # -- `run()` reads the document once and hands that one object to
+            # both -- so the record and the evaluation cannot disagree. No
+            # caller supplies it; there is no parameter, keyword or field by
+            # which one could.
+            #
+            # ADDITIVE and OPTIONAL within `KernelAdoptionRun.v1`: the report
+            # carries no digest and its reader permits keys it does not know.
+            #
             # `None` when the declaration states no coordinate, which is a
             # `not_applicable` document -- reported rather than omitted, so
-            # "no coordinate" and "key absent" are not the same reading.
+            # "no coordinate" and "key absent" are not the same reading. The
+            # key is ABSENT for a declaration that is missing or unreadable,
+            # and for a `KernelAdoptionDeclaration.v1` document, which has no
+            # such coordinate at all: nothing is manufactured for a document
+            # this runner could not read or that never carried one.
             summary["source_surface_algorithm"] = (
                 None
                 if declaration.source_surface is None

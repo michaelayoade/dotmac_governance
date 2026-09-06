@@ -1182,11 +1182,26 @@ class DeclarationAge(Base):
 
 
 class ThePlatformSubject(Base):
-    """The first acceptance subject: a real product's measured Kernel surface.
+    """A BOUNDED REGRESSION EXAMPLE built from a real product's measured surface.
 
-    Read this class's module docstring for exactly what this establishes and
+    **It is not acceptance evidence, and it must not be read as any.** The
+    actual acceptance proof is Platform #181's runner over Platform's LIVE
+    source, in Platform's own CI, against a declaration Platform wrote. What
+    this class has is a fixture: 85 facts measured once, at one pinned
+    revision, replayed from a JSON file. It proves the contract does not refuse
+    a real product's shape and it catches a regression against that shape. It
+    cannot prove Platform is enrolled, cannot prove the fixture still describes
+    Platform's current source, and does not become acceptance by being green.
+
+    That distinction is stated here rather than left implied because the
+    previous version of this class read as acceptance and one of its arms
+    carried a claim it had never checked -- see
+    `test_every_root_facade_symbol_is_one_the_a102_root_publishes` for what
+    that cost.
+
+    Read the module docstring for what the subject establishes generally and
     the three things it does not. The short form: the contract admits a real
-    product, and Platform's declaration remains Platform's to write.
+    product's shape, and Platform's declaration remains Platform's to write.
     """
 
     def load(self) -> dict[str, Any]:
@@ -1517,19 +1532,27 @@ class ThePlatformSubject(Base):
             FindingCode.ROOT_SYMBOL_UNEXPORTED,
         )
 
-    def test_the_fixture_records_canonical_kernel_names(self) -> None:
-        """The property the regeneration established, asserted rather than
-        assumed: every recorded root symbol is one the a102 root actually
-        publishes, under one of its two authorities.
+    def test_every_root_facade_symbol_is_one_the_a102_root_publishes(self) -> None:
+        """ROOT-FAÇADE enforcement only. The name says exactly that, now.
 
-        NOTE what this arm can and cannot see, because the gap is why the first
-        regeneration shipped wrong. It filters to `module == "dotmac_kernel"`,
-        so it only ever judged the ROOT façade -- the only surface with a
-        published name list to judge against. Two of Platform's three aliases
-        are on SUBMODULES, whose exports no catalogue list enumerates, and both
-        stayed recorded under their local names while this test passed. The
-        arm below is the one that covers them, and it does not need a name list
-        to do it.
+        It was called `test_the_fixture_records_canonical_kernel_names`, and
+        that name claimed the whole fixture. It never checked the whole
+        fixture: it filters to `module == "dotmac_kernel"`, so it judges the
+        root façade and nothing else -- the only Kernel surface with a
+        published name list to judge against. `SUPPORTED_MODULES` enumerates
+        module names, not the exports inside them, so a submodule symbol has no
+        catalogue to be checked against and this arm cannot reach one.
+
+        The cost of the wider name was concrete. Two of Platform's three
+        aliases are on submodules; both stayed recorded under their LOCAL names
+        through a regeneration that announced itself as canonical, and this
+        test passed the whole time. `#83` carries the wider claim in a merged
+        pull request; the claim it actually proved is this one.
+
+        Submodule aliases are covered by
+        `test_the_regeneration_preserved_every_alias_rather_than_flattening_it`,
+        which needs no name list because it compares the fixture with itself in
+        both directions.
         """
         fixture = self.load()
         kernel = self.kernel()
@@ -1576,8 +1599,31 @@ class ThePlatformSubject(Base):
         self.assertEqual(listed, inline)
         # Non-vacuity: an empty set equals an empty set, and would pass this
         # while proving the file carries no alias information at all.
+        #
+        # THREE, pinned twice. `alias_count` is the fixture's own declared
+        # number and the literal is this suite's, so a regeneration that found
+        # a fourth alias -- or lost one -- fails here rather than silently
+        # changing what the class demonstrates. #83 recorded ONE and claimed
+        # the set was complete; that is the error this pair exists to stop
+        # repeating.
         self.assertEqual(3, len(inline), sorted(inline))
         self.assertEqual(fixture["alias_count"], len(inline))
+        self.assertEqual(
+            {
+                ("alembic/env.py", "dotmac_kernel.messaging", "models"),
+                (
+                    "src/vendor_cp/migrations.py",
+                    "dotmac_kernel.migrations",
+                    "versions_dir",
+                ),
+                (
+                    "src/vendor_cp/offers/catalog.py",
+                    "dotmac_kernel",
+                    "UndeclaredCapabilityError",
+                ),
+            },
+            {(path, module, kernel) for path, module, kernel, _ in inline},
+        )
 
     def test_the_two_aliases_the_first_regeneration_missed_are_recorded(
         self,

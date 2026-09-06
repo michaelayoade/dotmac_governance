@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import dataclasses
+import inspect
 import io
 import json
 import shutil
@@ -48,8 +49,10 @@ from kernel_adoption_control import (
 )
 from kernel_adoption_control.declaration_contract import KERNEL_ADOPTION_CONTRACT
 from kernel_adoption_control.declaration_contract_v2 import (
+    ACCEPTED_SOURCE_SURFACE_ALGORITHMS,
     KERNEL_ADOPTION_CONTRACT_V2,
 )
+from kernel_adoption_control.engine import surface_identity_facts
 from kernel_adoption_control.runner import (
     CANONICAL_GOVERNANCE,
     GOVERNANCE_ROOT,
@@ -69,7 +72,12 @@ from kernel_adoption_control.runner import (
     resolve_observer,
     run,
 )
-from kernel_adoption_control.surface import SOURCE_SURFACE_ALGORITHM, SurfaceFact
+from kernel_adoption_control.surface import (
+    SOURCE_SURFACE_ALGORITHM,
+    SOURCE_SURFACE_IDENTITY_ALGORITHM,
+    SurfaceFact,
+    surface_identity_digest,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -202,6 +210,37 @@ V2_SURFACE_DIGEST = surface_digest(
         }
     )
 )
+
+
+#: The SAME source, rendered under the successor canonicalization. Derived
+#: from `V2_SOURCES` through the engine's own sweep rather than written down,
+#: for the reason `V2_SURFACE_DIGEST` is derived: a literal digest is a number
+#: nobody can re-derive.
+#:
+#: It differs from `V2_SURFACE_DIGEST` even though this source aliases nothing,
+#: because each algorithm's name is the first line of the bytes it digests.
+#: That is what makes it a discriminator: a run that admitted a v2 LABEL and
+#: then evaluated v1 would compare against the wrong one of these two.
+V2_IDENTITY_DIGEST = surface_identity_digest(surface_identity_facts(dict(V2_SOURCES)))
+
+
+def not_applicable_v2(
+    predecessor: str, reason: str = "composes no assembly"
+) -> dict[str, Any]:
+    """A v2 `not_applicable` declaration, which carries NO source coordinate.
+
+    `source_surface` is absent from the document and `None` on the parsed
+    dataclass -- the digest over an empty surface is a constant every
+    Kernel-free product would share, so the successor contract does not ask for
+    one here.
+    """
+    return {
+        "contract": KERNEL_ADOPTION_CONTRACT_V2,
+        "applicability": "not_applicable",
+        "declared_at": AS_OF.isoformat(),
+        "source_predecessor": predecessor,
+        "not_applicable_reason": reason,
+    }
 
 
 def observe_v2_consumer(root: Path) -> ProductObservation:
@@ -1790,6 +1829,385 @@ class V2ApplicableActivationEndToEnd(RunnerTestCase):
             as_of=AS_OF,
         )
         self.assertIn(FindingCode.SOURCE_SURFACE_DRIFT, self.codes(result))
+
+
+class TheReportRecordsWhichAlgorithmWasSelected(RunnerTestCase):
+    """`source_surface_algorithm`: provenance, and NOTHING stronger.
+
+    Its exact meaning, and the whole of it: **the algorithm selected by the
+    parsed declaration.** It does not say the evaluation completed, does not
+    say it passed, and is never an input to any verdict. `citability` and the
+    exit code are where a pass lives.
+
+    It exists because two canonicalizations are now selectable. A reader
+    holding only this artifact could not otherwise tell which one the run
+    compared under, and Michael's standing rule -- a v1 receipt is never v2
+    evidence -- needs receipts that say which they are.
+
+    It is ADDITIVE and OPTIONAL within `KernelAdoptionRun.v1`. The report
+    carries no digest and its reader permits keys it does not know, so no
+    contract version moves. The last test here holds that: remove the key and
+    the document is still well-formed. If it ever becomes mandatory, or if
+    anything starts reading it as evidence of a passed evaluation, the report
+    contract has to be versioned and that test is where it will be noticed.
+    """
+
+    def enrol(self, **overrides: Any) -> tuple[str, str]:
+        """A committed v2 declaration whose predecessor is real. See
+        `V2ApplicableActivationEndToEnd.enrol` for why the order matters."""
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        self.product.declare(applicable_v2(predecessor, **overrides))
+        self.product.commit()
+        return predecessor, _git(self.product.root, "rev-parse", "HEAD")
+
+    def go_v2(self) -> Any:
+        return run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_v2_consumer",
+            as_of=AS_OF,
+        )
+
+    def summary(self, result: Any) -> dict[str, Any]:
+        value: dict[str, Any] = result.to_dict()["product"]["declaration"]
+        return value
+
+    # ── (1) one parsed declaration, one access path ─────────────────────────
+
+    def test_the_recorded_algorithm_is_the_parsed_declarations_own_object(
+        self,
+    ) -> None:
+        """Not a second read that could diverge -- the SAME string object.
+
+        `assertIs`, not `assertEqual`. Equality would also hold for a summary
+        that re-parsed the document off disk and happened to agree; identity
+        holds only if the value came off the very dataclass the engine
+        dispatched on.
+        """
+        self.enrol(
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": V2_IDENTITY_DIGEST,
+            }
+        )
+        result = self.go_v2()
+        coordinate = result.declaration.declaration.source_surface
+        self.assertIsNotNone(coordinate)
+        self.assertIs(
+            coordinate.algorithm, self.summary(result)["source_surface_algorithm"]
+        )
+
+    def test_the_runner_reads_the_declaration_once_and_shares_that_one_object(
+        self,
+    ) -> None:
+        """The structural half of (1), read off `run()`'s own syntax tree.
+
+        A behavioural test can only show the two AGREED on the inputs it was
+        given. This shows they cannot disagree at all: `run()` calls
+        `read_declaration` exactly once, binds it to one name, and passes that
+        same name to the evaluator's inputs and to the report. There is no
+        second parse for the summary to drift from.
+        """
+        tree = ast.parse(inspect.getsource(run))
+        reads = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "read_declaration"
+        ]
+        self.assertEqual(1, len(reads), "run() must parse the declaration once")
+
+        passed_to = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and any(
+                keyword.arg == "declaration"
+                and isinstance(keyword.value, ast.Name)
+                and keyword.value.id == "outcome"
+                for keyword in node.keywords
+            )
+        }
+        self.assertEqual({"KernelAdoptionInputs", "RunReport"}, passed_to)
+
+    # ── (2) the caller cannot supply it ─────────────────────────────────────
+
+    def test_no_caller_can_supply_the_recorded_algorithm(self) -> None:
+        """A field a caller can set records the caller's claim, not the fact.
+
+        Three closures, together: `run()` takes no such parameter, `RunReport`
+        holds no such field, and the key is assigned in exactly ONE place in
+        the whole package -- from an attribute of the parsed declaration, never
+        from an argument. The last is the one that matters: a second assignment
+        anywhere, from anything else, fails here.
+        """
+        self.assertNotIn("source_surface_algorithm", inspect.signature(run).parameters)
+        self.assertNotIn(
+            "source_surface_algorithm",
+            {field.name for field in dataclasses.fields(RunReport)},
+        )
+
+        package = REPO_ROOT / "kernel_adoption_control"
+        writes: list[tuple[str, str]] = []
+        for path in sorted(package.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(node, ast.Assign):
+                    continue
+                for target in node.targets:
+                    if (
+                        isinstance(target, ast.Subscript)
+                        and isinstance(target.slice, ast.Constant)
+                        and target.slice.value == "source_surface_algorithm"
+                    ):
+                        writes.append((path.name, ast.dump(node.value)))
+        self.assertEqual(1, len(writes), writes)
+        name, value = writes[0]
+        self.assertEqual("runner.py", name)
+        # Derived from the declaration, and from nothing a caller reaches.
+        self.assertIn("attr='algorithm'", value)
+        self.assertIn("attr='source_surface'", value)
+        self.assertIn("id='declaration'", value)
+
+    def test_the_recorded_value_can_only_ever_be_one_the_contract_admits(
+        self,
+    ) -> None:
+        """The other half of (2): even the document cannot smuggle a value in.
+
+        A product writes `source_surface.algorithm` itself, so the field IS
+        product-supplied text in the loosest sense. What stops it being the
+        caller's claim is that the parser admits exactly two names, so the
+        recorded value is always one the runner has an evaluation for.
+        """
+        self.enrol()
+        result = self.go_v2()
+        self.assertIn(
+            self.summary(result)["source_surface_algorithm"],
+            ACCEPTED_SOURCE_SURFACE_ALGORITHMS,
+        )
+        self.assertEqual(2, len(ACCEPTED_SOURCE_SURFACE_ALGORITHMS))
+
+    # ── (3) both algorithms, through the real runner ────────────────────────
+
+    def test_a_real_run_records_v1_when_v1_was_declared(self) -> None:
+        self.enrol()
+        result = self.go_v2()
+        self.assertEqual([], self.codes(result), result.to_dict())
+        self.assertEqual(
+            SOURCE_SURFACE_ALGORITHM,
+            self.summary(result)["source_surface_algorithm"],
+        )
+
+    def test_a_real_run_records_v2_when_v2_was_declared(self) -> None:
+        """The same product, the same observation, the successor algorithm.
+
+        Clean, so the v2 evaluation really ran against `V2_IDENTITY_DIGEST` --
+        a value only the v2 canonicalization produces. The pair with the test
+        above is what makes the field a record of a CHOICE rather than a
+        constant.
+        """
+        self.enrol(
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": V2_IDENTITY_DIGEST,
+            }
+        )
+        result = self.go_v2()
+        self.assertEqual([], self.codes(result), result.to_dict())
+        self.assertEqual(
+            SOURCE_SURFACE_IDENTITY_ALGORITHM,
+            self.summary(result)["source_surface_algorithm"],
+        )
+
+    def test_the_two_runs_do_not_record_the_same_value(self) -> None:
+        """Non-vacuity for the pair above: a field hard-coded to either name
+        would pass one of them and fail here."""
+        self.assertNotEqual(SOURCE_SURFACE_ALGORITHM, SOURCE_SURFACE_IDENTITY_ALGORITHM)
+        self.assertNotEqual(V2_SURFACE_DIGEST, V2_IDENTITY_DIGEST)
+
+    # ── (4) null for not_applicable; nothing manufactured otherwise ─────────
+
+    def test_a_not_applicable_v2_declaration_records_null_not_an_algorithm(
+        self,
+    ) -> None:
+        """The key is PRESENT and the value is `None`.
+
+        "No coordinate was declared" and "this artifact does not speak about
+        coordinates" are different readings, and omitting the key would merge
+        them.
+        """
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        self.product.declare(not_applicable_v2(predecessor))
+        self.product.commit()
+        result = run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_kernel_free",
+            as_of=AS_OF,
+        )
+        summary = self.summary(result)
+        self.assertIn("source_surface_algorithm", summary)
+        self.assertIsNone(summary["source_surface_algorithm"])
+
+    def test_a_missing_or_unreadable_declaration_manufactures_nothing(self) -> None:
+        """The key is ABSENT, and that is a third reading kept distinct.
+
+        This is the arm that stops the `None` above from being vacuous. An
+        implementation that emitted `None` for every non-`present` declaration
+        would pass the test above and would be MANUFACTURING a coordinate
+        reading for a document it could not read. Both states are driven here,
+        through the real runner, and both are asserted to omit the key.
+        """
+        self.product.declare(None)
+        self.product.commit()
+        missing = run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_kernel_free",
+            as_of=AS_OF,
+        )
+        self.assertEqual("DeclarationMissing", self.summary(missing)["state"])
+        self.assertNotIn("source_surface_algorithm", self.summary(missing))
+
+        self.product.declare("{ not json")
+        self.product.commit()
+        unreadable = run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_kernel_free",
+            as_of=AS_OF,
+        )
+        self.assertEqual("DeclarationUnreadable", self.summary(unreadable)["state"])
+        self.assertNotIn("source_surface_algorithm", self.summary(unreadable))
+
+    def test_the_three_readings_stay_distinguishable(self) -> None:
+        """Present-with-a-name, present-with-null, absent -- and a fourth case.
+
+        A `KernelAdoptionDeclaration.v1` document also omits the key, because
+        v1 has no such coordinate at all. That is a fourth state sharing the
+        "absent" spelling, and it is distinguishable by `contract` and `state`,
+        which is asserted here rather than assumed.
+        """
+        self.product.declare(applicable())
+        self.product.commit()
+        v1_summary = self.summary(self.go(observer=f"{__name__}:observe_v2_consumer"))
+        self.assertNotIn("source_surface_algorithm", v1_summary)
+        self.assertEqual("present", v1_summary["state"])
+        self.assertEqual(KERNEL_ADOPTION_CONTRACT, v1_summary["contract"])
+
+    # ── (5) the field is not a pass ─────────────────────────────────────────
+
+    def test_a_drifted_run_still_fails_while_naming_a_supported_algorithm(
+        self,
+    ) -> None:
+        """The non-vacuity arm, and the one misreading that would matter.
+
+        The declaration names `dmg-kernel-surface-v2`, the field records it,
+        and the run REFUSES: the digest does not describe the measured source.
+        A reader who took the field for a verdict would read this artifact as a
+        pass. It is not one, and the exit code says so.
+        """
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        self.product.declare(
+            applicable_v2(
+                predecessor,
+                source_surface={
+                    "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                    "digest": "sha256:" + "0" * 64,
+                },
+            )
+        )
+        self.product.commit()
+        result = self.go_v2()
+        self.assertEqual(
+            SOURCE_SURFACE_IDENTITY_ALGORITHM,
+            self.summary(result)["source_surface_algorithm"],
+        )
+        self.assertIn(FindingCode.SOURCE_SURFACE_DRIFT, self.codes(result))
+        self.assertTrue(
+            any(
+                finding.severity is Severity.ERROR for finding in result.report.findings
+            )
+        )
+
+    # ── (6) editing it in a stored report changes nothing ───────────────────
+
+    def test_editing_the_field_in_a_stored_report_cannot_make_it_citable(
+        self,
+    ) -> None:
+        """Provenance is identity, not content -- for this field like any other.
+
+        Two closures. A DOCUMENT can never be citable: `inspect_report_document`
+        has no citable verdict to return, so editing a key in a file cannot
+        reach one however plausible the edit. And `citability` tests identity
+        membership of the set `run()` populates, so a hand-built `RunReport`
+        carrying a supported algorithm is refused -- `eq=False` is what stops a
+        field-for-field copy testing as the original.
+        """
+        self.enrol(
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": V2_IDENTITY_DIGEST,
+            }
+        )
+        result = self.go_v2()
+        document = json.loads(json.dumps(result.to_dict()))
+        document["product"]["declaration"]["source_surface_algorithm"] = (
+            SOURCE_SURFACE_ALGORITHM
+        )
+        verdict, _ = inspect_report_document(document)
+        self.assertIn(verdict, (DocumentVerdict.WELL_FORMED, DocumentVerdict.MALFORMED))
+        self.assertNotIn("citable", [member.value for member in DocumentVerdict])
+
+        forged = RunReport(
+            **{
+                field.name: getattr(result, field.name)
+                for field in dataclasses.fields(RunReport)
+            }
+        )
+        self.assertIsNot(result, forged)
+        citable, reason = citability(forged)
+        self.assertIs(Citability.NOT_CITABLE, citable)
+        self.assertIn("not produced by run() in this process", reason)
+
+    # ── additive and optional; the report contract did not move ─────────────
+
+    def test_the_field_is_optional_and_the_report_contract_did_not_move(
+        self,
+    ) -> None:
+        """`KernelAdoptionRun.v1` is unchanged, and this is why it may be.
+
+        The report carries no digest, so adding a key cannot invalidate a
+        stored one, and its reader permits keys it does not know. Removing the
+        field from a real report's serialization leaves the document
+        well-formed -- which is the operational meaning of "optional", and the
+        assertion that would fail the day it became mandatory or the day
+        something started reading it as a verdict.
+        """
+        self.assertEqual("KernelAdoptionRun.v1", RUN_CONTRACT)
+        self.enrol(
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": V2_IDENTITY_DIGEST,
+            }
+        )
+        result = self.go_v2()
+        if not result.governance_worktree_clean:
+            self.skipTest(
+                "this Governance checkout is dirty, which makes every report "
+                "it produces malformed for a reason that is not this field. "
+                "CI runs on a clean one and that is the run whose verdict is "
+                "the claim"
+            )
+        document = json.loads(json.dumps(result.to_dict()))
+        self.assertIs(DocumentVerdict.WELL_FORMED, inspect_report_document(document)[0])
+        del document["product"]["declaration"]["source_surface_algorithm"]
+        self.assertIs(
+            DocumentVerdict.WELL_FORMED,
+            inspect_report_document(document)[0],
+            "the field must stay ADDITIVE: a reader that requires it has "
+            "changed the report contract without versioning it",
+        )
 
 
 class TheRunnerRunsWhereTheSubjectIs(unittest.TestCase):

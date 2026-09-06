@@ -851,11 +851,26 @@ PACKAGE_OWNED_DIGEST_NAMES: dict[str, frozenset[str]] = {
     # The two v2 coordinates and the canonicalization one of them is taken
     # under. Both identify PRODUCT source or the KERNEL catalogue; neither is a
     # Foundation profile, which is the thing this boundary exists to keep out.
+    # `surface_identity_digest` is the source-surface coordinate's successor
+    # canonicalization (`dmg-kernel-surface-v2`), which records the Kernel's
+    # own name for a symbol separately from the local name it was bound to. It
+    # digests the same PRODUCT source the frozen v1 coordinate does, so it
+    # crosses no boundary v1 did not.
     "surface": frozenset(
-        {"CATALOGUE_DIGEST_ALGORITHM", "catalogue_digest", "surface_digest"}
+        {
+            "CATALOGUE_DIGEST_ALGORITHM",
+            "catalogue_digest",
+            "surface_digest",
+            "surface_identity_digest",
+        }
     ),
     # Imported, not defined: the engine is where the coordinates are compared.
-    "engine": frozenset({"catalogue_digest", "surface_digest"}),
+    # v2 is DERIVED here and compared nowhere yet -- the v2 document contract
+    # admits v1 only -- so its presence is a derivation a migrating product can
+    # call, and that is stated rather than implying a gate.
+    "engine": frozenset(
+        {"catalogue_digest", "surface_digest", "surface_identity_digest"}
+    ),
     # Imported, not defined. The runner RECORDS which canonicalization the run
     # compared under, on the report -- the artifact that is the evidence.
     # `kernel_catalogue` carries no `algorithm` field, so without this a stored
@@ -865,7 +880,12 @@ PACKAGE_OWNED_DIGEST_NAMES: dict[str, frozenset[str]] = {
     # is the boundary this ratchet holds.
     "runner": frozenset({"CATALOGUE_DIGEST_ALGORITHM"}),
     "__init__": frozenset(
-        {"CATALOGUE_DIGEST_ALGORITHM", "catalogue_digest", "surface_digest"}
+        {
+            "CATALOGUE_DIGEST_ALGORITHM",
+            "catalogue_digest",
+            "surface_digest",
+            "surface_identity_digest",
+        }
     ),
 }
 

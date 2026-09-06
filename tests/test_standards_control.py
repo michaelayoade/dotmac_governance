@@ -6940,7 +6940,19 @@ def static_edge(kind: str = "reader", fingerprint: str = "1" * 64) -> dict[str, 
 
 class RetirementEvaluationFixture:
     def __init__(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
+        #: `ignore_cleanup_errors` for the reason `RunnerTestCase.setUp` in
+        #: `test_kernel_adoption_runner` already gives: this fixture runs
+        #: `git`, and a git subprocess can still hold a descriptor under
+        #: `.git/objects` when rmtree walks it. That surfaces as
+        #: `OSError: [Errno 39] Directory not empty` raised from `close()`,
+        #: reported as an ERROR against a test that had already passed.
+        #:
+        #: Observed on CI run 34017903415. The flake is independent of what is
+        #: being tested -- it is teardown, after every assertion has run -- so
+        #: suppressing it hides no result. The same guard was applied to the
+        #: kernel-adoption fixtures when it was seen there; this is the copy
+        #: that was missed.
+        self.directory = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.directory.name)
 
     def close(self) -> None:
@@ -8129,7 +8141,13 @@ class ProductEvidenceEvaluationTests(unittest.TestCase):
 
 class TrustedRetirementHistoryFixture:
     def __init__(self, *, module_source_state: str = "drained") -> None:
-        self.directory = tempfile.TemporaryDirectory()
+        #: Same guard, same reason as `RetirementEvaluationFixture` above: this
+        #: fixture runs `git`, so its teardown can race a git subprocess still
+        #: holding a descriptor under `.git/objects`. Applied to BOTH rather
+        #: than only to the one observed flaking -- the two are the same shape,
+        #: and fixing only the one that happened to lose the race leaves the
+        #: other to lose it on a different day.
+        self.directory = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.directory.name)
         self.profile_path = self.root / ".dotmac/standards-profile.json"
 

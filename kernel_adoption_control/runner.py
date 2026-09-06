@@ -105,6 +105,7 @@ from .declaration import DECLARATION_PATH, read_declaration
 from .declaration_contract import KERNEL_ADOPTION_CONTRACT
 from .declaration_contract_v2 import KERNEL_ADOPTION_CONTRACT_V2
 from .engine import evaluate
+from .surface import CATALOGUE_DIGEST_ALGORITHM
 
 __all__ = [
     "CANONICAL_GOVERNANCE",
@@ -748,6 +749,20 @@ class RunReport:
                         # its own list, and a reader must be able to see
                         # whether that list was observed at all.
                         "root_exports": len(self.catalogue.root_exports),
+                        # WHICH canonicalization the digest comparison in this
+                        # run was taken under, recorded on the artifact that IS
+                        # the evidence. `kernel_catalogue` carries no
+                        # `algorithm` field (unlike `source_surface`), so
+                        # without this a stored receipt could not say whether
+                        # its catalogue digest was a v1 or a v2 value.
+                        #
+                        # Relabelling a v1 receipt as v2 evidence is refused
+                        # structurally as well as legibly: the algorithm name
+                        # is the FIRST line of the bytes digested, so a v1
+                        # value can never verify under v2 for any input. This
+                        # field makes that legible; the domain separation is
+                        # what makes it true.
+                        "catalogue_digest_algorithm": CATALOGUE_DIGEST_ALGORITHM,
                     }
                 ),
             },

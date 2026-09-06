@@ -1181,12 +1181,36 @@ class ThePlatformSubject(Base):
             (FIXTURES / "platform-kernel-surface.json").read_text(encoding="utf-8")
         )
 
+    def kernel(self) -> dict[str, Any]:
+        """The REAL dotmac-kernel catalogue at a102, not one derived from use.
+
+        Until 2026-09-06 this class built its catalogue as
+        `catalogue(frozenset(observed_modules))` -- the supported list WAS the
+        set of modules Platform imported. A catalogue derived from the
+        observation can never report an unpublished surface, because everything
+        observed is in it by construction; it also silently placed the bare
+        `dotmac_kernel` into `supported`, which is precisely the edit Michael
+        ruled out. That is why this admit control was green while Platform's
+        real enrolment went red against the same source.
+        """
+        return json.loads(
+            (FIXTURES / "kernel-a102-catalogue.json").read_text(encoding="utf-8")
+        )
+
     def sources(self, fixture: dict[str, Any]) -> dict[PurePosixPath, str]:
         """One import statement per measured fact.
 
         Synthesised, and labelled synthesised. What is real is the SET of
         `(path, module, symbols)` facts; the statements are the smallest source
         that reproduces it.
+
+        A KNOWN limitation, stated because one fact exercises it: `symbols`
+        records the names the statement BOUND LOCALLY, matching
+        `SurfaceFact.symbols`. An aliased import (`from dotmac_kernel import X
+        as Y`) is recorded as `Y`, and this synthesis then re-emits it as an
+        unaliased `from dotmac_kernel import Y` -- asserting that the Kernel's
+        own name is `Y`. For 27 of Platform's 28 root symbols that is true. See
+        `test_one_root_symbol_is_not_resolvable_from_a_local_name_record`.
         """
         by_path: dict[PurePosixPath, list[str]] = {}
         for fact in fixture["facts"]:
@@ -1232,7 +1256,14 @@ class ThePlatformSubject(Base):
         self, fixture: dict[str, Any], sources: dict[PurePosixPath, str]
     ) -> tuple[dict[str, Any], KernelSurfaceCatalogue]:
         modules = sorted({fact["module"] for fact in fixture["facts"]})
-        item = catalogue(frozenset(modules))
+        kernel = self.kernel()
+        item = catalogue(
+            frozenset(kernel["supported_modules"]),
+            version=kernel["version"],
+            revision=kernel["revision"],
+            internal=frozenset(kernel["internal_modules"]),
+            root_exports=frozenset(kernel["root_exports"]),
+        )
         first_use = {
             module: sorted(
                 fact["path"] for fact in fixture["facts"] if fact["module"] == module
@@ -1280,16 +1311,144 @@ class ThePlatformSubject(Base):
     def test_the_contract_admits_a_real_products_shape(self) -> None:
         """The admit control this whole change needed, and the one #81 lacked.
 
-        A rule observed only refusing is indistinguishable from one that refuses
-        everything. Sixteen required surfaces, a fourteen-pair retirement
-        baseline against a real issue and a real date, an effective floor of
-        `0.1.0a98`, two real pin sites and the real wheel digest out of
-        Platform's own lock: no findings.
+        A rule observed only refusing is indistinguishable from one that
+        refuses everything. Seventeen classified surfaces, a fourteen-pair
+        retirement baseline against a real issue and a real date, an effective
+        floor of `0.1.0a98`, two real pin sites and the real wheel digest out
+        of Platform's own lock -- measured against the REAL a102 catalogue
+        rather than one derived from Platform's own imports.
+
+        It admits 84 of the 85 measured symbol facts, every one of the 16
+        submodules, and 27 of the 28 root symbols. The single remaining finding
+        is asserted EXACTLY, in the test below, and it is an artefact of how
+        this fixture records names rather than a verdict on Platform.
+
+        This test previously asserted NO findings, and it did so against a
+        catalogue built from `frozenset(observed_modules)` -- which published
+        the bare `dotmac_kernel` because Platform imported it. That is why it
+        was green while Platform's real enrolment was red.
         """
         fixture = self.load()
         sources = self.sources(fixture)
         document, item = self.declaration(fixture, sources)
-        self.assertClean(report(document, sources, item))
+        codes = report(document, sources, item)
+        self.assertEqual(
+            (FindingCode.ROOT_SYMBOL_UNEXPORTED,), codes, [c.value for c in codes]
+        )
+
+    def test_submodules_reached_through_the_root_are_admitted(self) -> None:
+        """`from dotmac_kernel import audit` binds a SUPPORTED module.
+
+        Platform's `alembic/env.py` writes exactly this for three names. They
+        are in no `__all__` -- they are modules, not curated symbols -- and
+        refusing them would refuse a published surface for the syntax used to
+        reach it. Named here rather than left implicit in the count above,
+        because this is a second publication authority and a reader must not
+        have to infer that it was consulted.
+        """
+        kernel = self.kernel()
+        for name in ("audit", "models_platform", "settings_models"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, kernel["root_exports"])
+                self.assertIn(f"dotmac_kernel.{name}", kernel["supported_modules"])
+        item = catalogue(
+            frozenset(kernel["supported_modules"]),
+            version=kernel["version"],
+            revision=kernel["revision"],
+            internal=frozenset(kernel["internal_modules"]),
+            root_exports=frozenset(kernel["root_exports"]),
+        )
+        sources = {
+            PurePosixPath("alembic/env.py"): (
+                "from dotmac_kernel import audit, models_platform, settings_models\n"
+            )
+        }
+        required = [
+            {
+                "module": "dotmac_kernel",
+                "floor": "0.1.0a98",
+                "proven_by": "alembic/env.py",
+            }
+        ]
+        self.assertClean(
+            report(
+                v2_document(sources, item, required_surfaces=required),
+                sources,
+                item,
+            )
+        )
+
+    def test_an_internal_submodule_through_the_root_is_still_refused(self) -> None:
+        """The near-miss that keeps the second authority from being a hole.
+
+        `dotmac_kernel._transactions` is an INTERNAL module. Admitting a root
+        symbol on `known` rather than on `supported` would let it through, and
+        it would escape the private-surface arm as well -- that arm reads
+        MODULE path components, and the module recorded for this statement is
+        the bare root, so it never sees the symbol.
+        """
+        kernel = self.kernel()
+        self.assertIn("dotmac_kernel._transactions", kernel["internal_modules"])
+        item = catalogue(
+            frozenset(kernel["supported_modules"]),
+            version=kernel["version"],
+            revision=kernel["revision"],
+            internal=frozenset(kernel["internal_modules"]),
+            root_exports=frozenset(kernel["root_exports"]),
+        )
+        sources = {
+            PurePosixPath("app/x.py"): "from dotmac_kernel import _transactions\n"
+        }
+        required = [
+            {"module": "dotmac_kernel", "floor": "0.1.0a98", "proven_by": "app/x.py"}
+        ]
+        self.assertNamed(
+            report(
+                v2_document(sources, item, required_surfaces=required), sources, item
+            ),
+            FindingCode.ROOT_SYMBOL_UNEXPORTED,
+        )
+
+    def test_one_root_symbol_is_not_resolvable_from_a_local_name_record(self) -> None:
+        """OPEN QUESTION, recorded rather than decided or papered over.
+
+        `src/vendor_cp/offers/catalog.py` is recorded as binding
+        `KernelUndeclaredCapabilityError`. a102 publishes no such name and no
+        `Kernel`-prefixed name at all; it does publish
+        `UndeclaredCapabilityError`. The overwhelmingly likely statement is
+        `from dotmac_kernel import UndeclaredCapabilityError as
+        KernelUndeclaredCapabilityError` -- an ALIAS, recorded by a fixture
+        whose `symbols` are local names.
+
+        This run cannot decide between the two readings, and neither can this
+        repository: the answer is in Platform's source, which Governance does
+        not read. So the finding stands rather than being silenced by adding a
+        name to `root_exports` that the Kernel does not export -- that would
+        fabricate a Kernel export to make a test green, which is the exact
+        move the root arm exists to refuse.
+
+        The repair belongs to whoever regenerates the fixture: record the
+        KERNEL-side name for the root module, or carry the alias explicitly.
+        Until then this asserts the finding is exactly one, about exactly this
+        symbol, so it cannot quietly grow.
+        """
+        fixture = self.load()
+        kernel = self.kernel()
+        root = [f for f in fixture["facts"] if f["module"] == "dotmac_kernel"]
+        unresolved = sorted(
+            {
+                symbol
+                for fact in root
+                for symbol in fact["symbols"]
+                if symbol not in kernel["root_exports"]
+                and f"dotmac_kernel.{symbol}" not in kernel["supported_modules"]
+            }
+        )
+        self.assertEqual(["KernelUndeclaredCapabilityError"], unresolved)
+        self.assertIn("UndeclaredCapabilityError", kernel["root_exports"])
+        self.assertEqual(
+            [], [n for n in kernel["root_exports"] if n.startswith("Kernel")]
+        )
 
     def test_the_eleventh_site_is_inside_the_measured_surface(self) -> None:
         """Non-vacuity for the arm above: the hard case is actually in it.

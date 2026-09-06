@@ -255,7 +255,10 @@ def _check_root_facade(
     Four import shapes reach here and each gets a different answer:
 
     - **public** — `from dotmac_kernel import Party`, and `Party` is in
-      `__all__`: admitted, no finding.
+      `__all__`: admitted, no finding. A name that is not in `__all__` but
+      names a SUPPORTED SUBMODULE (`from dotmac_kernel import audit`) is
+      admitted too: it binds `dotmac_kernel.audit`, which the Kernel publishes
+      under its other authority. An INTERNAL submodule is not admitted here.
     - **private or nonexistent** — `_Internal`, or a name that was never
       there: `kernel.root.unexported`. Note that the leading-underscore case is
       not decided by the underscore. `_private_components` looks at MODULE path
@@ -307,17 +310,35 @@ def _check_root_facade(
         ]
     findings: list[Finding] = []
     for name in sorted(entry.names - catalogue.root_exports):
+        # A name may also be a SUBMODULE reached through the root:
+        # `from dotmac_kernel import audit` binds the module
+        # `dotmac_kernel.audit`, which is published -- by SUPPORTED_MODULES
+        # rather than by `__all__`. Two publication authorities, one question,
+        # and refusing this shape would refuse a supported surface for the
+        # syntax used to reach it. Platform writes exactly this in
+        # `alembic/env.py`.
+        #
+        # SUPPORTED only, never `known`. `dotmac_kernel._transactions` is an
+        # INTERNAL module, and admitting it here would let a root import walk
+        # straight past the private-surface arm -- that arm reads MODULE path
+        # components, and the module recorded for this statement is the bare
+        # root, so it never sees the symbol.
+        if f"{KERNEL_ROOT}.{name}" in catalogue.supported:
+            continue
         findings.append(
             _error(
                 FindingCode.ROOT_SYMBOL_UNEXPORTED,
                 f"imports {name} from the {KERNEL_ROOT} root façade, and "
-                f"{KERNEL_ROOT} {catalogue.version} does not export that name: "
-                f"its `__all__`, read at {catalogue.revision}, carries "
-                f"{len(catalogue.root_exports)} name(s) and this is not one. "
-                "The root is a published surface, and what it publishes is "
-                "that enumerated list -- not every attribute an importer can "
-                "reach through the package object. A name absent from it is a "
-                "typo, a private detail, or a name that was removed",
+                f"{KERNEL_ROOT} {catalogue.version} publishes it under neither "
+                f"of the two authorities that could carry it: it is not in the "
+                f"root's `__all__` ({len(catalogue.root_exports)} name(s), read "
+                f"at {catalogue.revision}), and {KERNEL_ROOT}.{name} is not a "
+                f"supported module ({len(catalogue.supported)} of those). The "
+                "root is a published surface, and what it publishes is those "
+                "enumerated lists -- not every attribute an importer can reach "
+                "through the package object. A name in neither is a typo, an "
+                "internal detail, a name that was removed, or a LOCAL alias "
+                "recorded where the Kernel's own name was wanted",
                 path=path,
                 line=entry.line,
             )
@@ -826,7 +847,11 @@ def _check_catalogue_binding(
                 f"to {derived}. This is the comparison the other three cannot "
                 "make: without it a product may state the right version and "
                 "hand the run another Kernel's module lists, and every surface "
-                "verdict is taken against a catalogue nobody bound",
+                "verdict is taken against a catalogue nobody bound. A digest "
+                "taken under the superseded dmg-kernel-catalogue-v1 also lands "
+                "here, and correctly: root exports changed the canonical "
+                "subject, so a v1 value answers a different question and is "
+                "RE-DERIVED rather than relabelled",
             )
         )
     return findings

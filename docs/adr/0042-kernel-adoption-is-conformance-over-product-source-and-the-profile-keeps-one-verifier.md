@@ -299,7 +299,8 @@ and the `not_applicable` premise is now checked here rather than asserted.
 ### A4. What activation is, and what it deliberately is not
 
 Activated: one module entry point, `python3 -m kernel_adoption_control`, exit
-`0` on a conforming run, `1` on findings and `2` on a refusal to run; and one
+`0` on a conforming and citable run, `1` on findings, `2` on a refusal to
+run and `3` on a conforming run that is not citable; and one
 step in `.github/workflows/governance-checks.yml`, held in agreement with
 `AGENTS.md`, `.dotmac/validation-contract.json` and `.dotmac/agent-profile.json`
 by `tools/check_validation_contract.py`.
@@ -447,9 +448,17 @@ edit to `KernelAdoptionDeclaration.v1`. A v1 is never redefined.
 **Consequently, an `applicable` report is explicitly NON-CITABLE.**
 `is_enforced` refuses it by name. This is the structural move that makes
 everything else honest: a run that reads part of a declaration cannot be cited
-as enforcing the declaration. Governance's own truthful `not_applicable`
-self-run has no unread fields, so it remains citable — which is why this change
-is a **self-enforcement foundation** and not a product gate. **Applicable-product
+as enforcing the declaration. Governance's own `not_applicable` self-run
+remains citable, and **not because it has no unread field — it has one.**
+`product_revision` is required of every declaration and compared with nothing,
+so it is now disclosed on both paths rather than only the applicable one; an
+unread field left silent in the one citable shape would be this package's own
+defect in the one place it would have gone unseen. It is citable because what a
+`not_applicable` declaration CLAIMS is a premise — "this repository consumes no
+Kernel" — and that premise IS evaluated, against the repository's own imports,
+and refused when false. An `applicable` declaration claims three further things
+nothing reads. That is why this change is a **self-enforcement foundation** and
+not a product gate. **Applicable-product
 activation is the next change and is gated on the successor contract; Platform's
 enrolment stays blocked until that change lands.** Nothing in this record may be
 read as making enrolment available today.
@@ -584,7 +593,11 @@ record does not touch it.
 
 What matters for enrolment is that **a product can add its declaration today,
 at schema 9, without touching its conformance profile at all** — the file has a
-default path and the reader finds it there. Only the optional binding needs a
+default path and the reader finds it there. **That is a fact about the FILE and
+not an invitation:** a product that adds one today gets an `applicable` run,
+which § A8 makes non-citable, exit `3`, and a red step. Enrolment becomes
+available when applicable-product activation lands under the successor
+contract, and not before. Only the optional binding needs a
 loadable profile, and stating a non-default path is the sole thing it buys.
 Had the binding been required, the Kernel-adoption axis would have become a
 fourth stop and would have blocked the stated merge order.
@@ -607,7 +620,11 @@ ADR 0013 § 3 refuses.
   the forbidden import as a string fixture), and `dotmac_kernel.display` (which
   is internal without being private).
 - Two vacuity hazards report themselves: a run over no source is a
-  `kernel.inventory.empty` error, and a pin arm given fewer than two sites emits
-  a notice saying it established nothing rather than passing silently.
+  `kernel.inventory.empty` error, and a pin arm that cannot detect a
+  disagreement refuses. **Superseded by § A10:** this originally said the pin
+  arm "emits a notice", and a report carrying only that notice was citable —
+  which made "the pin agrees" indistinguishable from "the pin was never
+  compared". Under an `applicable` declaration, fewer than two INDEPENDENT
+  observations is now `kernel.pin.undetectable`, an ERROR.
 - Unparseable source is a `kernel.source.unreadable` error. An unmeasured file
   is never reported as a clean one.

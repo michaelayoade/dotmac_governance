@@ -640,11 +640,16 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
     #: `required_surfaces`, and this runner reads NONE of them. A report over
     #: such a declaration therefore cannot be cited as enforcement of the
     #: declaration -- it enforces the part that is read, and the part that is
-    #: read is not the whole document. Governance's own truthful
-    #: `not_applicable` self-run has no unread fields, which is why it may be
-    #: cited and why this repository can be a self-enforcement foundation while
-    #: applicable-product activation waits on the successor contract
-    #: (open decision 52).
+    #: read is not the whole document.
+    #:
+    #: A `not_applicable` self-run is citable, and NOT because it has no unread
+    #: field -- it has one. `product_revision` is required of every declaration
+    #: and compared with nothing, which is why it is now disclosed on both
+    #: paths. It is citable because what such a declaration CLAIMS is a
+    #: premise -- "this repository consumes no Kernel" -- and that premise IS
+    #: evaluated, against the repository's own imports, and refused when false.
+    #: An `applicable` declaration claims three further things that nothing
+    #: reads, so citing it would assert coverage that does not exist.
     if declaration.get("applicability") != (
         KernelAdoptionApplicability.NOT_APPLICABLE.value
     ):

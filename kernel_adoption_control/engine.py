@@ -484,9 +484,28 @@ def _check_declaration(
         ]
 
     declaration = outcome.declaration
+    #: `product_revision` is REQUIRED of every declaration, `not_applicable`
+    #: included, and nothing in this package compares it with the revision the
+    #: run measured. Disclosed on both paths rather than only the applicable
+    #: one: the `not_applicable` shape is the shape that is CITABLE today, so
+    #: an unread field left silent there is an unread field inside the only
+    #: claim anyone can make -- which is the defect this package exists to
+    #: catch, in the one place it would have gone unseen. Open decision 52 (A)
+    #: owns the repair, and it is a non-self-referential coordinate rather than
+    #: a comparison: a committed file cannot contain its own commit.
+    unevaluated = _notice(
+        FindingCode.DECLARATION_FIELDS_UNEVALUATED,
+        f"this declaration states product_revision "
+        f"{declaration.product_revision}, and this runner does not compare it "
+        "with the revision it measured. Published rather than left silent "
+        "because a declared field nothing reads is the defect this package "
+        "exists to catch. The repair is a non-self-referential source "
+        "coordinate in a versioned successor contract -- open decision 52 -- "
+        "and NOT an edit to KernelAdoptionDeclaration.v1, which is frozen",
+    )
     if declaration.applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
         if not kernel_import_sites:
-            return []
+            return [unevaluated]
         path, line, module = kernel_import_sites[0]
         return [
             _error(

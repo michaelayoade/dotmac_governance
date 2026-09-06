@@ -349,11 +349,34 @@ class AdmitControl(RunnerTestCase):
             self.assertIn(named, notice[0].message)
         self.assertIn("decision 52", notice[0].message)
 
-    def test_a_not_applicable_run_publishes_no_such_notice(self) -> None:
-        """The near-miss: a declaration with no unread fields says nothing."""
+    def test_a_not_applicable_run_discloses_its_one_unread_field(self) -> None:
+        """The citable shape has an unread field too, and must say so.
+
+        This test previously asserted the opposite, on the premise that a
+        `not_applicable` declaration has no unread field. It has one:
+        `product_revision` is required of every declaration and compared with
+        nothing. Leaving it silent here left it silent in the ONE shape that is
+        citable -- this package's own defect, in the only place it would not
+        have been seen.
+        """
         self.product.declare(not_applicable())
         result = self.go(observer=f"{__name__}:observe_kernel_free")
-        self.assertNotIn(FindingCode.DECLARATION_FIELDS_UNEVALUATED, self.codes(result))
+        notice = [
+            item
+            for item in result.report.findings
+            if item.code is FindingCode.DECLARATION_FIELDS_UNEVALUATED
+        ]
+        self.assertEqual(1, len(notice))
+        self.assertIs(Severity.NOTICE, notice[0].severity)
+        self.assertIn("product_revision", notice[0].message)
+        self.assertIn("decision 52", notice[0].message)
+        # It must not claim the applicable-only fields are unread here: a
+        # `not_applicable` declaration does not carry them, and naming them
+        # would be a disclosure about fields that do not exist.
+        for absent in ("kernel_catalogue", "required_surfaces"):
+            self.assertNotIn(absent, notice[0].message)
+        # Still citable: the premise it states IS evaluated.
+        self.assertTrue(result.report.conforms, result.to_dict())
 
     def test_the_report_binds_to_both_revisions(self) -> None:
         self.product.declare(applicable())
@@ -978,11 +1001,28 @@ class PinSufficiencyIsApplicabilityAware(RunnerTestCase):
         self.assertIn(FindingCode.DECLARATION_PREMISE_FALSE, self.codes(result))
         self.assertFalse(result.report.conforms)
 
-    def test_a_not_applicable_declaration_with_no_pins_is_silent(self) -> None:
-        """The near-miss, and this repository's own real shape."""
+    def test_a_not_applicable_declaration_with_no_pins_raises_no_error(
+        self,
+    ) -> None:
+        """The near-miss, and this repository's own real shape.
+
+        Silent about PINS, not silent overall: the run still discloses its one
+        unread field. Asserting an empty list would make this test fail the day
+        that disclosure was added, which is what happened.
+        """
         self.product.declare(not_applicable())
         result = self.go(observer=f"{__name__}:observe_kernel_free")
-        self.assertEqual([], self.codes(result), result.to_dict())
+        self.assertEqual(
+            [],
+            [
+                item
+                for item in result.report.findings
+                if item.severity is Severity.ERROR
+            ],
+            result.to_dict(),
+        )
+        self.assertNotIn(FindingCode.PIN_UNDETECTABLE, self.codes(result))
+        self.assertNotIn(FindingCode.PIN_DISAGREES, self.codes(result))
 
     def test_a_refused_declaration_leaves_the_sufficiency_question_unanswered(
         self,

@@ -56,9 +56,9 @@ on this repository or producing governance material for Dotmac.
    without the others.
 
    ```bash
-   python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-   python3 -m ruff format --check agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-   python3 -m mypy --strict --scripts-are-modules agent_control gate_control kernel_adoption_control programme_control standards_control tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+   python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+   python3 -m ruff format --check agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+   python3 -m mypy --strict --scripts-are-modules agent_control gate_control kernel_adoption_control programme_control standards_control tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
    python3 tools/check_adrs.py
    python3 tools/check_adr_references.py
    python3 tools/check_commit_identity.py --base origin/main
@@ -69,6 +69,17 @@ on this repository or producing governance material for Dotmac.
    python3 -m programme_control --root .
    python3 -m standards_control verify --root . --profile .dotmac/standards-profile.json --default-branch main
    ```
+
+   The Kernel-adoption gate is deliberately NOT in that block. It refuses a
+   run it cannot bind to a committed revision, and a pre-commit tree is by
+   definition uncommitted — so as a pre-commit step it would fail every time
+   it was run as documented, which trains a reader to ignore the one exit code
+   whose entire point is that it means something. It runs in CI, and it can be
+   run by hand AFTER committing, as `kernel_adoption_control` with `--root .`,
+   an `--observer` and an `--as-of` (see the step in
+   `.github/workflows/governance-checks.yml`). A run over a dirty tree exits 3
+   and is EXPLICITLY NON-CITABLE: it is a diagnostic and may not be reported as
+   evidence of anything.
 
 5. Push the branch and let CI run the acceptance suite. CI is the acceptance
    owner: do not run the tests locally, and never start a service, container or

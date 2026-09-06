@@ -1,9 +1,15 @@
-"""Kernel-adoption conformance over product source. Report-only.
+"""Kernel-adoption conformance over product source.
 
-Six properties are measured, and each is a fact about files in a product
-checkout. None of them consults a profile document, because the profile has one
-verifier and it is not this one — see `contracts` for the boundary and ADR 0042
-for the decision.
+Seven properties are measured, and each is a fact about files in a product
+checkout plus the date the run is asked about. None of them consults a profile
+document, because the profile has one verifier and it is not this one — see
+`contracts` for the boundary and ADR 0042 for the decision.
+
+The seventh is expiry, added by ADR 0042's amendment of 2026-09-05: a
+`TransitionalSurface` carried an orderable date that was compared to nothing,
+which is a deadline that cannot pass. `as_of` is an INPUT, never a clock read
+— see `_check_expiry` for why, and for which side of the boundary the expiry
+day falls on.
 
 Every finding names the offending file, line and symbol. That is a requirement
 rather than a courtesy: the failures this package exists to catch are found by
@@ -14,23 +20,30 @@ Two vacuity hazards are handled as verdicts rather than assumed away:
 
 - A run over no source emits `INVENTORY_EMPTY`. Every sweep below would
   otherwise report "no findings" over nothing.
-- The pin-disagreement arm needs at least two sites to be capable of
-  disagreeing. Given fewer it emits a NOTICE saying so, because a check that
-  structurally cannot fail must not read as one that passed. This matters here
-  specifically: no pin disagreement exists in any of the three products today,
-  so the arm's health cannot be inferred from a green run and is established by
-  a planted defect instead.
+- The pin-disagreement arm needs at least two INDEPENDENT observations to be
+  capable of disagreeing. Given fewer it is an ERROR under an `applicable`
+  declaration — it was a notice, and the report stayed conforming and citable,
+  which is a check that structurally cannot fail being counted as one that
+  passed. Under `not_applicable` the requirement inverts: any pin site at all
+  contradicts the stated premise. Either way the sufficiency question has an
+  answer rather than a shrug, and the arm's health is established by a planted
+  defect, because no pin disagreement exists in any of the three products
+  today.
 """
 
 from __future__ import annotations
 
 import ast
 from collections import defaultdict
+from datetime import date
 from pathlib import PurePosixPath
 
 from .contracts import (
     AdoptionReport,
+    DeclarationEmpty,
+    DeclarationIncomplete,
     DeclarationMissing,
+    DeclarationPresent,
     DeclarationUnreadable,
     Finding,
     FindingCode,
@@ -40,7 +53,20 @@ from .contracts import (
     TransitionalSurface,
 )
 
-__all__ = ["KERNEL_ROOT", "evaluate"]
+__all__ = ["KERNEL_ROOT", "REFUSAL_CODES", "evaluate"]
+
+#: Four refusals, four codes, one shared consequence. The consequence is shared
+#: because it is the same in all four cases -- nothing downstream can be
+#: measured -- but the codes stay APART because the repairs differ: create the
+#: file, write a document into it, add the key that was never stated, fix the
+#: value that is wrong. A reader handed one code for four repairs opens the
+#: wrong file.
+REFUSAL_CODES: dict[type, FindingCode] = {
+    DeclarationMissing: FindingCode.DECLARATION_MISSING,
+    DeclarationEmpty: FindingCode.DECLARATION_EMPTY,
+    DeclarationIncomplete: FindingCode.DECLARATION_INCOMPLETE,
+    DeclarationUnreadable: FindingCode.DECLARATION_UNREADABLE,
+}
 
 #: The distribution's import name. One constant, so a rename is one edit.
 KERNEL_ROOT = "dotmac_kernel"
@@ -182,18 +208,77 @@ def _prohibited_match(module: str, prohibited: frozenset[str]) -> str | None:
     return None
 
 
-def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
+def _pin_sufficiency(inputs: KernelAdoptionInputs) -> list[Finding]:
+    """Whether the pin arm was even CAPABLE of reporting what it is asked to.
+
+    Applicability-aware, because "enough" is a different number for the two
+    states and the old arm asked neither question. It emitted a NOTICE at fewer
+    than two sites and the report stayed conforming and citable -- a check that
+    structurally could not fail, counted as one that passed. That is the exact
+    shape this repository exists to catch, arriving inside the package built to
+    catch it.
+
+    - **applicable** -- two or more INDEPENDENT observations, where independence
+      is a distinct `(path, line)`. Two entries at one line are one observation
+      written twice, and a disagreement between a value and itself is not
+      detectable. Fewer is an ERROR.
+    - **not_applicable** -- zero pin sites AND zero Kernel imports. A repository
+      declaring it consumes no Kernel while pinning the Kernel has stated a
+      premise its own packaging contradicts, which is the same fault as
+      importing one, so it is reported as the same code.
+
+    A declaration that could not be read gets neither requirement, because the
+    requirement is a function of a value nobody stated. The refusal in
+    `_check_declaration` already names this arm as unmonitored.
+    """
+    outcome = inputs.declaration
+    if not isinstance(outcome, DeclarationPresent):
+        return []
     sites = inputs.pin_sites
-    if len(sites) < 2:
+    if outcome.declaration.applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
+        if not sites:
+            return []
+        rendered = ", ".join(
+            f"{site.path.as_posix()}:{site.line} ({site.kind}) {site.version!r}"
+            for site in sites
+        )
         return [
-            _notice(
-                FindingCode.PIN_DISAGREES,
-                f"the pin-disagreement arm was given {len(sites)} pin site(s); it "
-                "cannot disagree with itself, so this run establishes nothing "
-                "about pin agreement. Two or more sites are required for the "
-                "check to be capable of failing",
+            _error(
+                FindingCode.DECLARATION_PREMISE_FALSE,
+                f"the declaration states applicability 'not_applicable' and "
+                f"this repository states {len(sites)} {KERNEL_ROOT} pin "
+                f"site(s): {rendered}. A repository that consumes no Kernel "
+                "does not pin one; the premise is contradicted by its own "
+                "packaging, and an exemption states an ENFORCEABLE premise or "
+                "the region is unmonitored rather than exempt",
+                path=sites[0].path,
+                line=sites[0].line,
             )
         ]
+    independent = {(site.path, site.line) for site in sites}
+    if len(independent) >= 2:
+        return []
+    return [
+        _error(
+            FindingCode.PIN_UNDETECTABLE,
+            f"the declaration states applicability 'applicable' and this run "
+            f"was given {len(sites)} pin site(s) at {len(independent)} distinct "
+            "location(s). The pin-disagreement arm cannot disagree with itself, "
+            "so it established nothing -- and a check incapable of failing must "
+            "not be counted as one that passed. Supply the product's real pin "
+            "sites (a dependency declaration and its lock resolution are the "
+            "usual two), or the arm is unmonitored rather than clean",
+        )
+    ]
+
+
+def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
+    sites = inputs.pin_sites
+    if len({(site.path, site.line) for site in sites}) < 2:
+        # Sufficiency is `_pin_sufficiency`'s question now, and it answers with
+        # an error or with nothing. Returning silently here would be silence
+        # only in the arm that cannot run; it is never the whole verdict.
+        return []
 
     by_version: dict[str, list[tuple[PurePosixPath, int, str]]] = defaultdict(list)
     for site in sites:
@@ -226,11 +311,64 @@ def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
     return findings
 
 
+def _check_expiry(surface: TransitionalSurface, as_of: date) -> Finding | None:
+    """Arm 7. Has the stated expiry passed on the date the run is asked about?
+
+    Two choices are made here and neither is an accident of an operator.
+
+    **What "now" is.** The run date, supplied by the caller and recorded in the
+    report. Not a clock read: `date.today()` appears nowhere in this package,
+    because a verdict that depends on when the process happened to start cannot
+    be re-derived by a reader who was not present, and cannot be tested without
+    freezing time. It is also NOT taken from the evidence, because there is
+    nothing in the evidence to take it from -- `KernelAdoptionDeclaration.v1`
+    carries `product_revision`, a commit id, and no date at all. Reading that
+    commit's timestamp would mean asking the product's Git history, which is an
+    oracle over another repository rather than a fact in the document.
+
+    **Which side of the boundary the expiry day falls on.** `expiry` is the
+    LAST DAY the transitional surface may exist, so a surface expiring on the
+    run date is not yet expired and one expiring the day before is. The
+    comparison is therefore strict: `expiry < as_of`. Stated because the
+    difference between `<` and `<=` here is one day of a retirement deadline,
+    and a boundary nobody wrote down is a boundary the next reader will change
+    while believing it made no difference. Both neighbours are asserted.
+    """
+    try:
+        expiry = date.fromisoformat(surface.expiry)
+    except ValueError:
+        # `parse_declaration` refuses this, so a declaration read from disk
+        # cannot arrive here. A directly-constructed dataclass can, and an
+        # unorderable expiry must fail closed rather than be treated as a
+        # deadline that has not arrived.
+        return _error(
+            FindingCode.TRANSITIONAL_EXPIRED,
+            f"{surface.module} states the expiry {surface.expiry!r}, which is "
+            "not an orderable calendar date, so whether it has passed cannot "
+            "be decided. Refusing to read an undecidable expiry as an unexpired "
+            "one",
+        )
+    if expiry >= as_of:
+        return None
+    return _error(
+        FindingCode.TRANSITIONAL_EXPIRED,
+        f"{surface.module} is classified transitional with expiry "
+        f"{surface.expiry}, and the run is asked about {as_of.isoformat()}: the "
+        f"transition is {(as_of - expiry).days} day(s) overdue. It is owned by "
+        f"{surface.owner} and tracked at {surface.retirement_issue}, replaced "
+        f"by {surface.replacement}. Retire the surface, or move the date in a "
+        "reviewed change that says who agreed to the new one -- an expiry that "
+        "passes with no consequence is the field admitting it was never a "
+        "commitment",
+    )
+
+
 def _check_transitional(
     surfaces: tuple[TransitionalSurface, ...],
     observed: dict[str, frozenset[tuple[PurePosixPath, str]]],
+    as_of: date,
 ) -> list[Finding]:
-    """Arm 6. Owner and expiry, then the baseline ratchet.
+    """Arms 6 and 7. Owner and expiry, the expiry comparison, then the ratchet.
 
     The blankness check below is defence in depth: `parse_declaration` already
     refuses a blank owner or expiry, so a declaration read from disk cannot
@@ -264,6 +402,10 @@ def _check_transitional(
                 )
             )
             continue
+
+        expired = _check_expiry(surface, as_of)
+        if expired is not None:
+            findings.append(expired)
 
         declared = {(site.path, site.symbol) for site in surface.baseline}
         actual = set(observed.get(surface.module, frozenset()))
@@ -302,12 +444,12 @@ def _check_declaration(
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
     observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
 ) -> list[Finding]:
-    """Arms 4 and 6, and the three states the declaration can be in.
+    """Arms 4, 6 and 7, and the five states the declaration can be in.
 
-    This is the half that used to be inert. Arms 4 and 6 have a production
-    input now — the `kernel_adoption` section of `.dotmac/standards-profile.json`
-    — and, more importantly, they REFUSE when it is absent or unreadable rather
-    than reporting nothing.
+    The input is the product's own `.dotmac/kernel-adoption.json` — its own
+    document, pointed at by the profile's optional `kernel_adoption_binding`
+    and never carried inside the profile. These arms REFUSE when it is missing,
+    empty, incomplete or corrupt rather than reporting nothing.
 
     `not_applicable` is checked, not accepted. An exemption states an
     enforceable premise or the region is unmonitored rather than exempt, and
@@ -317,28 +459,53 @@ def _check_declaration(
     it.
     """
     outcome = inputs.declaration
-    if isinstance(outcome, DeclarationMissing):
-        return [
-            _error(
-                FindingCode.DECLARATION_MISSING,
-                f"{outcome.detail}. Arms 4 and 6 are therefore UNMONITORED "
-                "rather than clean: no prohibited surface and no transitional "
-                "surface can be reported, and that is a refusal rather than a "
-                "pass",
+    if not isinstance(outcome, DeclarationPresent):
+        code = REFUSAL_CODES.get(type(outcome))
+        if code is None:
+            # A sixth outcome added without a code would otherwise fall through
+            # this function and be reported as nothing, which is the exact
+            # shape -- a refusal read as a pass -- that the four below exist to
+            # prevent.
+            raise AssertionError(
+                f"{type(outcome).__name__} is a declaration outcome with no "
+                "finding code. A new refusal is given one or it silently reads "
+                "as a clean run"
             )
-        ]
-    if isinstance(outcome, DeclarationUnreadable):
         return [
             _error(
-                FindingCode.DECLARATION_UNREADABLE,
-                f"{outcome.detail}. Arms 4 and 6 are UNMONITORED rather than clean",
+                code,
+                f"{outcome.detail}. Arms 1, 4, 6 and 7 are therefore "
+                "UNMONITORED rather than clean: no prohibited surface, no "
+                "transitional surface and no expired transition can be "
+                "reported, and the pin arm cannot even be told how many "
+                "observations it needs, because that is a function of an "
+                "applicability nobody stated. This is a refusal, not a pass",
             )
         ]
 
     declaration = outcome.declaration
+    #: `product_revision` is REQUIRED of every declaration, `not_applicable`
+    #: included, and nothing in this package compares it with the revision the
+    #: run measured. Disclosed on both paths rather than only the applicable
+    #: one: the `not_applicable` shape is the shape that is CITABLE today, so
+    #: an unread field left silent there is an unread field inside the only
+    #: claim anyone can make -- which is the defect this package exists to
+    #: catch, in the one place it would have gone unseen. Open decision 52 (A)
+    #: owns the repair, and it is a non-self-referential coordinate rather than
+    #: a comparison: a committed file cannot contain its own commit.
+    unevaluated = _notice(
+        FindingCode.DECLARATION_FIELDS_UNEVALUATED,
+        f"this declaration states product_revision "
+        f"{declaration.product_revision}, and this runner does not compare it "
+        "with the revision it measured. Published rather than left silent "
+        "because a declared field nothing reads is the defect this package "
+        "exists to catch. The repair is a non-self-referential source "
+        "coordinate in a versioned successor contract -- open decision 52 -- "
+        "and NOT an edit to KernelAdoptionDeclaration.v1, which is frozen",
+    )
     if declaration.applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
         if not kernel_import_sites:
-            return []
+            return [unevaluated]
         path, line, module = kernel_import_sites[0]
         return [
             _error(
@@ -355,7 +522,23 @@ def _check_declaration(
             )
         ]
 
-    findings: list[Finding] = []
+    findings: list[Finding] = [
+        _notice(
+            FindingCode.DECLARATION_FIELDS_UNEVALUATED,
+            "this declaration is 'applicable' and states product_revision "
+            f"{declaration.product_revision}, a kernel_catalogue and "
+            f"{len(declaration.required_surfaces)} entries in required_surfaces. NONE of "
+            "those three is evaluated by this runner. They are published here "
+            "rather than left silent because a declared field nothing compares "
+            "is the defect this package exists to catch, and a reader must not "
+            "infer from a clean run that they were checked. The repair is a "
+            "versioned successor contract carrying a non-self-referential "
+            "source coordinate, a catalogue digest comparison and "
+            "required-surface floor semantics -- open decision 52 -- and NOT an "
+            "edit to KernelAdoptionDeclaration.v1, which is frozen. Until it "
+            "exists an 'applicable' run is not citable as enforcement",
+        )
+    ]
     citations = {item.module: item.citation for item in declaration.prohibited_surfaces}
     prohibited = declaration.prohibited_modules
     for path, line, module in kernel_import_sites:
@@ -378,7 +561,9 @@ def _check_declaration(
             )
         )
     findings.extend(
-        _check_transitional(declaration.transitional_surfaces, observed_symbols)
+        _check_transitional(
+            declaration.transitional_surfaces, observed_symbols, inputs.as_of
+        )
     )
     return findings
 
@@ -391,6 +576,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     findings: list[Finding] = []
     kernel_import_sites: list[tuple[PurePosixPath, int, str]] = []
     observed_symbols: dict[str, set[tuple[PurePosixPath, str]]] = {}
+    catalogue = inputs.catalogue
 
     if not inputs.sources:
         findings.append(
@@ -446,21 +632,41 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                         line=entry.line,
                     )
                 )
-            elif module != KERNEL_ROOT and module not in inputs.catalogue.known:
-                findings.append(
-                    _error(
-                        FindingCode.SURFACE_UNKNOWN,
-                        f"imports {module}, which {KERNEL_ROOT} "
-                        f"{inputs.catalogue.version} does not publish. Its module "
-                        f"lists were read at {inputs.catalogue.revision} and "
-                        f"carry {len(inputs.catalogue.supported)} supported and "
-                        f"{len(inputs.catalogue.internal)} internal names. An "
-                        "unpublished surface is either a typo or a module the "
-                        "Kernel does not undertake to keep",
-                        path=path,
-                        line=entry.line,
+            elif module != KERNEL_ROOT:
+                # Nested rather than a second `elif`, so the absent-catalogue
+                # case cannot fall through to the arm that would have to read
+                # it. An unclassifiable surface is REFUSED; it never lands in
+                # the branch that reports a name as published.
+                if catalogue is None:
+                    findings.append(
+                        _error(
+                            FindingCode.CATALOGUE_ABSENT,
+                            f"imports {module}, and this run was given no "
+                            f"{KERNEL_ROOT} surface catalogue, so whether that "
+                            "name is published cannot be decided. An "
+                            "unclassifiable surface is refused rather than "
+                            "reported as a known one: a caller with no "
+                            "catalogue must not get a clean unknown-surface "
+                            "arm over every import it made",
+                            path=path,
+                            line=entry.line,
+                        )
                     )
-                )
+                elif module not in catalogue.known:
+                    findings.append(
+                        _error(
+                            FindingCode.SURFACE_UNKNOWN,
+                            f"imports {module}, which {KERNEL_ROOT} "
+                            f"{catalogue.version} does not publish. Its module "
+                            f"lists were read at {catalogue.revision} and "
+                            f"carry {len(catalogue.supported)} supported and "
+                            f"{len(catalogue.internal)} internal names. An "
+                            "unpublished surface is either a typo or a module "
+                            "the Kernel does not undertake to keep",
+                            path=path,
+                            line=entry.line,
+                        )
+                    )
 
             if entry.star:
                 findings.append(
@@ -497,6 +703,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             )
 
     findings.extend(_check_pins(inputs))
+    findings.extend(_pin_sufficiency(inputs))
     findings.extend(
         _check_declaration(
             inputs,

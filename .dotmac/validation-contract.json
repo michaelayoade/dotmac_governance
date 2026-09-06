@@ -73,6 +73,12 @@
       "reason": "Programme matrix validation. Reads the repository; the pinned-dossier arm additionally reads a checkout CI supplies."
     },
     {
+      "key": "kernel_adoption_control",
+      "aliases": [],
+      "class": "ci-owned",
+      "reason": "Kernel-adoption conformance over this repository's own source (ADR 0042, activated 2026-09-05). CI-owned, and NOT because a local run would be slow or need a service -- it reads only this checkout, no network and no clock. It is CI-owned because it REFUSES a run it cannot bind to a committed revision, and the pre-commit tree it would be documented against is by definition uncommitted. A step that fails every time it is run as documented trains a reader to ignore the exit code, so it is kept out of the block a contributor copies. Run by hand after committing it is a diagnostic; over a dirty tree it exits 3 and is explicitly non-citable."
+    },
+    {
       "key": "standards_control verify",
       "aliases": [
         "dotmac-standards verify"

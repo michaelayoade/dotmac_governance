@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from pathlib import PurePosixPath
 from typing import Final
@@ -41,6 +42,7 @@ from typing import Final
 __all__ = [
     "KERNEL_ADOPTION_CONTRACT",
     "DeclarationError",
+    "IncompleteDeclarationError",
     "KernelAdoptionApplicability",
     "KernelAdoptionDeclaration",
     "KernelCatalogueEvidence",
@@ -64,6 +66,22 @@ _KERNEL_MODULE = re.compile(r"^dotmac_kernel(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 class DeclarationError(ValueError):
     """The declaration could not be understood. Never softened to a default."""
+
+
+class IncompleteDeclarationError(DeclarationError):
+    """A required key was never stated. A SUBCLASS, so no caller loses a refusal.
+
+    This does not redefine `KernelAdoptionDeclaration.v1`. The same documents
+    are admitted and the same documents are refused; what changes is that one
+    refusal can now be told from the other by its type instead of by reading
+    the sentence. Every existing `except DeclarationError` still catches it,
+    which is why the split could be made without a v2.
+
+    The line: an obligation NEVER STATED is incomplete; an obligation STATED
+    WRONGLY -- a bad module name, an impossible date, an unknown key, a
+    non-object -- is plain `DeclarationError`, which the reader sees as
+    corrupt.
+    """
 
 
 class KernelAdoptionApplicability(str, Enum):
@@ -185,8 +203,13 @@ def _keys(
 ) -> None:
     missing = sorted(required - data.keys())
     unknown = sorted(data.keys() - required - optional)
+    # Absence is checked BEFORE any stated value is validated, here and by
+    # every caller of `_keys`, so a document that is both incomplete and
+    # corrupt reports incomplete. That ordering is the tie-break the two codes
+    # need in order to be distinguishable at all, and it is asserted by
+    # `test_a_document_that_is_both_reports_the_refusal_the_parser_reached_first`.
     if missing:
-        raise DeclarationError(f"{where} missing keys: {', '.join(missing)}")
+        raise IncompleteDeclarationError(f"{where} missing keys: {', '.join(missing)}")
     if unknown:
         raise DeclarationError(f"{where} has unknown keys: {', '.join(unknown)}")
 
@@ -279,6 +302,19 @@ def _transitional_surface(value: object, index: int) -> TransitionalSurface:
             "YYYY-MM-DD date. A date that cannot be ordered cannot expire, and "
             "'soon' has never retired anything"
         )
+    # The shape check above is not the whole of "orderable". `2026-13-45`
+    # matches it and is not a day, so it could be written, parsed, stored and
+    # then compared to nothing -- an expiry that can never pass. This is a
+    # tightening within the SAME stated format rather than a redefinition: no
+    # ISO YYYY-MM-DD date is newly refused, only strings that were never one.
+    try:
+        date.fromisoformat(expiry)
+    except ValueError as error:
+        raise DeclarationError(
+            f"{where}.expiry is {expiry!r}, which has the shape of an ISO date "
+            f"and is not one: {error}. It would be stored, ordered against "
+            "nothing and never expire"
+        ) from error
     sites: list[SurfaceSite] = []
     for position, item in enumerate(_sequence(data["baseline"], f"{where}.baseline")):
         site_where = f"{where}.baseline[{position}]"
@@ -327,6 +363,13 @@ def parse_declaration(value: object) -> KernelAdoptionDeclaration:
     list, because it looks measured.
     """
     data = _object(value, "declaration")
+    # Absence before wrongness, so a document that states no contract at all is
+    # INCOMPLETE rather than corrupt. `_text(None, ...)` would say the value
+    # "must be a non-empty string", which describes a key that is there and
+    # blank, and sends the author to edit a line that does not exist.
+    for key in ("contract", "applicability"):
+        if key not in data:
+            raise IncompleteDeclarationError(f"declaration missing keys: {key}")
     contract = _text(data.get("contract"), "declaration.contract")
     if contract != KERNEL_ADOPTION_CONTRACT:
         raise DeclarationError(

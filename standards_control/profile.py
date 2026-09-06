@@ -601,6 +601,24 @@ DEFAULT_KERNEL_ADOPTION_PATH = PurePosixPath(".dotmac/kernel-adoption.json")
 OPTIONAL_PROFILE_KEYS = frozenset({"kernel_adoption_binding"})
 
 
+def parse_governance_model(value: object) -> GovernanceModelRef:
+    """Public entry to the governance-model field parser.
+
+    `kernel_adoption_control.runner` needs the Governance pin out of a
+    repository's profile in order to bind a run to the exact Governance
+    revision that repository claims to be governed by. It cannot use
+    `parse_profile`, which requires `schema_version` 11 exactly while the three
+    enrolled products are still at 9 -- a whole-profile parse would refuse
+    every product for a reason that has nothing to do with the pin.
+
+    So the FIELD parser is exposed rather than reimplemented. This module stays
+    the one owner of what a `governance_model` means; a second reader of that
+    shape would be a second parser, which is the defect
+    `kernel_adoption_control` exists to avoid on the neighbouring contract.
+    """
+    return _governance(value)
+
+
 def parse_kernel_adoption_binding(value: object) -> KernelAdoptionBinding:
     """Parse the pointer to a repository's Kernel-adoption declaration.
 

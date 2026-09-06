@@ -6,8 +6,12 @@ report a clean run over a file it could not open. The three outcomes are
 `DeclarationPresent`, `DeclarationMissing` and `DeclarationUnreadable`, and
 there is no fourth — in particular there is no empty one.
 
-The declaration is its own document, `.dotmac/kernel-adoption.json`, under the
-Governance-owned `KernelAdoptionDeclaration.v1` contract. The conformance
+The declaration is its own document, `.dotmac/kernel-adoption.json`, under a
+Governance-owned contract. TWO contracts are read: `KernelAdoptionDeclaration.v1`,
+which is frozen, and its successor `KernelAdoptionDeclaration.v2`. The document
+names its own, and `parse_any_declaration` routes it to the one parser that
+reads it -- neither parser is made lenient, because a document read leniently
+by the nearest parser has the fields it does not share silently unmeasured. The conformance
 profile carries only a POINTER to it — `kernel_adoption_binding` — so a
 classification never arrives as a line in a diff to that profile, and the two
 documents version independently.
@@ -52,8 +56,8 @@ from .contracts import (
 from .declaration_contract import (
     DeclarationError,
     IncompleteDeclarationError,
-    parse_declaration,
 )
+from .declaration_contract_v2 import parse_any_declaration
 
 __all__ = ["DECLARATION_PATH", "read_declaration"]
 
@@ -105,7 +109,7 @@ def read_declaration(
             "report it as an empty classification"
         )
     try:
-        return DeclarationPresent(parse_declaration(document))
+        return DeclarationPresent(parse_any_declaration(document))
     except IncompleteDeclarationError as error:
         return DeclarationIncomplete(
             f"{location.as_posix()}: {error}. The document is a declaration "

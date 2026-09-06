@@ -50,11 +50,16 @@ and this module does not check it.
 A report names the exact Governance revision that produced it and the exact
 product revision it measured, both derived from Git rather than supplied. A
 product cannot state a Governance revision it did not run, because the runner
-reads its own checkout. `is_enforced` is the predicate anything citing an
-enrolment must use: a product pinning a Governance revision from before this
-module existed produces no report at all, and a report failing any binding
-condition is `enforced=False` with the reason named. "CI-enforced" is a claim
-that must exhibit such a report; its absence is not a pass.
+reads its own checkout.
+
+**Citability is asked of a REPORT OBJECT, never of a document.** `citability`
+takes a `RunReport` that `run()` produced in this process; `inspect_report_document`
+takes a mapping and can only ever call it self-consistent, because its return
+type has no citable value in it. That split is open decision 52 (5)'s repair
+and its boundary both: a run report written to disk is not self-authenticating,
+and the citable claim lives in the exit code of the job that ran, not in the
+artifact. A product pinning a Governance revision from before this module
+existed produces no report at all, and no report is not a pass.
 """
 
 from __future__ import annotations
@@ -66,6 +71,7 @@ import json
 import re
 import subprocess
 import sys
+import weakref
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date
@@ -87,22 +93,29 @@ from .contracts import (
     DeclarationOutcome,
     DeclarationPresent,
     KernelAdoptionApplicability,
+    KernelAdoptionDeclarationV2,
     KernelAdoptionInputs,
     KernelSurfaceCatalogue,
     PinSite,
+    PredecessorObservation,
     Severity,
 )
 from .declaration import DECLARATION_PATH, read_declaration
+from .declaration_contract import KERNEL_ADOPTION_CONTRACT
+from .declaration_contract_v2 import KERNEL_ADOPTION_CONTRACT_V2
 from .engine import evaluate
 
 __all__ = [
     "CANONICAL_GOVERNANCE",
     "RUN_CONTRACT",
+    "Citability",
+    "DocumentVerdict",
     "ProductObservation",
     "Provenance",
     "RunReport",
     "RunnerError",
-    "is_enforced",
+    "citability",
+    "inspect_report_document",
     "main",
     "resolve_observer",
     "run",
@@ -113,7 +126,7 @@ __all__ = [
 #: cannot satisfy this and cannot assert it is Governance. Before this constant
 #: existed, `GOVERNANCE_ROOT` was derived from the package's own file location
 #: alone: a copied package produced its own root, its own peeled HEAD and
-#: `is_enforced == True` naming a revision that is not a Governance commit --
+#: a citable verdict naming a revision that is not a Governance commit --
 #: including from a MODIFIED copy, which is the interesting case.
 CANONICAL_GOVERNANCE = "https://github.com/michaelayoade/dotmac_governance"
 
@@ -252,7 +265,7 @@ def _revision(root: Path, what: str) -> str:
 def _worktree_clean(root: Path) -> bool:
     """Whether `root` holds exactly the bytes of its own HEAD.
 
-    Recorded rather than refused, and then REQUIRED by `is_enforced`. A local
+    Recorded rather than refused, and then REQUIRED by `citability`. A local
     run with edits is useful and must stay possible; a report from one must not
     be citable as enforcement, because the revision it names is not the bytes
     it measured.
@@ -488,22 +501,131 @@ def _declaration_location(root: Path) -> PurePosixPath:
     return binding.declaration_path
 
 
+def _predecessor_observation(
+    root: Path, declared: str, measured: str
+) -> PredecessorObservation:
+    """Ask this repository's own history whether `declared` precedes `measured`.
+
+    A repository-local Git query inside the measured repository's own job, so
+    ADR 0013 § 1 needs no oracle for it: nothing here reaches a network or
+    another repository.
+
+    Three answers, and the third is the one that matters operationally.
+    `git merge-base --is-ancestor` exits 0 for an ancestor and 1 for a
+    non-ancestor, and ANY other exit is treated as undecided rather than as a
+    refutation -- an unknown commit in a SHALLOW clone exits 128, and reading
+    that as "not an ancestor" would report a false violation to every product
+    using `actions/checkout`'s default depth.
+
+    Equality is refuted here rather than delegated. A declaration naming the
+    revision that contains it is claiming a file knows a hash over its own
+    bytes, and `--is-ancestor` calls a commit its own ancestor, so the strict
+    half has to be asked separately or the impossible case would pass.
+    """
+    if declared == measured:
+        return PredecessorObservation(
+            declared=declared,
+            measured=measured,
+            is_strict_ancestor=False,
+            detail=(
+                "the declared coordinate IS the measured revision. A committed "
+                "file cannot contain its own commit, so a declaration naming "
+                "the revision that contains it names something that could not "
+                "have been written -- the coordinate is a predecessor or it is "
+                "nothing"
+            ),
+        )
+    shallow = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if shallow.returncode == 0 and shallow.stdout.strip() == "true":
+        return PredecessorObservation(
+            declared=declared,
+            measured=measured,
+            is_strict_ancestor=None,
+            detail=(
+                "this checkout is SHALLOW, so most of its history is absent "
+                "and ancestry cannot be decided here. Check out with "
+                "`fetch-depth: 0`; a truncated history cannot refute an "
+                "ancestor and must not be read as having done so"
+            ),
+        )
+    completed = subprocess.run(
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", declared, measured],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode == 0:
+        return PredecessorObservation(
+            declared=declared,
+            measured=measured,
+            is_strict_ancestor=True,
+            detail=f"{declared} is a strict ancestor of {measured}",
+        )
+    if completed.returncode == 1:
+        return PredecessorObservation(
+            declared=declared,
+            measured=measured,
+            is_strict_ancestor=False,
+            detail=("git reports it is not an ancestor of the measured revision"),
+        )
+    return PredecessorObservation(
+        declared=declared,
+        measured=measured,
+        is_strict_ancestor=None,
+        detail=(
+            f"`git merge-base --is-ancestor` exited {completed.returncode}: "
+            f"{completed.stderr.strip() or 'no diagnostic'}. The usual cause "
+            "is that the commit is not present in this checkout at all. An "
+            "exit code that is neither 0 nor 1 is not a refutation and is not "
+            "read as one"
+        ),
+    )
+
+
 def _declaration_summary(outcome: DeclarationOutcome) -> dict[str, object]:
     if isinstance(outcome, DeclarationPresent):
         declaration = outcome.declaration
-        return {
+        summary: dict[str, object] = {
             "state": "present",
             "contract": declaration.contract,
             "applicability": declaration.applicability.value,
-            "declared_product_revision": declaration.product_revision,
             "transitional_surfaces": len(declaration.transitional_surfaces),
         }
+        if isinstance(declaration, KernelAdoptionDeclarationV2):
+            summary["declared_at"] = declaration.declared_at.isoformat()
+            summary["source_predecessor"] = declaration.source_predecessor
+            summary["required_surfaces"] = len(declaration.required_surfaces)
+        else:
+            summary["declared_product_revision"] = declaration.product_revision
+        return summary
     return {"state": type(outcome).__name__, "detail": outcome.detail}
 
 
-@dataclass(frozen=True)
+#: Every `RunReport` this process's `run()` produced, held weakly.
+#:
+#: This is the whole of the answer to "did the runner produce this, or did
+#: someone write it?" -- see `citability`. A `WeakSet` rather than a list so a
+#: long-lived process does not retain every report it ever made, and identity
+#: membership rather than value membership, which is why `RunReport` is
+#: `eq=False`: with dataclass equality, a hand-built report equal in every
+#: field would test as a member of this set and the distinction would be
+#: decoration.
+_PRODUCED: weakref.WeakSet[RunReport] = weakref.WeakSet()
+
+
+@dataclass(frozen=True, eq=False)
 class RunReport:
-    """One run, bound to the two revisions that produced and were measured."""
+    """One run, bound to the two revisions that produced and were measured.
+
+    `eq=False` is load-bearing rather than an omission: identity is what
+    `_PRODUCED` membership must test. Two reports with identical fields are
+    still two reports, and only one of them came out of `run()`.
+    """
 
     as_of: date
     provenance: Provenance
@@ -603,6 +725,14 @@ def run(
             f"{type(observation).__name__}, not a ProductObservation"
         )
 
+    predecessor: PredecessorObservation | None = None
+    if isinstance(outcome, DeclarationPresent) and isinstance(
+        outcome.declaration, KernelAdoptionDeclarationV2
+    ):
+        predecessor = _predecessor_observation(
+            root, outcome.declaration.source_predecessor, product_revision
+        )
+
     report = evaluate(
         KernelAdoptionInputs(
             sources=observation.sources,
@@ -610,9 +740,10 @@ def run(
             declaration=outcome,
             as_of=as_of,
             pin_sites=observation.pin_sites,
+            predecessor=predecessor,
         )
     )
-    return RunReport(
+    result = RunReport(
         as_of=as_of,
         provenance=provenance,
         governance_origin_configured=origin_configured,
@@ -630,21 +761,75 @@ def run(
         catalogue=observation.catalogue,
         report=report,
     )
+    # The one place a report becomes citable-in-principle. Registered AFTER
+    # construction succeeds, so a partially built report never enters the set.
+    _PRODUCED.add(result)
+    return result
 
 
-def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
-    """Whether a run report may be cited as CI enforcement, and why not if not.
+class DocumentVerdict(str, Enum):
+    """What can be established by reading a run report DOCUMENT, and no more.
 
-    Every condition below is one an enrolment claim has been made without
-    somewhere in this fleet. The predicate exists so that "Platform's Kernel
-    adoption is CI-enforced" is a sentence with a checkable referent, and so
-    that a product pinning a Governance revision predating the runner is
-    VISIBLY unenforced rather than indistinguishable from an enforced one — it
-    produces no document at all, and no document is not a pass.
+    Two values, and the absent third is the point. There is deliberately no
+    `CITABLE` member, because no property of a JSON document establishes that
+    a run produced it: anyone who can write the file can write a well-formed
+    one. A reader holding a document literally cannot obtain "citable" from
+    this function, which is a stronger guarantee than a caveat in a docstring
+    that the next reader skips.
     """
 
-    def reject(reason: str) -> tuple[bool, str]:
-        return False, reason
+    #: Every internal-consistency condition holds. This says the document does
+    #: not contradict ITSELF. It says nothing whatever about where it came from.
+    WELL_FORMED = "well_formed"
+    #: A condition failed. Not a run report, or one that disagrees with itself.
+    MALFORMED = "malformed"
+
+
+class Citability(str, Enum):
+    """Whether a report may be cited as CI enforcement. Two values, no third."""
+
+    CITABLE = "citable"
+    NOT_CITABLE = "not_citable"
+
+
+def inspect_report_document(
+    document: Mapping[str, object],
+) -> tuple[DocumentVerdict, str]:
+    """Check a run-report document against ITSELF. Never against reality.
+
+    **This function cannot decide enforcement and no longer pretends to.**
+    Until 2026-09-06 it was `is_enforced(document) -> (bool, str)`, and open
+    decision 52 (5) named the defect precisely: `is_enforced` was a predicate
+    over a REPORT, not over a repository, so anyone who could write the JSON
+    could write a passing one. Its own test suite demonstrated it -- the admit
+    control was a hand-built dictionary that returned `True`. A predicate whose
+    positive case has only ever been exhibited by a fabricated input is not
+    measuring what its name says.
+
+    What was available to fix it, and what was chosen. Re-derivation from
+    inputs is not possible here: the document's inputs are a product checkout
+    at a revision this process may no longer hold. A coordinate only a real run
+    could compute would be a signature, which is open decision 17's oracle and
+    must not be invented here. So the third option is taken -- **the predicate
+    refuses to answer outside a context it can verify** -- and it is
+    implemented structurally: this function's return type has no citable value
+    in it, and `citability` takes a `RunReport` OBJECT that must have come out
+    of `run()` in this process.
+
+    **The honest boundary, stated plainly: a run report written to disk is not
+    self-authenticating and this change does not make it one.** The citable
+    claim lives in the EXIT CODE of the job that performed the run, not in the
+    artifact it left behind. A consumer reading a stored document gets
+    `WELL_FORMED` at best, which means "this document does not contradict
+    itself", and any further claim about it needs an oracle this repository
+    does not have.
+
+    Every condition below is one an enrolment claim has been made without
+    somewhere in this fleet.
+    """
+
+    def reject(reason: str) -> tuple[DocumentVerdict, str]:
+        return DocumentVerdict.MALFORMED, reason
 
     if document.get("contract") != RUN_CONTRACT:
         return reject(
@@ -715,31 +900,6 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
             f"the declaration was {declaration.get('state')!r} rather than "
             "present, which is a refusal"
         )
-    #: The narrowing that makes everything above honest. An `applicable`
-    #: declaration carries `product_revision`, `kernel_catalogue` and
-    #: `required_surfaces`, and this runner reads NONE of them. A report over
-    #: such a declaration therefore cannot be cited as enforcement of the
-    #: declaration -- it enforces the part that is read, and the part that is
-    #: read is not the whole document.
-    #:
-    #: A `not_applicable` self-run is citable, and NOT because it has no unread
-    #: field -- it has one. `product_revision` is required of every declaration
-    #: and compared with nothing, which is why it is now disclosed on both
-    #: paths. It is citable because what such a declaration CLAIMS is a
-    #: premise -- "this repository consumes no Kernel" -- and that premise IS
-    #: evaluated, against the repository's own imports, and refused when false.
-    #: An `applicable` declaration claims three further things that nothing
-    #: reads, so citing it would assert coverage that does not exist.
-    if declaration.get("applicability") != (
-        KernelAdoptionApplicability.NOT_APPLICABLE.value
-    ):
-        return reject(
-            "the declaration is 'applicable', and this runner does not "
-            "evaluate product_revision, kernel_catalogue or required_surfaces. "
-            "An applicable run is NOT citable as enforcement until the "
-            "versioned successor contract exists (open decision 52); citing it "
-            "would claim coverage of three declared fields nothing reads"
-        )
     findings = document.get("findings")
     if not isinstance(findings, Mapping):
         return reject("the report records no findings section")
@@ -786,10 +946,84 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
             f"{len(items)} finding(s), none of them an error. A report that "
             "disagrees with itself is refused in both directions"
         )
-    return True, (
-        f"conforming run of Governance {revision} over product {measured}, "
-        f"{count} source file(s), {len(items)} notice(s), no errors, as of "
-        f"{document.get('as_of')}"
+    return DocumentVerdict.WELL_FORMED, (
+        f"self-consistent run report: Governance {revision} over product "
+        f"{measured}, {count} source file(s), {len(items)} notice(s), no "
+        f"errors, as of {document.get('as_of')}. This says the document "
+        "agrees with itself and NOTHING about who wrote it"
+    )
+
+
+def citability(report: RunReport) -> tuple[Citability, str]:
+    """Whether a report `run()` produced in THIS process may be cited, and why not.
+
+    Three conditions, in the order that makes each refusal name one repair.
+
+    **1. This process produced it.** Identity membership of `_PRODUCED`. That
+    is the narrow, honest thing item (5) of open decision 52 asked for: it
+    distinguishes a runner-produced report from a caller-constructed one, and
+    it does so within the only scope where the distinction is decidable at all.
+    A `RunReport` a test or a caller builds by hand is refused however
+    plausible its fields, which is exactly what a hand-built dictionary used to
+    get away with.
+
+    **What this does NOT prove**, because the boundary is the finding: it says
+    nothing about a report in a file, in another process, or in another job.
+    Serialising a citable report and reading it back yields a document, and
+    `inspect_report_document` will only ever call a document well-formed.
+    Crossing that boundary needs an oracle -- decision 17 -- and inventing a
+    signature scheme here would be creating a second one.
+
+    **2. The document agrees with itself.** Every arm of
+    `inspect_report_document`, applied to this report's own serialization, so
+    the two can never diverge: the thing checked is the thing published.
+
+    **3. The declaration's contract is one whose fields are all read.** A
+    `KernelAdoptionDeclaration.v1` `applicable` declaration carries
+    `product_revision`, `kernel_catalogue` and `required_surfaces`, and no arm
+    reads them, so a report over one cannot be cited as enforcing it. That
+    refusal stands unchanged. A `v2` `applicable` declaration is citable
+    because every field v2 requires has an arm -- which is what the successor
+    contract is FOR. A `not_applicable` declaration of either version is
+    citable on the reasoning ADR 0042 § A8 already settled: what it claims is a
+    premise, and the premise is independently evaluated.
+    """
+    if report not in _PRODUCED:
+        return Citability.NOT_CITABLE, (
+            "this RunReport was not produced by run() in this process. A "
+            "report is citable as enforcement only where the run that made it "
+            "can be established, and constructing the type is not performing "
+            "the run. A stored document can never satisfy this: the citable "
+            "claim lives in the exit code of the job that ran, not in the "
+            "artifact it left behind"
+        )
+    document = report.to_dict()
+    verdict, reason = inspect_report_document(document)
+    if verdict is not DocumentVerdict.WELL_FORMED:
+        return Citability.NOT_CITABLE, reason
+    outcome = report.declaration
+    if not isinstance(outcome, DeclarationPresent):
+        # Unreachable: `inspect_report_document` already refuses a declaration
+        # state other than `present`. Kept because a refusal that depends on
+        # another function's arm is a refusal that disappears when that arm
+        # moves.
+        return Citability.NOT_CITABLE, (
+            f"the declaration was {type(outcome).__name__}, which is a refusal"
+        )
+    declaration = outcome.declaration
+    applicable = declaration.applicability is KernelAdoptionApplicability.APPLICABLE
+    if applicable and declaration.contract == KERNEL_ADOPTION_CONTRACT:
+        return Citability.NOT_CITABLE, (
+            f"the declaration is {KERNEL_ADOPTION_CONTRACT} and 'applicable', "
+            "and no arm reads its product_revision, kernel_catalogue or "
+            "required_surfaces. Citing it would claim coverage of three "
+            "declared fields nothing compares. The repair is the successor "
+            f"contract {KERNEL_ADOPTION_CONTRACT_V2}, whose every required "
+            "field has an arm -- not an edit to v1, which is frozen"
+        )
+    return Citability.CITABLE, (
+        f"{reason}; declaration {declaration.contract} "
+        f"'{declaration.applicability.value}', produced by this run"
     )
 
 
@@ -842,11 +1076,12 @@ def main(argv: list[str] | None = None) -> int:
     - **1** -- the run found violations.
     - **2** -- the run could not be made: no provenance, no observation, an
       unreadable profile. Nothing was measured.
-    - **3** -- the run conformed and is NOT citable. Today an `applicable`
-      declaration always lands here, by decision rather than by defect: three
-      of its fields are unread, so the run cannot be cited as enforcing the
-      declaration, and open decision 52 owns the successor contract that fixes
-      it. A dirty worktree lands here too.
+    - **3** -- the run conformed and is NOT citable. A `KernelAdoptionDeclaration.v1`
+      `applicable` declaration always lands here, by decision rather than by
+      defect: three of its fields are unread, so the run cannot be cited as
+      enforcing the declaration. A `v2` `applicable` declaration does NOT --
+      that is what the successor contract activated. A dirty worktree lands
+      here too.
     """
     parser = argparse.ArgumentParser(
         prog="kernel_adoption_control",
@@ -901,18 +1136,18 @@ def main(argv: list[str] | None = None) -> int:
             f"{finding.message}"
         )
 
-    enforced, reason = is_enforced(document)
+    verdict, reason = citability(result)
     print(
         f"kernel-adoption: governance {result.governance_revision} "
         f"({result.provenance.value}) over {result.product_root} at "
         f"{result.product_revision}, {result.source_count} source file(s), as "
         f"of {result.as_of.isoformat()}"
     )
-    print(f"kernel-adoption: citable as enforcement: {enforced} ({reason})")
+    print(f"kernel-adoption: citable as enforcement: {verdict.value} ({reason})")
     if not result.report.conforms:
         return 1
-    if not enforced:
-        # `is_enforced` was printed and nothing acted on it, so a step could go
+    if verdict is not Citability.CITABLE:
+        # The predicate was printed and nothing acted on it, so a step could go
         # green while announcing that its own result was not citable. A
         # predicate no exit code consults is a comment.
         print(

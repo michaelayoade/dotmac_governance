@@ -40,11 +40,18 @@ from standards_control.contracts import Severity
 from .declaration_contract import (
     KernelAdoptionApplicability,
     KernelAdoptionDeclaration,
+    ProhibitedSurface,
+    RequiredSurface,
     TransitionalSurface,
+)
+from .declaration_contract_v2 import (
+    AnyKernelAdoptionDeclaration,
+    KernelAdoptionDeclarationV2,
 )
 
 __all__ = [
     "AdoptionReport",
+    "AnyKernelAdoptionDeclaration",
     "DeclarationEmpty",
     "DeclarationIncomplete",
     "DeclarationMissing",
@@ -55,9 +62,14 @@ __all__ = [
     "FindingCode",
     "KernelAdoptionApplicability",
     "KernelAdoptionDeclaration",
+    "KernelAdoptionDeclarationV2",
     "KernelAdoptionInputs",
     "KernelSurfaceCatalogue",
     "PinSite",
+    "PredecessorObservation",
+    "normalise_observed_path",
+    "ProhibitedSurface",
+    "RequiredSurface",
     "Severity",
     "TransitionalSurface",
 ]
@@ -142,6 +154,84 @@ class FindingCode(str, Enum):
     #: over every import it made.
     CATALOGUE_ABSENT = "kernel.catalogue.absent"
 
+    # --- KernelAdoptionDeclaration.v2 --------------------------------------
+    # Every code below exists because a v2 field is READ. They are the repair
+    # for `DECLARATION_FIELDS_UNEVALUATED`, which stays: a v1 `applicable`
+    # declaration is still three unread fields and still non-citable.
+
+    #: The declared `source_surface` digest and the digest derived from the
+    #: measured source disagree. The declaration describes a Kernel surface the
+    #: product no longer has -- or has not yet -- so every classification in it
+    #: is being applied to source it was not written against.
+    SOURCE_SURFACE_DRIFT = "kernel.source.surface-drift"
+    #: An `applicable` declaration was measured over source containing NO
+    #: Kernel import at all. Its own code, and the vacuity canary for the
+    #: coordinate above: the digest of an empty surface set is a CONSTANT, so
+    #: every Kernel-free product would share it and a declaration could match
+    #: it by describing nothing. A product that declares Kernel adoption and
+    #: imports no Kernel has stated something its own source contradicts.
+    SURFACE_NONE_OBSERVED = "kernel.surface.none-observed"
+    #: The declared `source_predecessor` is not an ancestor of the revision
+    #: that was measured. Either the commit is not in this repository's history
+    #: at all, or it is not behind what was measured.
+    PREDECESSOR_NOT_ANCESTOR = "kernel.source.predecessor-not-ancestor"
+    #: Ancestry could not be decided -- a shallow clone is the usual reason. A
+    #: refusal, not silence: `fetch-depth: 0` is the repair, and a coordinate
+    #: that cannot be checked is unmonitored rather than satisfied.
+    PREDECESSOR_UNVERIFIABLE = "kernel.source.predecessor-unverifiable"
+
+    #: The declared `kernel_catalogue` and the catalogue the observer supplied
+    #: are not the same Kernel. Until this code existed a product could declare
+    #: one Kernel and be measured against a self-authored catalogue for
+    #: another, and every surface verdict would be taken against module lists
+    #: nobody bound to the declared version.
+    CATALOGUE_DISAGREES = "kernel.catalogue.disagrees"
+    #: A v2 `applicable` declaration was run with no catalogue, or with one
+    #: carrying no artifact digest, so the binding above could not be made.
+    CATALOGUE_UNBOUND = "kernel.catalogue.unbound"
+    #: The supplied catalogue publishes no modules. A sweep against an empty
+    #: catalogue would report every import unknown OR, if the arm were written
+    #: the other way, nothing at all; either way the catalogue is not one.
+    CATALOGUE_EMPTY = "kernel.catalogue.empty"
+
+    #: A `required_surfaces` entry names a module the declared Kernel does not
+    #: publish. A dependency on a name that is not there.
+    REQUIRED_UNPUBLISHED = "kernel.required.unpublished"
+    #: A `required_surfaces` entry names a module nothing in the measured
+    #: source imports. A declared dependency with no use is the same defect
+    #: this package exists for, one level in: a field somebody wrote and
+    #: nothing reads.
+    REQUIRED_UNUSED = "kernel.required.unused"
+    #: A Kernel module IS imported and the declaration classifies it as
+    #: nothing -- not required, not transitional, not prohibited. The other
+    #: direction of the arm above, and the one that makes `required_surfaces`
+    #: an inventory rather than a sample.
+    SURFACE_UNCLASSIFIED = "kernel.surface.unclassified"
+    #: A declared `floor` is HIGHER than the Kernel version the declaration
+    #: itself binds. The product states it needs a Kernel it is not composing.
+    REQUIRED_FLOOR_UNSATISFIED = "kernel.required.floor-unsatisfied"
+    #: A `floor` or a Kernel version could not be ordered. Refused rather than
+    #: guessed: an invented order reports a verdict over a question never asked.
+    REQUIRED_FLOOR_UNORDERABLE = "kernel.required.floor-unorderable"
+    #: `proven_by` names a path the run did not read, so the proof cannot be
+    #: examined. A floor whose proof is unreadable is a number somebody typed.
+    REQUIRED_PROOF_UNREAD = "kernel.required.proof-unread"
+    #: `proven_by` names a file the run DID read, and that file never mentions
+    #: the module it is offered as proof of. The weakest of the proof arms and
+    #: stated as such -- it establishes that the proof is about the right
+    #: subject, not that it proves anything.
+    REQUIRED_PROOF_SILENT = "kernel.required.proof-silent"
+
+    #: `declared_at` is after the date the run is asked about. A declaration
+    #: cannot have been written after the run that reads it.
+    DECLARED_AT_AHEAD = "kernel.declaration.dated-ahead"
+    #: A transitional expiry had ALREADY passed on the day the declaration was
+    #: written. Decidable without inventing a staleness policy, and it is the
+    #: shape a copied declaration takes: the dates came with the file.
+    TRANSITIONAL_EXPIRY_PREDATES_DECLARATION = (
+        "kernel.transitional.expiry-predates-declaration"
+    )
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -171,6 +261,46 @@ class Finding:
         return result
 
 
+def normalise_observed_path(path: PurePosixPath) -> str:
+    """One spelling of a caller-supplied path, for deciding INDEPENDENCE.
+
+    Decision 52 (E), deferred on 2026-09-06 and repaired here because
+    applicable activation is what makes the pin arm real enforcement.
+
+    `PurePosixPath` does not resolve `..`, so `pyproject.toml` and
+    `x/../pyproject.toml` compared unequal and counted as two INDEPENDENT
+    observations of the pin. The arm requires two before it can report a
+    disagreement, so one line of one file, written twice in two spellings,
+    satisfied it. That catches accidental duplication and not a product that
+    wants to pass -- and the data is caller-supplied, which is precisely the
+    case where the second matters.
+
+    Normalization is LEXICAL and deliberately not `Path.resolve()`: resolving
+    would touch the filesystem, and the engine reads only its inputs. `.`
+    segments are dropped and `..` pops the previous segment.
+
+    It is also CASE-FOLDED, and that direction is chosen fail-closed. On a
+    case-insensitive filesystem `PyProject.toml` and `pyproject.toml` are one
+    file; on a case-sensitive one they are two. Collapsing them counts FEWER
+    independent observations, so the arm refuses where it might have passed.
+    The opposite choice would let a case change manufacture independence.
+
+    What it does not catch, stated rather than left to be discovered: a symlink
+    or a bind mount making two genuinely different paths the same file. The
+    engine sees strings, and no lexical rule can see through a link.
+    """
+    parts: list[str] = []
+    for part in path.as_posix().split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts).casefold()
+
+
 @dataclass(frozen=True)
 class PinSite:
     """One place a product states the Kernel version it adopts.
@@ -188,6 +318,36 @@ class PinSite:
     #: constant, a bill-of-materials floor. Carried so the message can say
     #: which two KINDS disagree, which is usually the actual defect.
     kind: str
+
+    @property
+    def independence_key(self) -> tuple[str, int]:
+        """What makes this observation DISTINCT from another one.
+
+        The normalised path and the line. Never the raw path: see
+        `normalise_observed_path`.
+        """
+        return normalise_observed_path(self.path), self.line
+
+
+@dataclass(frozen=True)
+class PredecessorObservation:
+    """Whether the declared `source_predecessor` really precedes what was measured.
+
+    Observed by the runner, which has the product checkout and Git; carried as
+    DATA so the engine stays a pure function of its inputs and the verdict can
+    be tested without a repository.
+
+    `is_strict_ancestor` is a THREE-valued field on purpose. `True` and `False`
+    are answers; `None` means the question could not be decided -- a shallow
+    clone is the usual reason, and `fetch-depth: 0` the usual repair. There is
+    no fourth state and no default, because a coordinate that could not be
+    checked must be reported as unmonitored rather than read as satisfied.
+    """
+
+    declared: str
+    measured: str
+    is_strict_ancestor: bool | None
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -207,6 +367,17 @@ class KernelSurfaceCatalogue:
     version: str
     supported: frozenset[str]
     internal: frozenset[str]
+    #: The digest of the Kernel DISTRIBUTION the observer found installed or
+    #: locked -- for a Poetry product, the `sha256:` in `poetry.lock`. A
+    #: repository-local fact the observer read, NOT a registry attestation:
+    #: verifying it against a registry needs open decision 17's oracle.
+    #:
+    #: `None` is an explicit absence and never means "skip". A v2 `applicable`
+    #: declaration binds this field, so an observer that supplies none is
+    #: reported `kernel.catalogue.unbound` rather than passing the binding.
+    #: Defaulted only so that every existing caller keeps compiling; a caller
+    #: that omits it has stated an absence, not accepted a default.
+    artifact_digest: str | None = None
 
     @property
     def known(self) -> frozenset[str]:
@@ -215,9 +386,15 @@ class KernelSurfaceCatalogue:
 
 @dataclass(frozen=True)
 class DeclarationPresent:
-    """The repository declared its Kernel-surface classifications."""
+    """The repository declared its Kernel-surface classifications.
 
-    declaration: KernelAdoptionDeclaration
+    EITHER contract. `KernelAdoptionDeclaration.v1` is frozen and still
+    parsed; `KernelAdoptionDeclarationV2` is the successor. The arms that were
+    already honest read the attributes both carry; the arms that are new to v2
+    ask for a v2 by type and say so when they get a v1.
+    """
+
+    declaration: AnyKernelAdoptionDeclaration
 
 
 @dataclass(frozen=True)
@@ -335,6 +512,13 @@ class KernelAdoptionInputs:
     #: reproducible rather than merely correct on the day.
     as_of: date
     pin_sites: tuple[PinSite, ...] = ()
+    #: The runner's Git observation of `source_predecessor`, or `None` when
+    #: there was nothing to observe -- a v1 declaration, or a refusal, states
+    #: no predecessor. `None` is NOT "it was fine": a v2 declaration evaluated
+    #: with no observation is reported `kernel.source.predecessor-unverifiable`,
+    #: because an engine invoked directly by a caller who skipped the probe
+    #: must not thereby report the coordinate clean.
+    predecessor: PredecessorObservation | None = None
 
 
 @dataclass(frozen=True)

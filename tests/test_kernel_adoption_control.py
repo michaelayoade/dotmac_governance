@@ -829,10 +829,65 @@ class DeclarationContract(unittest.TestCase):
         )
 
 
-#: Modules the digest arm of the boundary sweep does not cover, each with an
-#: enforceable premise asserted below. "Exempt" and "unmonitored" are different
-#: states, and a list with no premise turns the first into the second.
-EXEMPT_FROM_THE_DIGEST_SWEEP = frozenset({"declaration_contract"})
+#: Every digest-named attribute this package may hold, module-qualified, and
+#: what each one is.
+#:
+#: This REPLACED a blanket "no attribute whose name contains 'digest'" rule
+#: plus a named exemption for `declaration_contract`. That shape stopped
+#: working the moment the package acquired digests OF ITS OWN -- the v2
+#: source-surface and catalogue coordinates -- and the available repairs were
+#: to exempt three more modules wholesale or to state the premise exactly. A
+#: blanket exemption turns "reviewed and correct" into "unmonitored", so the
+#: premise is stated: the boundary is that no FOUNDATION PROFILE digest lives
+#: here, not that the word may not appear.
+#:
+#: It is a two-directional ratchet. A new digest-named attribute fails until it
+#: is named here with a reason, and a name that disappears fails until it is
+#: removed -- an allowlist that may only grow stops describing the package.
+PACKAGE_OWNED_DIGEST_NAMES: dict[str, frozenset[str]] = {
+    # The pattern validating a `sha256:` coordinate, shared by both contracts.
+    "declaration_contract": frozenset({"_DIGEST"}),
+    "declaration_contract_v2": frozenset({"_DIGEST", "_digest"}),
+    # The two v2 coordinates and the canonicalization one of them is taken
+    # under. Both identify PRODUCT source or the KERNEL catalogue; neither is a
+    # Foundation profile, which is the thing this boundary exists to keep out.
+    "surface": frozenset(
+        {"CATALOGUE_DIGEST_ALGORITHM", "catalogue_digest", "surface_digest"}
+    ),
+    # Imported, not defined: the engine is where the coordinates are compared.
+    "engine": frozenset({"catalogue_digest", "surface_digest"}),
+    "__init__": frozenset(
+        {"CATALOGUE_DIGEST_ALGORITHM", "catalogue_digest", "surface_digest"}
+    ),
+}
+
+#: What may never appear in ANY module here, at any time, under any premise.
+#: These are Foundation's, and a second one is the defect ADR 0042 § 1 names.
+FORBIDDEN_EVERYWHERE = ("APPLICATION_PROFILE_SCHEMA", "canonical_bytes")
+
+
+def _package_modules() -> dict[str, object]:
+    """Every module in the package, imported, keyed by stem. Derived from disk.
+
+    ADR 0034: a gate that enumerates its targets must admit every one of them.
+    A hand-written module list is the shape that silently stops covering a
+    package -- the next module is added, every assertion stays green, and the
+    new file is unmonitored rather than clean.
+    """
+    import importlib
+
+    package = Path(__file__).resolve().parent.parent / "kernel_adoption_control"
+    found: dict[str, object] = {}
+    for path in sorted(package.glob("*.py")):
+        if path.stem == "__main__":
+            continue
+        name = (
+            "kernel_adoption_control"
+            if path.stem == "__init__"
+            else f"kernel_adoption_control.{path.stem}"
+        )
+        found[path.stem] = importlib.import_module(name)
+    return found
 
 
 class BoundaryIsStructural(unittest.TestCase):
@@ -843,81 +898,76 @@ class BoundaryIsStructural(unittest.TestCase):
     still a second parser, so its absence is a test rather than a paragraph.
     """
 
-    def test_the_package_declares_no_profile_schema_and_no_digest(self) -> None:
-        import kernel_adoption_control
-        from kernel_adoption_control import (
-            contracts,
-            declaration,
-            engine,
-            foundation_binding,
-            runner,
-        )
+    def test_the_sweep_covers_every_module_in_the_package(self) -> None:
+        """Non-vacuity for everything below: the target set is not empty.
 
-        # A gate that enumerates its targets must admit every one of them
-        # (ADR 0034). `runner` was added by ADR 0042's activation amendment; a
-        # list that did not grow with the package would have left the one new
-        # module unmonitored while still reporting green.
-        for module in (
-            kernel_adoption_control,
-            contracts,
-            declaration,
-            engine,
-            foundation_binding,
-            runner,
-        ):
+        A sweep derived from a glob passes trivially if the glob finds nothing,
+        and the modules it names would then be unmonitored rather than clean.
+        """
+        modules = _package_modules()
+        self.assertGreaterEqual(len(modules), 9, sorted(modules))
+        for expected in ("contracts", "engine", "runner", "declaration_contract_v2"):
+            self.assertIn(expected, modules)
+
+    def test_no_module_declares_a_profile_schema_or_a_canonical_serializer(
+        self,
+    ) -> None:
+        for stem, module in _package_modules().items():
             names = set(dir(module))
-            for forbidden in ("APPLICATION_PROFILE_SCHEMA", "canonical_bytes"):
-                self.assertNotIn(forbidden, names, module.__name__)
-            for name in names:
-                self.assertNotIn("digest", name.lower(), f"{module.__name__}.{name}")
+            for forbidden in FORBIDDEN_EVERYWHERE:
+                self.assertNotIn(forbidden, names, stem)
 
-    def test_the_boundary_sweep_covers_every_module_in_the_package(self) -> None:
-        """The enumeration above is compared to the package, not trusted.
+    def test_every_digest_named_attribute_is_one_this_package_owns(self) -> None:
+        """The premise, stated exactly rather than exempted wholesale.
 
-        A hand-written module list is exactly the shape that silently stops
-        covering a package: the next module is added, every assertion stays
-        green, and the new file is unmonitored rather than clean. This makes
-        the list a ratchet -- adding a module fails this test until the sweep
-        names it.
+        Two directions. An unlisted digest-named attribute fails -- which is how
+        a Foundation profile digest would arrive. A LISTED one that no longer
+        exists fails too, so the allowlist cannot outlive the code it describes.
         """
-        package = Path(__file__).resolve().parent.parent / "kernel_adoption_control"
-        on_disk = {
-            path.stem
-            for path in package.glob("*.py")
-            if path.stem not in {"__init__", "__main__"}
-        }
-        swept = {"contracts", "declaration", "engine", "foundation_binding", "runner"}
-        self.assertEqual(
-            on_disk,
-            swept | EXEMPT_FROM_THE_DIGEST_SWEEP,
-            "a module exists that the boundary sweep above neither names nor "
-            "exempts with a reason",
-        )
+        for stem, module in _package_modules().items():
+            allowed = PACKAGE_OWNED_DIGEST_NAMES.get(stem, frozenset())
+            present = {name for name in dir(module) if "digest" in name.lower()}
+            self.assertEqual(
+                allowed,
+                present,
+                f"kernel_adoption_control.{stem}: the digest-named attributes "
+                "present and the ones declared package-owned disagree. A new "
+                "one is named here with a reason, or it is a Foundation "
+                "concern that does not belong in this package",
+            )
 
-    def test_the_one_exemption_states_a_premise_that_is_checked(self) -> None:
-        """`declaration_contract` is exempt from the digest arm, and only that.
+    def test_the_allowlist_names_no_module_that_does_not_exist(self) -> None:
+        """The other half of the ratchet, at module granularity."""
+        self.assertLessEqual(set(PACKAGE_OWNED_DIGEST_NAMES), set(_package_modules()))
 
-        The arm forbids any attribute whose name contains "digest", because a
-        Foundation profile digest here would be this package becoming the
-        second verifier. `declaration_contract` carries
-        `KernelCatalogueEvidence.artifact_digest` and the `_DIGEST` pattern
-        validating it, and neither is a profile digest: they identify the
-        KERNEL artifact a declaration was written against, which is the
-        immutable coordinate ADR 0013 § 3 requires and which this package owns.
+    def test_the_digest_arm_bites(self) -> None:
+        """Sensitivity. A clean tree proves nothing about the detector itself.
 
-        A blanket exemption would leave the module unmonitored. So the premise
-        is enforced instead: the two digest-named attributes are enumerated,
-        the module is required to hold no others, and the rest of the boundary
-        -- no profile schema constant, no canonical serializer -- still applies
-        to it.
+        Planted: a module carrying an undeclared digest-named attribute is
+        NAMED. Near-miss: an attribute whose name merely CONTAINS a substring of
+        it -- `digestible` contains "digest" and would be caught, so the
+        near-miss is a name that does not, and must stay silent.
         """
-        from kernel_adoption_control import declaration_contract
+        import types
 
-        names = set(dir(declaration_contract))
-        for forbidden in ("APPLICATION_PROFILE_SCHEMA", "canonical_bytes"):
-            self.assertNotIn(forbidden, names)
-        digest_named = {name for name in names if "digest" in name.lower()}
-        self.assertEqual({"_DIGEST"}, digest_named)
+        planted = types.ModuleType("planted")
+        planted.PROFILE_DIGEST = "sha256:x"  # type: ignore[attr-defined]
+        present = {name for name in dir(planted) if "digest" in name.lower()}
+        self.assertIn("PROFILE_DIGEST", present)
+
+        near_miss = types.ModuleType("near_miss")
+        near_miss.artifact_reference = "sha256:x"  # type: ignore[attr-defined]
+        quiet = {name for name in dir(near_miss) if "digest" in name.lower()}
+        self.assertEqual(set(), quiet)
+
+    def test_the_one_module_carrying_the_frozen_contract_still_holds_its_digest(
+        self,
+    ) -> None:
+        """`KernelCatalogueEvidence.artifact_digest` is v1's and stays v1's.
+
+        v1 is frozen. The successor carries its own catalogue binding, and this
+        asserts the frozen one was not quietly edited into it.
+        """
         self.assertIn(
             "artifact_digest",
             {field.name for field in dataclasses.fields(KernelCatalogueEvidence)},

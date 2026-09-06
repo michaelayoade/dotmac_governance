@@ -629,6 +629,161 @@ Added in the second pass, after review:
   that its own result was uncitable. Found by review, settled by observation:
   CI now prints `True`.
 
+## Amendment, 2026-09-06: the successor contract, and applicable activation
+
+§ A8 said an `applicable` report is explicitly NON-CITABLE, and open decision
+52 owned the repair. This is that repair. It is a **versioned successor**:
+`KernelAdoptionDeclaration.v1` is frozen, both contracts are parsed, a v1
+document is admitted with exactly the refusals it always had, and this
+repository's own `not_applicable` v1 declaration is untouched and stays citable
+on § A8's reasoning.
+
+### B1. The non-self-referential source coordinate — decision 52 (A)
+
+`product_revision` was required of every declaration and compared with nothing,
+and it cannot be compared: *"a committed file cannot contain its own commit."*
+v2 replaces it with **two** coordinates, because one cannot do both jobs.
+
+**`source_predecessor`** is a peeled commit the runner verifies is a STRICT
+ancestor of the revision measured, by `git merge-base --is-ancestor` inside the
+measured repository's own job — a repository-local fact, so ADR 0013 § 1 needs
+no oracle. Equality is refuted explicitly: `--is-ancestor` calls a commit its
+own ancestor, so a declaration naming the revision that contains it would
+otherwise pass while claiming something impossible. An exit code that is
+neither 0 nor 1 — a shallow clone, the `actions/checkout` default — is
+**undecided**, not a refutation: it reports `kernel.source.predecessor-unverifiable`
+and names `fetch-depth: 0`. *Proves:* the coordinate exists in this
+repository's history and is behind what was measured. *Does not prove:* that
+the declaration was written at that commit, that the commit is related to the
+declaration, or anything about the source. A product may name its first commit
+and satisfy it forever.
+
+**`source_surface`** is a digest the engine RE-DERIVES from the measured
+source: the canonical sorted rendering of every `(path, module, symbols, star)`
+Kernel fact, merged per file-and-module, with line numbers excluded. *Proves:*
+the declaration was written against exactly this Kernel surface; any import
+added, removed, renamed or moved refuses. It cannot be satisfied by editing the
+declaration alone, which converts silent staleness into a reviewable diff.
+*Does not prove:* a revision, a date, inventory completeness (it digests what
+was MEASURED — an observer that never grew to cover a directory stays
+invisible), any non-Kernel change (deliberately: a coordinate that refuses on
+every commit is a coordinate that gets deleted), or authorship.
+
+The empty surface digest is a CONSTANT every Kernel-free product would share.
+That is a vacuity hazard rather than a feature, and the canary is its own
+verdict: an `applicable` declaration over zero Kernel imports is
+`kernel.surface.none-observed`.
+
+### B2. The catalogue is bound four ways — decision 52 (B)
+
+`kernel_catalogue` was never compared with the catalogue the observer supplies,
+so a product could declare one Kernel and be measured against a self-authored
+catalogue for another. v2 compares version, peeled revision, distribution
+artifact digest, and **`catalogue_digest`** — a digest over the module LISTS
+themselves. The fourth is what makes the first three mean anything: without it
+a product may state the right version and hand the run another Kernel's lists,
+and every surface verdict is taken against a catalogue nobody bound. The
+planted defect is exactly that shape, and it is the only one the first three
+comparisons miss. The artifact digest is compared with what the observer read
+out of the product's own lock — a repository-local fact and **not** a registry
+attestation; that needs decision 17's oracle.
+
+### B3. `required_surfaces` is executable — decision 52 (C)
+
+Five questions, the fifth in the opposite direction because a one-directional
+inventory is a sample: the module must be PUBLISHED by the bound Kernel; it
+must be IMPORTED; the `floor` must be satisfied by the bound Kernel version
+(ordered by a narrow PEP 440 subset that REFUSES an epoch, a post-release, a
+dev release or a local version rather than mis-ordering it); `proven_by` must
+name a path the run READ; and every imported Kernel module must be classified
+as something. The `proven_by` arm's second half — that the proof MENTIONS its
+subject — is the weakest thing in this change and is labelled so rather than
+dressed up: it establishes the proof is about the right subject and not that it
+proves anything, and no check at this layer can read a test's meaning.
+
+### B4. Pin-path independence — decision 52 (E)
+
+Independence was a distinct `(path, line)` over CALLER-SUPPLIED data, and
+`PurePosixPath` does not resolve `..`, so `pyproject.toml` and
+`x/../pyproject.toml` were two independent observations of one line. It caught
+accidental duplication and not a product that wanted to pass. Normalization is
+lexical (never `resolve()`, which would touch the filesystem) and CASE-FOLDED,
+which is the fail-closed direction: collapsing counts FEWER observations, so
+the arm refuses where it might have passed. It cannot see through a symlink,
+and that is stated rather than left to be discovered. Two lines in one file
+stay independent — Sub states the pin four times in `pyproject.toml` alone — and
+that near-miss is asserted.
+
+### B5. A document cannot establish that a run produced it — decision 52 (5)
+
+`is_enforced` was a predicate over a REPORT, not over a repository: anyone who
+could write the JSON could write a passing one, and **its own admit control was
+a hand-built dictionary that returned `True`**. A predicate whose positive case
+had only ever been exhibited by a fabricated input was not measuring what its
+name said.
+
+Three repairs were weighed. Re-derivation from inputs is unavailable — the
+inputs are a product checkout at a revision the reading process may not hold. A
+coordinate only a real run could compute is a signature, which is decision 17's
+oracle and must not be invented here. So the third is taken: **the predicate
+refuses to answer outside a context it can verify**, and it is implemented
+structurally rather than by a caveat.
+
+`inspect_report_document(mapping) -> DocumentVerdict` has **no citable member
+in its value set**, so no amount of document-writing produces the claim.
+`citability(RunReport) -> Citability` requires identity membership of the set
+`run()` populates — `RunReport` is `eq=False` precisely so a hand-built report
+equal in every field is not a member.
+
+*What this proves:* within one process, that a report came out of `run()`
+rather than out of a constructor. *What it does not prove, and cannot:*
+anything about a report in a file, in another process, or in another job.
+**A run report on disk is not self-authenticating and this change does not make
+it one.** The citable claim lives in the EXIT CODE of the job that performed the
+run, not in the artifact it left behind. Crossing that boundary needs decision
+17's oracle. This is the smallest honest thing, not a closure.
+
+### B6. Activation, and where its boundary is
+
+A v2 `applicable` run is citable, and there is no
+`kernel.declaration.fields-unevaluated` notice on that path — every field v2
+requires has a named reader, asserted structurally by a field→reader map that
+fails when the dataclass grows a field nobody reads. A **v1** `applicable` run
+is still non-citable, still exits 3, and still publishes the notice.
+
+The first acceptance subject is `dotmac_platform_control_plane` at `origin/main`
+`f8865b1a43a6d6769d5fa3a3ab3eddfdf296cffb`, read READ-ONLY. Its real measured
+Kernel surface — 17 modules, 85 symbols, eleven `dotmac_kernel.db` sites across
+fourteen `(path, symbol)` pairs including
+`src/vendor_cp/rotation_runtime_oracle.pyprogram`, which is not a `.py` file —
+is in `tests/fixtures/platform-kernel-surface.json`, and the contract admits a
+declaration of that shape with no findings. **What that establishes is that the
+contract ADMITS a real product**, which a suite of refusals cannot establish
+about itself.
+
+**What it does not establish, and must not be read as:** Platform has no
+`.dotmac/kernel-adoption.json`, Governance does not write in product
+repositories, and none was created. No runner ran against Platform and no
+report exists. **Platform enrolment still requires Platform to write its
+declaration and add the step**, and until it does, Platform is an unmonitored
+region for this property. Under ADR 0013 § 1 the run happens in Platform's own
+CI or it does not happen.
+
+### B7. Drift prevention added by this amendment
+
+- Every new arm has a planted violation, a paired near-miss required to stay
+  silent, and an admit control. The two vacuity hazards report themselves: the
+  constant empty-surface digest, and an empty catalogue.
+- The boundary sweep's "no attribute containing `digest`" proxy was REPLACED
+  rather than exempted. The package now legitimately owns two digests of its
+  own, and a blanket exemption for three more modules would have turned
+  "reviewed and correct" into "unmonitored". Every digest-named attribute is
+  enumerated per module with what it is, two-directionally, and the module list
+  is derived from disk rather than hand-written.
+- A field→reader map over `KernelAdoptionDeclarationV2` fails when the
+  dataclass grows a field no engine arm names. That is the guard against v2
+  becoming v1.
+
 ## Consequences
 
 An enrolled repository's Kernel adoption is UNMONITORED rather than exempt

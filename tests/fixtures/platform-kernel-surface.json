@@ -1,0 +1,698 @@
+{
+ "_comment": [
+  "Measured Kernel-surface facts for michaelayoade/dotmac_platform_control_plane.",
+  "MEASURED, not copied: an AST sweep over `git show origin/main:<path>` for every",
+  "tracked *.py and *.pyprogram outside tests/, taken 2026-09-06 at the peeled",
+  "revision below. The .pyprogram entry is included deliberately -- it imports",
+  "dotmac_kernel.db and is invisible to a suffix-based sweep.",
+  "",
+  "This is a FIXTURE and is labelled one. It carries Platform's measured Kernel",
+  "surface and NOT Platform's source; the test synthesises one import statement",
+  "per fact so the engine has something to parse. Platform's own declaration is",
+  "Platform's to write and does not exist yet -- see the test module's docstring",
+  "for exactly what this can and cannot demonstrate."
+ ],
+ "repository": "michaelayoade/dotmac_platform_control_plane",
+ "revision": "f8865b1a43a6d6769d5fa3a3ab3eddfdf296cffb",
+ "measured_on": "2026-09-06",
+ "inventory_rule": "every tracked *.py and *.pyprogram outside tests/",
+ "module_count": 17,
+ "symbol_count": 85,
+ "facts": [
+  {
+   "path": "alembic/env.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "audit",
+    "models_platform",
+    "settings_models"
+   ]
+  },
+  {
+   "path": "alembic/env.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "messaging_models"
+   ]
+  },
+  {
+   "path": "alembic/env.py",
+   "module": "dotmac_kernel.models",
+   "symbols": [
+    "Base"
+   ]
+  },
+  {
+   "path": "alembic/env.py",
+   "module": "dotmac_kernel.planes",
+   "symbols": [
+    "install_module_plane_selections"
+   ]
+  },
+  {
+   "path": "alembic/env.py",
+   "module": "dotmac_kernel.prerequisites",
+   "symbols": [
+    "install_prerequisite_bindings"
+   ]
+  },
+  {
+   "path": "scripts/check_product_database_catalog_readiness.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "ModuleManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/models.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "Base",
+    "TimestampMixin",
+    "uuid_pk"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "NotFoundError",
+    "PlatformAdmin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/service.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "ConflictError",
+    "write_platform_audit_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/accounts/service.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "process_once_platform"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/allocations/consumer.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "ClaimedPlatformEvent"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/allocations/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/allocations/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "PlatformAdmin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/allocations/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/allocations/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/api_documentation.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals/adapter.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "ConflictError"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals/adapter.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "process_once_platform"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "PlatformAdmin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/approvals_authority.py",
+   "module": "dotmac_kernel.migrations.catalog",
+   "symbols": [
+    "ROLE_TABLE_PRIVILEGES_SQL",
+    "TABLE_PRIVILEGES"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/assembly.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "FeatureManifest",
+    "ModuleManifest",
+    "ProductAssemblySpec"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/cli/runtime.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "platform_session"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/console/feature.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "LocalizedText",
+    "ModuleManifest",
+    "WebNavItem",
+    "WebSurfaceContribution"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/contracts/adapter.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "ConflictError",
+    "DomainError",
+    "NotFoundError"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/contracts/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/contracts/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "NotFoundError",
+    "PlatformAdmin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/contracts/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/contracts/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/deployment/adapter.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "NotFoundError"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/adapter.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "ConflictError",
+    "NotFoundError"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/adapter.py",
+   "module": "dotmac_kernel.licensing",
+   "symbols": [
+    "LicenceKeyRing"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/delivery_models.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "Base",
+    "TimestampMixin",
+    "uuid_pk"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/intent_models.py",
+   "module": "dotmac_kernel.models",
+   "symbols": [
+    "Base",
+    "TimestampMixin",
+    "uuid_pk"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/projection.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "NotFoundError",
+    "write_platform_audit_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/projection.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "enqueue_platform_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "PlatformAdmin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/source_ports.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "ConflictError",
+    "NotFoundError"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/source_ports.py",
+   "module": "dotmac_kernel.audit",
+   "symbols": [
+    "write_platform_audit_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/licensing/transport.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "NotFoundError",
+    "write_platform_audit_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/main.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "create_app"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/migration_bindings.py",
+   "module": "dotmac_kernel.planes",
+   "symbols": [
+    "ModulePlane",
+    "ModulePlaneSelection"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/migration_bindings.py",
+   "module": "dotmac_kernel.prerequisites",
+   "symbols": [
+    "IDEMPOTENCY_LEDGER_V1",
+    "MODULE_DATABASE_ROLES_V1",
+    "OUTBOX_RELAY_V1",
+    "PLATFORM_AUDIT_LOG_V1",
+    "PrerequisiteBinding",
+    "TENANT_SCOPE_CATALOG_V1"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/migrations.py",
+   "module": "dotmac_kernel.migrations",
+   "symbols": [
+    "kernel_versions_dir"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/migrations.py",
+   "module": "dotmac_kernel.planes",
+   "symbols": [
+    "MODULE_PLANES_ENV_VAR"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/migrations.py",
+   "module": "dotmac_kernel.prerequisites",
+   "symbols": [
+    "BINDINGS_ENV_VAR"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/catalog.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "CapabilityCatalogue",
+    "DomainError",
+    "FeatureManifest",
+    "KernelUndeclaredCapabilityError",
+    "NotFoundError",
+    "ProductManifestError",
+    "ProductManifestSnapshot"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/models.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "Base",
+    "TimestampMixin",
+    "uuid_pk"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "BadRequestError",
+    "Money",
+    "MoneyError",
+    "NotFoundError",
+    "PlatformAdmin",
+    "currency"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/service.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "ConflictError",
+    "Money",
+    "currency",
+    "write_platform_audit_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/offers/service.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "process_once_platform"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/platform_admin.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "PlatformAdmin",
+    "hash_password"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/providers.py",
+   "module": "dotmac_kernel.providers.provisioning",
+   "symbols": [
+    "ProvisioningProvider"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/laboratory.py",
+   "module": "dotmac_kernel.providers.provisioning",
+   "symbols": [
+    "ApplyResult",
+    "CompensationDisposition",
+    "CompensationResult",
+    "ObserveResult",
+    "PlanResult",
+    "ProvisioningPlanError",
+    "ProvisioningRequest",
+    "ProvisioningStatus",
+    "ProvisioningStep",
+    "StepStatus"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/router.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "PlatformAdmin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/router.py",
+   "module": "dotmac_kernel.platform_auth",
+   "symbols": [
+    "require_platform_admin"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/schemas.py",
+   "module": "dotmac_kernel.providers.provisioning",
+   "symbols": [
+    "ApplyResult",
+    "ObserveResult",
+    "PlanResult",
+    "ProvisioningStep"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/service.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "PlatformScope"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/provisioning/service.py",
+   "module": "dotmac_kernel.providers.provisioning",
+   "symbols": [
+    "ApplyResult",
+    "ObserveResult",
+    "PlanResult",
+    "ProvisioningProvider",
+    "ProvisioningRequest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/readiness/feature.py",
+   "module": "dotmac_kernel.features",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/readiness/router.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "get_platform_db"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/relay/health.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "OutboxStatus",
+    "PlatformOutboxEvent"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/relay/models.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "Base"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/relay/runner.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "runtime"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/relay/runner.py",
+   "module": "dotmac_kernel.messaging",
+   "symbols": [
+    "RelayPolicy"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/relay/runner.py",
+   "module": "dotmac_kernel.messaging.platform_worker",
+   "symbols": [
+    "PlatformDeliveryTransport",
+    "SessionFactory",
+    "run_once"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/relay/runner.py",
+   "module": "dotmac_kernel.session_runtime",
+   "symbols": [
+    "DatabaseRuntime"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/release_evidence/feature.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "FeatureManifest"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/release_evidence/service.py",
+   "module": "dotmac_kernel",
+   "symbols": [
+    "ConflictError",
+    "ProductManifestError",
+    "ProductManifestSnapshot",
+    "write_platform_audit_event"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/release_evidence/service.py",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "conflict_savepoint"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/release_evidence/service.py",
+   "module": "dotmac_kernel.idempotency",
+   "symbols": [
+    "IdempotentOutcome",
+    "execute_once_platform",
+    "fingerprint_of"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/rotation_runtime_material_oracle.pyprogram",
+   "module": "dotmac_kernel.security",
+   "symbols": [
+    "decode_access_token",
+    "hash_token"
+   ]
+  },
+  {
+   "path": "src/vendor_cp/rotation_runtime_oracle.pyprogram",
+   "module": "dotmac_kernel.db",
+   "symbols": [
+    "PlatformSessionLocal",
+    "SessionLocal",
+    "engine",
+    "platform_engine"
+   ]
+  }
+ ]
+}

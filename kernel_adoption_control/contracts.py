@@ -50,6 +50,7 @@ from .declaration_contract_v2 import (
 )
 
 __all__ = [
+    "KERNEL_ROOT",
     "AdoptionReport",
     "AnyKernelAdoptionDeclaration",
     "DeclarationEmpty",
@@ -73,6 +74,13 @@ __all__ = [
     "Severity",
     "TransitionalSurface",
 ]
+
+#: The Kernel distribution's root package name. Defined HERE rather than in
+#: `engine`, because `KernelSurfaceCatalogue.publishes` has to know which
+#: module is the root façade and a second spelling of the name would be a
+#: second writer of the one string every arm in this package matches on.
+#: `engine` re-exports it, so no caller changed.
+KERNEL_ROOT = "dotmac_kernel"
 
 
 class FindingCode(str, Enum):
@@ -193,6 +201,21 @@ class FindingCode(str, Enum):
     #: catalogue would report every import unknown OR, if the arm were written
     #: the other way, nothing at all; either way the catalogue is not one.
     CATALOGUE_EMPTY = "kernel.catalogue.empty"
+
+    #: A root-façade import was measured and the supplied catalogue carries no
+    #: root exports, so which names the façade publishes is unobserved. Its own
+    #: code because its repair is its own: the OBSERVER must read the installed
+    #: artifact's `dotmac_kernel.__all__`. Distinct from `catalogue.absent`,
+    #: whose repair is to supply a catalogue at all, and it is a refusal rather
+    #: than silence for the same reason: an unobserved publication authority
+    #: must not buy a clean root arm over every root import made.
+    ROOT_EXPORTS_UNOBSERVED = "kernel.root.exports-unobserved"
+    #: A `from dotmac_kernel import X` named an `X` the installed artifact's
+    #: `__all__` does not carry. This is what keeps normalising the root from
+    #: becoming a blanket pass: the root is a PUBLISHED surface, and what it
+    #: publishes is the enumerated list, not everything an importer can reach
+    #: through the package object.
+    ROOT_SYMBOL_UNEXPORTED = "kernel.root.unexported"
 
     #: A `required_surfaces` entry names a module the declared Kernel does not
     #: publish. A dependency on a name that is not there.
@@ -378,10 +401,47 @@ class KernelSurfaceCatalogue:
     #: Defaulted only so that every existing caller keeps compiling; a caller
     #: that omits it has stated an absence, not accepted a default.
     artifact_digest: str | None = None
+    #: The installed artifact's `dotmac_kernel.__all__` -- the ROOT FAÇADE's
+    #: own publication authority, and a list `SUPPORTED_MODULES` deliberately
+    #: does not contain, because that set enumerates SUBMODULES.
+    #:
+    #: Read by the observer off the artifact the product resolved, exactly as
+    #: `supported` and `internal` are. Never hand-typed here and never derived
+    #: from the module lists: the root publishes NAMES and the lists publish
+    #: MODULES, and conflating them would admit every root import rather than
+    #: the named public exports.
+    #:
+    #: Empty is a STATED ABSENCE and never means "admit anything". A run that
+    #: measures a root import against an empty set reports
+    #: `kernel.root.exports-unobserved` and refuses, so an observer that never
+    #: learned to read `__all__` cannot buy silence for the façade.
+    root_exports: frozenset[str] = frozenset()
 
     @property
     def known(self) -> frozenset[str]:
         return self.supported | self.internal
+
+    def publishes(self, module: str) -> bool:
+        """Is `module` a surface this Kernel publishes, root façade included?
+
+        `known` answers for submodules and CANNOT answer for the root: the bare
+        `dotmac_kernel` is in neither `SUPPORTED_MODULES` nor
+        `INTERNAL_MODULES` -- verified at `dotmac-kernel-v0.1.0a102` (peeled
+        `7a3c128b06eaba09784a9d8409d036169b3caa68`), where the two lists carry
+        89 and 4 names and neither is the bare root. So a product importing the
+        root had no reachable verdict: declaring it required reported
+        `kernel.required.unpublished`, and omitting it reported
+        `kernel.surface.unclassified`.
+
+        The root is normalised as a SEPARATELY published surface rather than
+        added to a list that describes submodules. Its publication authority is
+        `__all__`, so it is published exactly when that authority was observed
+        -- and when it was not, the root arm refuses under its own code rather
+        than this returning `True` and letting the façade through unmeasured.
+        """
+        if module == KERNEL_ROOT:
+            return bool(self.root_exports)
+        return module in self.known
 
 
 @dataclass(frozen=True)

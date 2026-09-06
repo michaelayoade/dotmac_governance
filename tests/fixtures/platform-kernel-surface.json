@@ -18,6 +18,16 @@
  "inventory_rule": "every tracked *.py and *.pyprogram outside tests/",
  "module_count": 17,
  "symbol_count": 85,
+ "symbol_name_convention": "CANONICAL Kernel-side names: a symbol is recorded as the Kernel spells it, before any `as`. Regenerated 2026-09-06. This file previously recorded LOCAL bound names, so an aliased import was stored under the name it was bound to and could not be told apart from a name the Kernel does not publish.",
+ "known_aliases": [
+  {
+   "path": "src/vendor_cp/offers/catalog.py",
+   "module": "dotmac_kernel",
+   "kernel_name": "UndeclaredCapabilityError",
+   "local_name": "KernelUndeclaredCapabilityError",
+   "note": "Platform disambiguates the Kernel's error from its own. The Kernel publishes UndeclaredCapabilityError at the a102 root and publishes no Kernel-prefixed name at all; the alias is Platform's and stays Platform's. Recorded rather than dropped so the admit control can prove the aliased shape is admitted on the KERNEL's name."
+  }
+ ],
  "facts": [
   {
    "path": "alembic/env.py",
@@ -439,10 +449,10 @@
     "CapabilityCatalogue",
     "DomainError",
     "FeatureManifest",
-    "KernelUndeclaredCapabilityError",
     "NotFoundError",
     "ProductManifestError",
-    "ProductManifestSnapshot"
+    "ProductManifestSnapshot",
+    "UndeclaredCapabilityError"
    ]
   },
   {

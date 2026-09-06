@@ -94,7 +94,7 @@
       "required": ["declaration_path", "contract_version"],
       "properties": {
         "declaration_path": { "$ref": "#/$defs/path" },
-        "contract_version": { "const": "KernelAdoptionDeclaration.v1" }
+        "contract_version": { "enum": ["KernelAdoptionDeclaration.v1", "KernelAdoptionDeclaration.v2"] }
       }
     },
     "compatibility_retirement": {

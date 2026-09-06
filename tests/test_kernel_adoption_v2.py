@@ -116,14 +116,23 @@ def catalogue(
     revision: str = KERNEL_REVISION,
     internal: frozenset[str] = frozenset(),
     artifact_digest: str | None = WHEEL,
+    root_exports: frozenset[str] = frozenset(),
 ) -> KernelSurfaceCatalogue:
-    """A catalogue fixture. Production callers pass the Kernel's real lists."""
+    """A catalogue fixture. Production callers pass the Kernel's real lists.
+
+    `root_exports` DEFAULTS TO EMPTY, matching the production default and
+    matching every observer written before the root façade was normalised. So
+    the fixtures that say nothing about the root keep describing a run whose
+    observer never read `dotmac_kernel.__all__` -- which is the state the
+    refusal `kernel.root.exports-unobserved` exists to name.
+    """
     return KernelSurfaceCatalogue(
         revision=revision,
         version=version,
         supported=supported,
         internal=internal,
         artifact_digest=artifact_digest,
+        root_exports=root_exports,
     )
 
 
@@ -138,6 +147,7 @@ def binding(item: KernelSurfaceCatalogue, **overrides: str) -> dict[str, object]
             revision=item.revision,
             supported=item.supported,
             internal=item.internal,
+            root_exports=item.root_exports,
         ),
     }
     document.update(overrides)
@@ -1171,12 +1181,54 @@ class ThePlatformSubject(Base):
             (FIXTURES / "platform-kernel-surface.json").read_text(encoding="utf-8")
         )
 
+    def kernel(self) -> dict[str, Any]:
+        """The REAL dotmac-kernel catalogue at a102, not one derived from use.
+
+        Until 2026-09-06 this class built its catalogue as
+        `catalogue(frozenset(observed_modules))` -- the supported list WAS the
+        set of modules Platform imported. A catalogue derived from the
+        observation can never report an unpublished surface, because everything
+        observed is in it by construction; it also silently placed the bare
+        `dotmac_kernel` into `supported`, which is precisely the edit Michael
+        ruled out. That is why this admit control was green while Platform's
+        real enrolment went red against the same source.
+        """
+        return json.loads(
+            (FIXTURES / "kernel-a102-catalogue.json").read_text(encoding="utf-8")
+        )
+
+    def catalogue_of(self, kernel: dict[str, Any]) -> KernelSurfaceCatalogue:
+        """The a102 catalogue as a `KernelSurfaceCatalogue`. One builder.
+
+        Three lists, three publication authorities, none of them derived from
+        another -- which is the whole point of reading them from the Kernel
+        rather than from a product's imports.
+        """
+        return catalogue(
+            frozenset(kernel["supported_modules"]),
+            version=kernel["version"],
+            revision=kernel["revision"],
+            internal=frozenset(kernel["internal_modules"]),
+            root_exports=frozenset(kernel["root_exports"]),
+        )
+
     def sources(self, fixture: dict[str, Any]) -> dict[PurePosixPath, str]:
         """One import statement per measured fact.
 
         Synthesised, and labelled synthesised. What is real is the SET of
         `(path, module, symbols)` facts; the statements are the smallest source
         that reproduces it.
+
+        `symbols` holds CANONICAL Kernel-side names -- the name before any
+        `as` -- so this synthesis reproduces the surface the Kernel sees. The
+        file previously recorded LOCAL bound names, which made an aliased
+        import indistinguishable from a name the Kernel does not publish; it
+        was regenerated on 2026-09-06 and carries the one known alias
+        separately, in `known_aliases`.
+
+        What is therefore NOT reproduced here is the alias itself. The synthesis
+        emits the Kernel's name unaliased, so the aliased shape needs its own
+        subject -- see `test_the_platform_alias_is_admitted_on_the_kernels_name`.
         """
         by_path: dict[PurePosixPath, list[str]] = {}
         for fact in fixture["facts"]:
@@ -1222,7 +1274,8 @@ class ThePlatformSubject(Base):
         self, fixture: dict[str, Any], sources: dict[PurePosixPath, str]
     ) -> tuple[dict[str, Any], KernelSurfaceCatalogue]:
         modules = sorted({fact["module"] for fact in fixture["facts"]})
-        item = catalogue(frozenset(modules))
+        kernel = self.kernel()
+        item = self.catalogue_of(kernel)
         first_use = {
             module: sorted(
                 fact["path"] for fact in fixture["facts"] if fact["module"] == module
@@ -1270,16 +1323,317 @@ class ThePlatformSubject(Base):
     def test_the_contract_admits_a_real_products_shape(self) -> None:
         """The admit control this whole change needed, and the one #81 lacked.
 
-        A rule observed only refusing is indistinguishable from one that refuses
-        everything. Sixteen required surfaces, a fourteen-pair retirement
-        baseline against a real issue and a real date, an effective floor of
-        `0.1.0a98`, two real pin sites and the real wheel digest out of
-        Platform's own lock: no findings.
+        A rule observed only refusing is indistinguishable from one that
+        refuses everything. Seventeen classified surfaces, a fourteen-pair
+        retirement baseline against a real issue and a real date, an effective
+        floor of `0.1.0a98`, two real pin sites and the real wheel digest out
+        of Platform's own lock -- measured against the REAL a102 catalogue
+        rather than one derived from Platform's own imports.
+
+        NO findings: all 85 measured symbol facts, all 16 submodules and all 28
+        root symbols are admitted by the real a102 catalogue.
+
+        Two separate things had to be true before this could be clean, and
+        neither was reached by adjusting anything to get here. The catalogue
+        stopped being `frozenset(observed_modules)` -- which published whatever
+        Platform imported, including the bare `dotmac_kernel`, and is why this
+        was green while Platform's real enrolment was red. And the fixture
+        stopped recording LOCAL bound names, which had made Platform's alias
+        for `UndeclaredCapabilityError` look like a name the Kernel does not
+        publish.
         """
         fixture = self.load()
         sources = self.sources(fixture)
         document, item = self.declaration(fixture, sources)
         self.assertClean(report(document, sources, item))
+
+    def test_submodules_reached_through_the_root_are_admitted(self) -> None:
+        """`from dotmac_kernel import audit` binds a SUPPORTED module.
+
+        Platform's `alembic/env.py` writes exactly this for three names. They
+        are in no `__all__` -- they are modules, not curated symbols -- and
+        refusing them would refuse a published surface for the syntax used to
+        reach it. Named here rather than left implicit in the count above,
+        because this is a second publication authority and a reader must not
+        have to infer that it was consulted.
+        """
+        kernel = self.kernel()
+        for name in ("audit", "models_platform", "settings_models"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, kernel["root_exports"])
+                self.assertIn(f"dotmac_kernel.{name}", kernel["supported_modules"])
+        item = self.catalogue_of(kernel)
+        sources = {
+            PurePosixPath("alembic/env.py"): (
+                "from dotmac_kernel import audit, models_platform, settings_models\n"
+            )
+        }
+        required = [
+            {
+                "module": "dotmac_kernel",
+                "floor": "0.1.0a98",
+                "proven_by": "alembic/env.py",
+            }
+        ]
+        self.assertClean(
+            report(
+                v2_document(sources, item, required_surfaces=required),
+                sources,
+                item,
+            )
+        )
+
+    def test_an_internal_submodule_through_the_root_is_still_refused(self) -> None:
+        """The near-miss that keeps the second authority from being a hole.
+
+        `dotmac_kernel._transactions` is an INTERNAL module. Admitting a root
+        symbol on `known` rather than on `supported` would let it through, and
+        it would escape the private-surface arm as well -- that arm reads
+        MODULE path components, and the module recorded for this statement is
+        the bare root, so it never sees the symbol.
+        """
+        kernel = self.kernel()
+        self.assertIn("dotmac_kernel._transactions", kernel["internal_modules"])
+        item = self.catalogue_of(kernel)
+        sources = {
+            PurePosixPath("app/x.py"): "from dotmac_kernel import _transactions\n"
+        }
+        required = [
+            {"module": "dotmac_kernel", "floor": "0.1.0a98", "proven_by": "app/x.py"}
+        ]
+        self.assertNamed(
+            report(
+                v2_document(sources, item, required_surfaces=required), sources, item
+            ),
+            FindingCode.ROOT_SYMBOL_UNEXPORTED,
+        )
+
+    def test_the_platform_alias_is_admitted_on_the_kernels_name(self) -> None:
+        """The alias admit control. Platform's local name, the Kernel's verdict.
+
+        `src/vendor_cp/offers/catalog.py` writes
+        `from dotmac_kernel import UndeclaredCapabilityError as
+        KernelUndeclaredCapabilityError` -- Platform disambiguating the
+        Kernel's error from its own. The Kernel publishes
+        `UndeclaredCapabilityError` at the a102 root and publishes no
+        `Kernel`-prefixed name at all.
+
+        This is exercised on the REAL aliased statement rather than on the
+        fixture's unaliased synthesis, because the synthesis cannot carry an
+        alias. It is the one shape the admit control above structurally cannot
+        reach, so it gets its own subject rather than being assumed covered.
+
+        The refusal was NOT weakened to get here and no name was added to the
+        Kernel: the fixture was recording local names, and it now records
+        canonical ones.
+        """
+        kernel = self.kernel()
+        alias = self.load()["known_aliases"][0]
+        self.assertEqual("UndeclaredCapabilityError", alias["kernel_name"])
+        self.assertEqual("KernelUndeclaredCapabilityError", alias["local_name"])
+        self.assertIn(alias["kernel_name"], kernel["root_exports"])
+        self.assertNotIn(alias["local_name"], kernel["root_exports"])
+
+        item = self.catalogue_of(kernel)
+        path = PurePosixPath(alias["path"])
+        sources = {
+            path: (
+                f"from dotmac_kernel import {alias['kernel_name']} as "
+                f"{alias['local_name']}\n"
+            )
+        }
+        required = [
+            {
+                "module": "dotmac_kernel",
+                "floor": "0.1.0a98",
+                "proven_by": path.as_posix(),
+            }
+        ]
+        self.assertClean(
+            report(
+                v2_document(sources, item, required_surfaces=required), sources, item
+            )
+        )
+
+    def test_the_local_half_of_that_alias_is_still_refused(self) -> None:
+        """The paired near-miss, and the reason the admit control above is not
+        an exemption.
+
+        Had the alias been "fixed" by adding `KernelUndeclaredCapabilityError`
+        to the Kernel's exports -- the move that was refused -- this would go
+        quiet. The Kernel's name is admitted; Platform's local name, asked of
+        the Kernel, is not.
+        """
+        kernel = self.kernel()
+        alias = self.load()["known_aliases"][0]
+        item = self.catalogue_of(kernel)
+        sources = {
+            PurePosixPath("x.py"): f"from dotmac_kernel import {alias['local_name']}\n"
+        }
+        required = [
+            {"module": "dotmac_kernel", "floor": "0.1.0a98", "proven_by": "x.py"}
+        ]
+        self.assertNamed(
+            report(
+                v2_document(sources, item, required_surfaces=required), sources, item
+            ),
+            FindingCode.ROOT_SYMBOL_UNEXPORTED,
+        )
+
+    def test_the_fixture_records_canonical_kernel_names(self) -> None:
+        """The property the regeneration established, asserted rather than
+        assumed: every recorded root symbol is one the a102 root actually
+        publishes, under one of its two authorities."""
+        fixture = self.load()
+        kernel = self.kernel()
+        unresolved = sorted(
+            {
+                symbol
+                for fact in fixture["facts"]
+                if fact["module"] == "dotmac_kernel"
+                for symbol in fact["symbols"]
+                if symbol not in kernel["root_exports"]
+                and f"dotmac_kernel.{symbol}" not in kernel["supported_modules"]
+            }
+        )
+        self.assertEqual([], unresolved)
+        self.assertIn("symbol_name_convention", fixture)
+
+    # ── the collision the second publication authority created ──────────────
+    #
+    # `facet_principal` is BOTH: `dotmac_kernel.facet_principal` is a supported
+    # SUBMODULE, and `facet_principal` is a NAME in the root's `__all__` (the
+    # module defines the object and the root re-exports it). It is the only
+    # name at a102 holding both roles -- verified in the first test below
+    # rather than asserted -- and it is the ambiguity the submodule-through-root
+    # arm made reachable.
+    #
+    # NOTE: the review proposed `settings` for this. It does not hold both
+    # roles: `settings` is in `__all__` (it is the Settings INSTANCE, imported
+    # from `dotmac_kernel.config`) and there is no `dotmac_kernel/settings.py`
+    # in the a102 tree at all, so `dotmac_kernel.settings` is in no module
+    # list. Asserting on it would have proved the opposite of the intended
+    # property. `settings` is used below as the near-miss instead, which is
+    # what it is actually good for.
+
+    COLLIDING = "facet_principal"
+
+    def test_the_colliding_name_really_holds_both_roles(self) -> None:
+        """Non-vacuity for the four tests below.
+
+        If this name ever stops being both a supported module and a root
+        export, those tests stop testing a collision and start testing two
+        unrelated things while still passing.
+        """
+        kernel = self.kernel()
+        self.assertIn(f"dotmac_kernel.{self.COLLIDING}", kernel["supported_modules"])
+        self.assertIn(self.COLLIDING, kernel["root_exports"])
+        both = sorted(
+            name
+            for name in kernel["root_exports"]
+            if f"dotmac_kernel.{name}" in kernel["supported_modules"]
+        )
+        self.assertEqual([self.COLLIDING], both)
+
+    def collide(self, statement: str, module: str) -> tuple[FindingCode, ...]:
+        """Measure one statement, classifying exactly `module` and nothing else.
+
+        Classifying ONE surface is what gives these tests teeth: if the
+        statement were classified as the other surface, the declaration would
+        not cover what was measured and `kernel.surface.unclassified` fires.
+        """
+        item = self.catalogue_of(self.kernel())
+        sources = {PurePosixPath("app/x.py"): statement}
+        required = [{"module": module, "floor": "0.1.0a98", "proven_by": "app/x.py"}]
+        return report(
+            v2_document(sources, item, required_surfaces=required), sources, item
+        )
+
+    def test_the_dotted_form_is_classified_as_the_submodule(self) -> None:
+        self.assertClean(
+            self.collide(
+                f"import dotmac_kernel.{self.COLLIDING}\n",
+                f"dotmac_kernel.{self.COLLIDING}",
+            )
+        )
+
+    def test_the_from_root_form_is_classified_as_the_root_export(self) -> None:
+        self.assertClean(
+            self.collide(
+                f"from dotmac_kernel import {self.COLLIDING}\n", "dotmac_kernel"
+            )
+        )
+
+    def test_the_two_forms_are_not_interchangeable(self) -> None:
+        """The collision must not let one declaration entry cover both shapes.
+
+        This is the half that would go quiet if the root and the submodule were
+        ever conflated into one surface: each form is measured as the surface
+        it actually names, so classifying the OTHER one leaves the measured
+        import unclassified.
+        """
+        self.assertNamed(
+            self.collide(f"import dotmac_kernel.{self.COLLIDING}\n", "dotmac_kernel"),
+            FindingCode.SURFACE_UNCLASSIFIED,
+        )
+        self.assertNamed(
+            self.collide(
+                f"from dotmac_kernel import {self.COLLIDING}\n",
+                f"dotmac_kernel.{self.COLLIDING}",
+            ),
+            FindingCode.SURFACE_UNCLASSIFIED,
+        )
+
+    def test_both_aliased_forms_keep_their_canonical_kernel_identity(self) -> None:
+        """The clause with teeth: an alias changes the LOCAL name and nothing
+        the classification depends on.
+
+        On the root path this is `names` vs `bound`, already proven elsewhere.
+        On the SUBMODULE path it has never been exercised: `import
+        dotmac_kernel.facet_principal as fp` binds `fp`, and if the module were
+        ever read off the `as` clause the measured surface would become `fp` --
+        a name in no catalogue, classified by nothing. Both forms are asserted
+        here so neither half of the distinction can regress.
+        """
+        self.assertClean(
+            self.collide(
+                f"import dotmac_kernel.{self.COLLIDING} as fp\n",
+                f"dotmac_kernel.{self.COLLIDING}",
+            )
+        )
+        self.assertClean(
+            self.collide(
+                f"from dotmac_kernel import {self.COLLIDING} as fp\n",
+                "dotmac_kernel",
+            )
+        )
+        # And the aliases really are different local names, so the two clean
+        # results above are not two spellings of one statement.
+        self.assertNotEqual(
+            f"import dotmac_kernel.{self.COLLIDING} as fp",
+            f"from dotmac_kernel import {self.COLLIDING} as fp",
+        )
+
+    def test_a_root_export_that_is_not_a_module_is_not_importable_as_one(
+        self,
+    ) -> None:
+        """The near-miss keeping the two authorities apart, on the name the
+        review proposed for the collision.
+
+        `settings` is a root export and is NOT a module: there is no
+        `dotmac_kernel/settings.py` at a102. So the root authority must not
+        leak into the submodule path -- `import dotmac_kernel.settings` names
+        something the Kernel does not publish, and a run that admitted it would
+        be reading `__all__` to answer a question about modules.
+        """
+        kernel = self.kernel()
+        self.assertIn("settings", kernel["root_exports"])
+        self.assertNotIn("dotmac_kernel.settings", kernel["supported_modules"])
+        self.assertNotIn("dotmac_kernel.settings", kernel["internal_modules"])
+        self.assertNamed(
+            self.collide("import dotmac_kernel.settings\n", "dotmac_kernel.settings"),
+            FindingCode.SURFACE_UNKNOWN,
+        )
 
     def test_the_eleventh_site_is_inside_the_measured_surface(self) -> None:
         """Non-vacuity for the arm above: the hard case is actually in it.
@@ -1351,6 +1705,8 @@ class EveryNewCodeIsReachable(unittest.TestCase):
             FindingCode.CATALOGUE_UNBOUND,
             FindingCode.CATALOGUE_EMPTY,
             FindingCode.REQUIRED_UNPUBLISHED,
+            FindingCode.ROOT_EXPORTS_UNOBSERVED,
+            FindingCode.ROOT_SYMBOL_UNEXPORTED,
             FindingCode.REQUIRED_UNUSED,
             FindingCode.SURFACE_UNCLASSIFIED,
             FindingCode.REQUIRED_FLOOR_UNSATISFIED,
@@ -1438,6 +1794,244 @@ class TheSuccessorHasNoUnreadField(unittest.TestCase):
 
         for field, reader in self.READERS.items():
             self.assertTrue(hasattr(engine, reader), f"{field} -> {reader}")
+
+
+# ── the root façade ──────────────────────────────────────────────────────────
+#
+# `SUPPORTED_MODULES` and `INTERNAL_MODULES` enumerate SUBMODULES; the bare
+# `dotmac_kernel` is in neither. Read at `dotmac-kernel-v0.1.0a102`, peeled
+# 7a3c128b06eaba09784a9d8409d036169b3caa68, they carry 89 and 4 names and
+# neither list contains the root. So before the root was normalised, a product
+# importing it had NO reachable clean verdict: declaring it required reported
+# `kernel.required.unpublished`, and omitting it reported
+# `kernel.surface.unclassified`.
+#
+# The root's publication authority is its own `__all__`, carried on the
+# catalogue as `root_exports` and bound into `catalogue_digest`.
+
+#: A root catalogue. `Party` and `resolve_value` are real a102 root exports;
+#: `_Internal` is deliberately NOT one, and neither is `NotAThing`.
+ROOT_EXPORTS = frozenset({"Party", "resolve_value", "settings"})
+ROOT_MODULE = catalogue(
+    frozenset({"dotmac_kernel.messaging"}), root_exports=ROOT_EXPORTS
+)
+#: The same Kernel, observed by an observer that never read `__all__`.
+ROOT_UNOBSERVED = catalogue(frozenset({"dotmac_kernel.messaging"}))
+
+ROOT_PUBLIC = {PurePosixPath("src/app/service.py"): "from dotmac_kernel import Party\n"}
+ROOT_PRIVATE = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel import _Internal\n"
+}
+ROOT_NONEXISTENT = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel import NotAThing\n"
+}
+ROOT_ALIASED = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel import Party as P\n"
+}
+#: An alias whose LOCAL name is a public export and whose KERNEL name is not.
+#: The near-miss for resolving on the wrong side of `as`: an arm asking `bound`
+#: would admit this, because `Party` is in `__all__`.
+ROOT_ALIASED_TO_A_PUBLIC_NAME = {
+    PurePosixPath(
+        "src/app/service.py"
+    ): "from dotmac_kernel import _Internal as Party\n"
+}
+ROOT_MODULE_ONLY = {PurePosixPath("src/app/service.py"): "import dotmac_kernel\n"}
+
+#: The root declared as a required surface. This is the classification that was
+#: unreachable: `required` + root reported `kernel.required.unpublished`.
+REQUIRED_ROOT = [
+    {
+        "module": "dotmac_kernel",
+        "floor": "0.1.0a90",
+        "proven_by": "src/app/service.py",
+    }
+]
+
+
+class TheRootFacadeIsASeparatelyPublishedSurface(Base):
+    """Defect 1. Exit 0 was unreachable for any product importing the root.
+
+    Platform imports 28 symbols from `dotmac_kernel` directly. The engine
+    recorded the module verbatim and asked the SUBMODULE lists about it, so
+    both available classifications failed. The repair normalises the root as a
+    published surface whose allowed names come from the installed artifact's
+    `__all__` -- and the load-bearing half is that this is not a blanket pass.
+    """
+
+    def test_a_required_root_facade_is_no_longer_unpublished(self) -> None:
+        """The admit control. Without it the five refusals below are
+        indistinguishable from a rule that refuses every root import."""
+        codes = report(
+            v2_document(ROOT_PUBLIC, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            ROOT_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_the_defect_itself_the_root_had_no_reachable_verdict(self) -> None:
+        """Both horns, planted together, against a catalogue with NO root
+        exports -- which is exactly the pre-repair state, because before this
+        change the field did not exist and no observer supplied it.
+
+        Declaring the root required must not be answered by the submodule
+        lists, and omitting it must still be unclassified. The first is the
+        defect; the second is the arm that must stay awake.
+        """
+        omitted = report(
+            v2_document(ROOT_PUBLIC, ROOT_UNOBSERVED),
+            ROOT_PUBLIC,
+            ROOT_UNOBSERVED,
+        )
+        self.assertNamed(omitted, FindingCode.SURFACE_UNCLASSIFIED)
+
+    def test_a_public_export_is_admitted(self) -> None:
+        codes = report(
+            v2_document(ROOT_PUBLIC, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            ROOT_MODULE,
+        )
+        self.assertSilent(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+        self.assertSilent(codes, FindingCode.ROOT_EXPORTS_UNOBSERVED)
+
+    def test_a_private_name_is_refused(self) -> None:
+        codes = report(
+            v2_document(ROOT_PRIVATE, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PRIVATE,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+
+    def test_a_nonexistent_name_is_refused(self) -> None:
+        """The same refusal as the private one, and deliberately so: the arm
+        asks `__all__`, not the spelling. A leading underscore is not what
+        decides it -- `_private_components` reads MODULE path components and
+        returns nothing for the bare root, so the private-surface arm never
+        sees a root symbol at all."""
+        codes = report(
+            v2_document(ROOT_NONEXISTENT, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_NONEXISTENT,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+        self.assertSilent(codes, FindingCode.SURFACE_PRIVATE)
+
+    def test_an_aliased_public_import_is_resolved_on_the_kernels_name(self) -> None:
+        codes = report(
+            v2_document(ROOT_ALIASED, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_ALIASED,
+            ROOT_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_an_alias_cannot_launder_a_private_name_into_a_public_one(self) -> None:
+        """The near-miss that proves the arm reads the far side of `as`.
+
+        `from dotmac_kernel import _Internal as Party` binds the LOCAL name
+        `Party`, which IS in `__all__`. An arm asking what the statement bound
+        locally would admit it. The Kernel's name is `_Internal`, and that is
+        the name admission is decided on.
+        """
+        codes = report(
+            v2_document(
+                ROOT_ALIASED_TO_A_PUBLIC_NAME,
+                ROOT_MODULE,
+                required_surfaces=REQUIRED_ROOT,
+            ),
+            ROOT_ALIASED_TO_A_PUBLIC_NAME,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+
+    def test_a_module_only_import_names_no_export_and_is_admitted(self) -> None:
+        """`import dotmac_kernel` imports the package and names nothing.
+
+        There is no symbol to admit or refuse, so the symbol arm is silent --
+        and the module is still MEASURED, so the declaration still has to
+        classify it. Both halves matter: silence without classification would
+        be a root import that escaped the inventory.
+        """
+        codes = report(
+            v2_document(ROOT_MODULE_ONLY, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_MODULE_ONLY,
+            ROOT_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_a_module_only_import_still_has_to_be_classified(self) -> None:
+        """The other half. Silence on symbols is not silence on inventory."""
+        codes = report(
+            v2_document(ROOT_MODULE_ONLY, ROOT_MODULE),
+            ROOT_MODULE_ONLY,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.SURFACE_UNCLASSIFIED)
+
+    def test_an_observer_that_never_read_all_is_refused_not_admitted(self) -> None:
+        """The vacuity guard on the whole arm.
+
+        If an empty `root_exports` were read as "no list, admit anything", the
+        eight tests above would all pass over a catalogue nobody populated and
+        the arm would be decoration. An empty list is a stated absence whose
+        repair is in the OBSERVER, and it refuses.
+        """
+        codes = report(
+            v2_document(ROOT_PUBLIC, ROOT_UNOBSERVED, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            ROOT_UNOBSERVED,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_EXPORTS_UNOBSERVED)
+
+    def test_a_submodule_import_never_reaches_the_root_arm(self) -> None:
+        """The near-miss for the branch itself: normalising the root must not
+        change how a submodule is classified."""
+        codes = report(
+            v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE),
+            ONE_IMPORT,
+            ONE_MODULE,
+        )
+        self.assertSilent(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+        self.assertSilent(codes, FindingCode.ROOT_EXPORTS_UNOBSERVED)
+
+    def test_the_root_exports_are_bound_into_the_catalogue_digest(self) -> None:
+        """A widened `__all__` is a different catalogue.
+
+        Without this, an observer could quietly grow the admitted set and the
+        declaration would go on matching. The digest is the coordinate that
+        makes it a reviewable edit.
+        """
+        widened = catalogue(
+            frozenset({"dotmac_kernel.messaging"}),
+            root_exports=ROOT_EXPORTS | {"NotAThing"},
+        )
+        codes = report(
+            # The document binds the NARROW catalogue; the run supplies the
+            # widened one.
+            v2_document(ROOT_PUBLIC, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            widened,
+        )
+        self.assertNamed(codes, FindingCode.CATALOGUE_DISAGREES)
+
+    def test_two_catalogues_differing_only_in_root_exports_differ(self) -> None:
+        """The digest sensitivity proof, taken directly rather than through a
+        finding: a check over two identical inputs proves nothing about the
+        input it is supposed to be sensitive to."""
+        common = {
+            "version": "0.1.0a102",
+            "revision": KERNEL_REVISION,
+            "supported": frozenset({"dotmac_kernel.db"}),
+            "internal": frozenset(),
+        }
+        self.assertNotEqual(
+            catalogue_digest(**common, root_exports=frozenset({"Party"})),
+            catalogue_digest(**common, root_exports=frozenset({"Party", "settings"})),
+        )
+        # And the near-miss: same lists, same digest.
+        self.assertEqual(
+            catalogue_digest(**common, root_exports=frozenset({"Party"})),
+            catalogue_digest(**common, root_exports=frozenset({"Party"})),
+        )
 
 
 if __name__ == "__main__":

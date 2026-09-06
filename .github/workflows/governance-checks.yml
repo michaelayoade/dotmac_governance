@@ -112,10 +112,20 @@ jobs:
       # this repository's own source rather than accepting it (ADR 0042's
       # activation amendment of 2026-09-05).
       #
-      # Scoped to THIS checkout. An enrolled product runs the same command over
-      # its own checkout in its own CI, because a declaration living in another
-      # repository is not a repository-local fact for Governance (ADR 0013
-      # § 1); propagation to the estate is open decision 52.
+      # Scoped to THIS checkout, and narrower than that: what is ACTIVATED and
+      # citable is Governance's own `not_applicable` self-run. An `applicable`
+      # declaration is explicitly NOT citable -- the runner reads none of
+      # `product_revision`, `kernel_catalogue` or `required_surfaces` -- and
+      # exits 3. Applicable-product activation waits on the versioned successor
+      # contract in open decision 52, and PLATFORM ENROLMENT STAYS BLOCKED
+      # until it lands. A declaration living in another repository is not a
+      # repository-local fact for Governance either way (ADR 0013 § 1).
+      #
+      # The step's exit code consults citability, not only conformance: a green
+      # step whose own log says its result is uncitable is worse than a red
+      # one, because the badge is what gets quoted. That makes this step
+      # sensitive to an unclean worktree -- which is why `.gitignore` covers
+      # the ruff and mypy caches the earlier steps write into this root.
       #
       # `--as-of` is SUPPLIED, never read from a clock inside the check: the
       # package calls no clock at all, so an expiry verdict is a function of

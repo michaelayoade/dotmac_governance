@@ -60,18 +60,25 @@ that must exhibit such a report; its absence is not a pass.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
 import json
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date
+from enum import Enum
 from pathlib import Path, PurePosixPath
 
+from standards_control.contracts import (
+    GovernanceSourceKind,
+    PinnedGovernanceModelRef,
+)
 from standards_control.profile import (
     ProfileError,
+    parse_governance_model,
     parse_kernel_adoption_binding,
 )
 
@@ -79,6 +86,7 @@ from .contracts import (
     AdoptionReport,
     DeclarationOutcome,
     DeclarationPresent,
+    KernelAdoptionApplicability,
     KernelAdoptionInputs,
     KernelSurfaceCatalogue,
     PinSite,
@@ -87,8 +95,10 @@ from .declaration import DECLARATION_PATH, read_declaration
 from .engine import evaluate
 
 __all__ = [
+    "CANONICAL_GOVERNANCE",
     "RUN_CONTRACT",
     "ProductObservation",
+    "Provenance",
     "RunReport",
     "RunnerError",
     "is_enforced",
@@ -96,6 +106,15 @@ __all__ = [
     "resolve_observer",
     "run",
 ]
+
+#: The one repository whose code may claim to be Governance. A vendored copy of
+#: this package sitting inside a product gets that product's remote, so it
+#: cannot satisfy this and cannot assert it is Governance. Before this constant
+#: existed, `GOVERNANCE_ROOT` was derived from the package's own file location
+#: alone: a copied package produced its own root, its own peeled HEAD and
+#: `is_enforced == True` naming a revision that is not a Governance commit --
+#: including from a MODIFIED copy, which is the interesting case.
+CANONICAL_GOVERNANCE = "https://github.com/michaelayoade/dotmac_governance"
 
 #: The run report's own contract string. A consumer that cannot find this key
 #: is not looking at a Kernel-adoption run, and must not treat what it has as
@@ -240,6 +259,136 @@ def _worktree_clean(root: Path) -> bool:
     return _git(root, "status", "--porcelain") == ""
 
 
+class Provenance(str, Enum):
+    """How this run established that the code measuring is Governance's.
+
+    Two values and no third. There is deliberately no "unverified" member: a
+    run whose provenance cannot be established is a `RunnerError`, not a
+    report carrying a caveat, because a caveat in a field is exactly what a
+    later reader stops noticing.
+    """
+
+    #: Governance measuring itself. The measured root IS the Governance
+    #: checkout, and that checkout's remote is the canonical repository.
+    SELF = "self"
+    #: A product measuring itself with a Governance checkout beside it, whose
+    #: remote is canonical AND whose HEAD is the exact revision the product's
+    #: own profile pins under `governance_model`.
+    PINNED = "pinned"
+
+
+def _canonical_remote(root: Path) -> str:
+    """The `origin` URL of `root`, normalised, or a refusal.
+
+    The whole vendoring defence is this one comparison. It is not a strong
+    cryptographic claim -- a remote URL can be set to anything by whoever
+    controls the checkout -- and saying so is part of the claim: what it stops
+    is a product that COPIES the package into its own tree and thereby inherits
+    the ability to assert it is Governance, which is a mistake somebody makes
+    by accident. It does not stop deliberate forgery by someone who already
+    controls the runner's checkout, and nothing available here would.
+    """
+    url = _git(root, "remote", "get-url", "origin")
+    if url.startswith("git@") and ":" in url:
+        host, _, path = url.partition(":")
+        url = f"https://{host.removeprefix('git@')}/{path}"
+    return url.removesuffix(".git").rstrip("/")
+
+
+def _governance_pin(root: Path) -> PinnedGovernanceModelRef | None:
+    """The Governance revision `root`'s own profile pins, or None if it is local.
+
+    Read through `standards_control`'s field parser rather than
+    `parse_profile`: that function requires `schema_version` 11 exactly, and
+    the three enrolled products are still at 9, so a whole-profile parse would
+    refuse every product for a reason that has nothing to do with the pin.
+    """
+    path = root / PROFILE_PATH
+    if not path.is_file():
+        raise RunnerError(
+            f"{PROFILE_PATH.as_posix()} does not exist, so this repository "
+            "states no governance_model and the Governance revision it claims "
+            "to be governed by is unknown. A run that cannot say which "
+            "Governance measured it is not bindable"
+        )
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RunnerError(
+            f"{PROFILE_PATH.as_posix()} could not be read: {error}"
+        ) from error
+    if not isinstance(document, dict) or "governance_model" not in document:
+        raise RunnerError(
+            f"{PROFILE_PATH.as_posix()} states no governance_model, so the "
+            "Governance revision this repository is governed by is unknown"
+        )
+    try:
+        model = parse_governance_model(document["governance_model"])
+    except ProfileError as error:
+        raise RunnerError(
+            f"{PROFILE_PATH.as_posix()} governance_model does not parse: {error}"
+        ) from error
+    if model.kind is GovernanceSourceKind.LOCAL:
+        return None
+    assert isinstance(model, PinnedGovernanceModelRef)
+    return model
+
+
+def _provenance(
+    governance_root: Path, product_root: Path, governance_revision: str
+) -> Provenance:
+    """Establish that the code doing the measuring really is Governance's.
+
+    Two admissible shapes, and everything else refuses:
+
+    - **self** -- the measured root and the Governance root are the same
+      directory, and its remote is `CANONICAL_GOVERNANCE`. This is Governance
+      running its own gate. A product that VENDORED the package would also see
+      the two roots coincide, which is why the remote is checked here and not
+      only on the pinned path: the vendored copy carries the product's remote.
+    - **pinned** -- the measured repository's own profile pins Governance by
+      canonical URL and revision, the Governance checkout's remote is
+      canonical, and its HEAD is exactly that revision. A run against a
+      Governance revision the product did not pin is refused, so a product
+      cannot be measured by code it never agreed to be measured by, and cannot
+      claim enforcement from a Governance checkout it silently moved.
+    """
+    remote = _canonical_remote(governance_root)
+    if remote != CANONICAL_GOVERNANCE:
+        raise RunnerError(
+            f"the checkout supplying this runner has origin {remote!r}, not "
+            f"{CANONICAL_GOVERNANCE!r}. Only the canonical Governance "
+            "repository may assert that a run was performed by Governance; a "
+            "vendored copy of this package is a copy of the code and not the "
+            "authority behind it"
+        )
+    if governance_root.resolve() == product_root.resolve():
+        return Provenance.SELF
+    pin = _governance_pin(product_root)
+    if pin is None:
+        raise RunnerError(
+            f"{product_root} states governance_model kind 'local', which only "
+            "the Governance repository itself may state, and it is not the "
+            "repository being measured here. A product states a PINNED "
+            "governance_model or it has not said which Governance governs it"
+        )
+    if str(pin.canonical_url) != CANONICAL_GOVERNANCE:
+        raise RunnerError(
+            f"{PROFILE_PATH.as_posix()} pins governance at "
+            f"{str(pin.canonical_url)!r}, not {CANONICAL_GOVERNANCE!r}"
+        )
+    if str(pin.revision) != governance_revision:
+        raise RunnerError(
+            f"{PROFILE_PATH.as_posix()} pins Governance at {str(pin.revision)} "
+            f"and this runner is at {governance_revision}. Refusing to measure "
+            "a repository with a Governance revision it has not pinned: the "
+            "report would name a revision the measured repository never agreed "
+            "to, and a product that pinned an older Governance would appear "
+            "enforced by a newer one it has not adopted"
+        )
+    return Provenance.PINNED
+
+
 def _declaration_location(root: Path) -> PurePosixPath:
     """Where this repository's declaration lives, per its own profile binding.
 
@@ -294,6 +443,7 @@ class RunReport:
     """One run, bound to the two revisions that produced and were measured."""
 
     as_of: date
+    provenance: Provenance
     governance_revision: str
     governance_worktree_clean: bool
     product_root: str
@@ -312,8 +462,10 @@ class RunReport:
             "contract": RUN_CONTRACT,
             "as_of": self.as_of.isoformat(),
             "governance": {
+                "provenance": self.provenance.value,
                 "revision": self.governance_revision,
                 "worktree_clean": self.governance_worktree_clean,
+                "canonical_url": CANONICAL_GOVERNANCE,
             },
             "product": {
                 "root": self.product_root,
@@ -355,19 +507,22 @@ def run(
 
     governance_revision = _revision(governance_root, "governance")
     product_revision = _revision(root, "product")
+    provenance = _provenance(governance_root, root, governance_revision)
 
     location = _declaration_location(root)
     outcome = read_declaration(root, location)
 
-    observer = resolve_observer(observer_reference)
-    try:
-        observation = observer(root)
-    except Exception as error:  # noqa: BLE001 - product code, any failure refuses
-        raise RunnerError(
-            f"the observer {observer_reference} raised {error!r}. A run whose "
-            "observation failed reports nothing, and reporting nothing as "
-            "clean is the failure this package exists to prevent"
-        ) from error
+    with _import_root(root):
+        observer = resolve_observer(observer_reference)
+        try:
+            observation = observer(root)
+        except Exception as error:  # noqa: BLE001 - product code, any failure refuses
+            raise RunnerError(
+                f"the observer {observer_reference} raised {error!r}. A run "
+                "whose observation failed reports nothing, and reporting "
+                "nothing as clean is the failure this package exists to "
+                "prevent"
+            ) from error
     if not isinstance(observation, ProductObservation):
         raise RunnerError(
             f"the observer {observer_reference} returned "
@@ -385,6 +540,7 @@ def run(
     )
     return RunReport(
         as_of=as_of,
+        provenance=provenance,
         governance_revision=governance_revision,
         governance_worktree_clean=_worktree_clean(governance_root),
         product_root=str(root),
@@ -423,6 +579,19 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
     governance = document.get("governance")
     if not isinstance(governance, Mapping):
         return reject("the report names no governance revision")
+    if governance.get("canonical_url") != CANONICAL_GOVERNANCE:
+        return reject(
+            f"the report names governance repository "
+            f"{governance.get('canonical_url')!r}, not {CANONICAL_GOVERNANCE!r}: "
+            "a vendored copy of this package is a copy of the code and not the "
+            "authority behind it"
+        )
+    if governance.get("provenance") not in {item.value for item in Provenance}:
+        return reject(
+            f"the report states provenance {governance.get('provenance')!r}, "
+            "which is not an established one. A run that cannot say how it "
+            "knows the measuring code was Governance's is not enforcement"
+        )
     revision = governance.get("revision")
     if not isinstance(revision, str) or not _PEELED_COMMIT.fullmatch(revision):
         return reject(
@@ -458,6 +627,34 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
             f"the observation supplied {count!r} source files; a sweep over an "
             "empty inventory passes for the wrong reason"
         )
+    declaration = product.get("declaration")
+    if not isinstance(declaration, Mapping):
+        return reject("the report records no declaration state")
+    if declaration.get("state") != "present":
+        return reject(
+            f"the declaration was {declaration.get('state')!r} rather than "
+            "present, which is a refusal"
+        )
+    #: The narrowing that makes everything above honest. An `applicable`
+    #: declaration carries `product_revision`, `kernel_catalogue` and
+    #: `required_surfaces`, and this runner reads NONE of them. A report over
+    #: such a declaration therefore cannot be cited as enforcement of the
+    #: declaration -- it enforces the part that is read, and the part that is
+    #: read is not the whole document. Governance's own truthful
+    #: `not_applicable` self-run has no unread fields, which is why it may be
+    #: cited and why this repository can be a self-enforcement foundation while
+    #: applicable-product activation waits on the successor contract
+    #: (open decision 52).
+    if declaration.get("applicability") != (
+        KernelAdoptionApplicability.NOT_APPLICABLE.value
+    ):
+        return reject(
+            "the declaration is 'applicable', and this runner does not "
+            "evaluate product_revision, kernel_catalogue or required_surfaces. "
+            "An applicable run is NOT citable as enforcement until the "
+            "versioned successor contract exists (open decision 52); citing it "
+            "would claim coverage of three declared fields nothing reads"
+        )
     findings = document.get("findings")
     if not isinstance(findings, Mapping):
         return reject("the report records no findings section")
@@ -467,6 +664,31 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
         f"conforming run of Governance {revision} over product {measured}, "
         f"{count} source file(s), as of {document.get('as_of')}"
     )
+
+
+@contextlib.contextmanager
+def _import_root(root: Path) -> Iterator[None]:
+    """Put the measured checkout on `sys.path` for the observer load, then remove it.
+
+    `main` used to insert it and leave it there, which made the measured
+    checkout the PRIMARY import root for the rest of the process -- broader
+    than the "an observer is called" exposure ADR 0042 § A9 names, because any
+    later import in the same process, including a stdlib-shadowing name, would
+    resolve there first.
+
+    What this does NOT undo, and the reason it is a narrowing rather than a
+    fix: the observer module stays in `sys.modules`, and its import already
+    executed the product's code. Restoring the path cannot unrun that. The
+    exposure is bounded by running in the measured repository's own job over
+    its own trusted commit, which is ADR 0044's subject and not this module's.
+    """
+    entry = str(root.resolve())
+    sys.path.insert(0, entry)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(ValueError):
+            sys.path.remove(entry)
 
 
 def _as_of(value: str) -> date:
@@ -486,6 +708,18 @@ def main(argv: list[str] | None = None) -> int:
     the verdict would depend on when the job started, and no reader could
     reproduce it. CI passes the UTC date of the run and the report records it,
     so re-running with the same `--as-of` gives the same answer forever.
+
+    Four exit codes, because "it failed" is four different facts here:
+
+    - **0** -- conforming AND citable as enforcement.
+    - **1** -- the run found violations.
+    - **2** -- the run could not be made: no provenance, no observation, an
+      unreadable profile. Nothing was measured.
+    - **3** -- the run conformed and is NOT citable. Today an `applicable`
+      declaration always lands here, by decision rather than by defect: three
+      of its fields are unread, so the run cannot be cited as enforcing the
+      declaration, and open decision 52 owns the successor contract that fixes
+      it. A dirty worktree lands here too.
     """
     parser = argparse.ArgumentParser(
         prog="kernel_adoption_control",
@@ -513,7 +747,6 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     root = Path(arguments.root)
-    sys.path.insert(0, str(root.resolve()))
     try:
         result = run(
             product_root=root,
@@ -543,11 +776,24 @@ def main(argv: list[str] | None = None) -> int:
 
     enforced, reason = is_enforced(document)
     print(
-        f"kernel-adoption: governance {result.governance_revision} over "
-        f"{result.product_root} at {result.product_revision}, "
-        f"{result.source_count} source file(s), as of {result.as_of.isoformat()}"
+        f"kernel-adoption: governance {result.governance_revision} "
+        f"({result.provenance.value}) over {result.product_root} at "
+        f"{result.product_revision}, {result.source_count} source file(s), as "
+        f"of {result.as_of.isoformat()}"
     )
     print(f"kernel-adoption: citable as enforcement: {enforced} ({reason})")
     if not result.report.conforms:
         return 1
+    if not enforced:
+        # `is_enforced` was printed and nothing acted on it, so a step could go
+        # green while announcing that its own result was not citable. A
+        # predicate no exit code consults is a comment.
+        print(
+            "kernel-adoption: FAILING because this run is not citable as "
+            "enforcement. A green step that announces its own result is "
+            "uncitable is worse than a red one: the log says so and the badge "
+            "does not, and the badge is what gets quoted",
+            file=sys.stderr,
+        )
+        return 3
     return 0

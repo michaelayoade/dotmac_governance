@@ -25,8 +25,12 @@ could have been `<=` with nobody noticing.
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date, timedelta
@@ -37,13 +41,18 @@ from kernel_adoption_control import (
     FindingCode,
     KernelSurfaceCatalogue,
     PinSite,
+    Severity,
 )
 from kernel_adoption_control.runner import (
+    CANONICAL_GOVERNANCE,
     GOVERNANCE_ROOT,
     RUN_CONTRACT,
     ProductObservation,
+    Provenance,
     RunnerError,
+    _declaration_location,
     is_enforced,
+    main,
     resolve_observer,
     run,
 )
@@ -83,6 +92,15 @@ def transitional(expiry: str, module: str = "dotmac_kernel.db") -> dict[str, Any
     }
 
 
+def not_applicable(reason: str = "composes no assembly") -> dict[str, Any]:
+    return {
+        "contract": "KernelAdoptionDeclaration.v1",
+        "product_revision": PRODUCT_REVISION,
+        "applicability": "not_applicable",
+        "not_applicable_reason": reason,
+    }
+
+
 def applicable(**overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "contract": "KernelAdoptionDeclaration.v1",
@@ -101,14 +119,25 @@ def applicable(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _git(root: Path, *arguments: str) -> None:
-    subprocess.run(
+def _git(root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
         ["git", "-C", str(root), *arguments],
         capture_output=True,
         text=True,
         check=True,
         timeout=30,
     )
+    return completed.stdout.strip()
+
+
+def governance_head() -> str:
+    """The revision the Governance checkout under test is actually at.
+
+    Read rather than hardcoded: a fixture pinning a literal commit would refuse
+    every run the day after it was written, and the property being exercised is
+    that the pin and the runner AGREE -- not what either happens to be.
+    """
+    return _git(REPO_ROOT, "rev-parse", "HEAD")
 
 
 # ── the observers the tests point the runner at ──────────────────────────────
@@ -146,6 +175,39 @@ def observe_without_catalogue(root: Path) -> ProductObservation:
     )
 
 
+def observe_one_pin(root: Path) -> ProductObservation:
+    return ProductObservation(
+        sources={PurePosixPath("app/legacy.py"): CONSUMER},
+        catalogue=CATALOGUE,
+        pin_sites=(
+            PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "dependency"),
+        ),
+    )
+
+
+def observe_duplicate_pin(root: Path) -> ProductObservation:
+    """Two entries, one location. Two names for one observation."""
+    return ProductObservation(
+        sources={PurePosixPath("app/legacy.py"): CONSUMER},
+        catalogue=CATALOGUE,
+        pin_sites=(
+            PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "dependency"),
+            PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "bom-floor"),
+        ),
+    )
+
+
+def observe_na_but_pinned(root: Path) -> ProductObservation:
+    """No Kernel import, and a Kernel pin. The premise its packaging denies."""
+    return ProductObservation(
+        sources={PurePosixPath("app/pure.py"): "value = 1\n"},
+        catalogue=None,
+        pin_sites=(
+            PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "dependency"),
+        ),
+    )
+
+
 def observe_nothing(root: Path) -> ProductObservation:
     return ProductObservation(sources={}, catalogue=None, pin_sites=())
 
@@ -174,6 +236,26 @@ class ProductFixture:
         _git(self.root, "config", "user.email", "test@example.invalid")
         _git(self.root, "config", "user.name", "Test")
         _git(self.root, "config", "commit.gpgsign", "false")
+        # A product is a DIFFERENT repository, so its remote is its own. This is
+        # what makes the provenance tests real rather than incidental: the
+        # Governance checkout beside it is the canonical one and this is not.
+        _git(
+            self.root,
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/michaelayoade/dotmac_erp.git",
+        )
+        self.profile({})
+
+    def governance_model(self, revision: str | None = None) -> dict[str, Any]:
+        return {
+            "kind": "pinned",
+            "canonical_url": CANONICAL_GOVERNANCE,
+            "revision": governance_head() if revision is None else revision,
+            "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
+            "status": "accepted",
+        }
 
     def declare(self, body: dict[str, Any] | str | None) -> None:
         path = self.root / ".dotmac" / "kernel-adoption.json"
@@ -185,9 +267,22 @@ class ProductFixture:
         path.write_text(raw, encoding="utf-8")
 
     def profile(self, body: dict[str, Any] | str) -> None:
-        raw = body if isinstance(body, str) else json.dumps(body, indent=2) + "\n"
+        """Write the profile, always carrying a governance_model.
+
+        The pin is not optional for the runner: a repository that does not say
+        which Governance governs it cannot be measured by one. So the fixture
+        supplies it and each test overrides only the part it is about.
+        """
+        if isinstance(body, str):
+            (self.root / ".dotmac" / "standards-profile.json").write_text(
+                body, encoding="utf-8"
+            )
+            return
+        document: dict[str, Any] = {"schema_version": 9}
+        document.update(body)
+        document.setdefault("governance_model", self.governance_model())
         (self.root / ".dotmac" / "standards-profile.json").write_text(
-            raw, encoding="utf-8"
+            json.dumps(document, indent=2) + "\n", encoding="utf-8"
         )
 
     def commit(self) -> None:
@@ -228,8 +323,37 @@ class AdmitControl(RunnerTestCase):
     def test_a_conforming_product_produces_no_error(self) -> None:
         self.product.declare(applicable())
         result = self.go()
-        self.assertEqual([], self.codes(result), result.to_dict())
-        self.assertTrue(result.report.conforms)
+        self.assertTrue(result.report.conforms, result.to_dict())
+        self.assertEqual(
+            [FindingCode.DECLARATION_FIELDS_UNEVALUATED], self.codes(result)
+        )
+
+    def test_an_applicable_run_publishes_the_fields_it_does_not_read(self) -> None:
+        """Three declared fields nothing compares, said out loud in the report.
+
+        `product_revision`, `kernel_catalogue` and `required_surfaces` are
+        parsed, carried and never evaluated. Leaving that silent would be
+        declared-and-never-read inside the package built to catch
+        declared-and-never-read, so it is a NOTICE on every applicable run and
+        the reason an applicable run is not citable.
+        """
+        self.product.declare(applicable())
+        notice = [
+            item
+            for item in self.go().report.findings
+            if item.code is FindingCode.DECLARATION_FIELDS_UNEVALUATED
+        ]
+        self.assertEqual(1, len(notice))
+        self.assertIs(Severity.NOTICE, notice[0].severity)
+        for named in ("product_revision", "kernel_catalogue", "required_surfaces"):
+            self.assertIn(named, notice[0].message)
+        self.assertIn("decision 52", notice[0].message)
+
+    def test_a_not_applicable_run_publishes_no_such_notice(self) -> None:
+        """The near-miss: a declaration with no unread fields says nothing."""
+        self.product.declare(not_applicable())
+        result = self.go(observer=f"{__name__}:observe_kernel_free")
+        self.assertNotIn(FindingCode.DECLARATION_FIELDS_UNEVALUATED, self.codes(result))
 
     def test_the_report_binds_to_both_revisions(self) -> None:
         self.product.declare(applicable())
@@ -581,7 +705,7 @@ class TheProductCannotClassifyItself(RunnerTestCase):
         """Delete the file; the observer is unchanged and the run refuses."""
         self.product.declare(applicable())
         clean = self.go()
-        self.assertEqual([], self.codes(clean))
+        self.assertNotIn(FindingCode.DECLARATION_MISSING, self.codes(clean))
         self.product.declare(None)
         refused = self.go()
         self.assertIn(FindingCode.DECLARATION_MISSING, self.codes(refused))
@@ -670,7 +794,11 @@ class WhereTheDeclarationLives(RunnerTestCase):
             json.dumps(applicable()) + "\n", encoding="utf-8"
         )
         result = self.go()
-        self.assertEqual([], self.codes(result), result.to_dict())
+        self.assertEqual(
+            [FindingCode.DECLARATION_FIELDS_UNEVALUATED],
+            self.codes(result),
+            result.to_dict(),
+        )
         self.assertEqual(
             ".dotmac/elsewhere.json", result.to_dict()["product"]["declaration_path"]
         )
@@ -683,17 +811,30 @@ class WhereTheDeclarationLives(RunnerTestCase):
             result.to_dict()["product"]["declaration_path"],
         )
 
-    def test_an_unreadable_profile_refuses_rather_than_falling_back(self) -> None:
-        """A profile that may name a non-default path, and cannot be read.
+    def test_an_unreadable_profile_refuses_the_run(self) -> None:
+        """An unreadable profile stops the run before anything is measured.
 
-        Falling back to the default would answer a question that could not be
-        answered: the declaration's location is unknown, so reading SOME file
-        and reporting on it is worse than refusing.
+        Provenance is established first and reads the same file, so this is
+        where an end-to-end run refuses now. The fall-back property itself is
+        asserted directly below, because a property observed only through
+        another check's ordering stops being observed the day that ordering
+        changes.
         """
         self.product.declare(applicable())
         self.product.profile("{ not json\n")
         with self.assertRaises(RunnerError) as caught:
             self.go()
+        self.assertIn("could not be read", str(caught.exception))
+
+    def test_the_reader_never_falls_back_to_the_default_path(self) -> None:
+        """Directly: an unreadable profile may bind elsewhere, so refuse.
+
+        Reading SOME file and reporting on it would answer a question that
+        could not be answered.
+        """
+        self.product.profile("{ not json\n")
+        with self.assertRaises(RunnerError) as caught:
+            _declaration_location(self.product.root)
         self.assertIn(
             "where the declaration lives is now unknown", str(caught.exception)
         )
@@ -709,6 +850,237 @@ class WhereTheDeclarationLives(RunnerTestCase):
         )
 
 
+class ProvenanceIsBoundToGovernance(RunnerTestCase):
+    """A copy of this package is a copy of the code, not the authority.
+
+    Before this, `GOVERNANCE_ROOT` was the package's own parent directory and
+    nothing else. A product that vendored the package got its own root, its own
+    peeled HEAD, and a report claiming enforcement at a revision that is not a
+    Governance commit -- including from a MODIFIED copy, which is the case that
+    matters, because a modified copy can be made to conform.
+    """
+
+    def vendor(self) -> Path:
+        """A product tree holding a COPY of the package, with its own remote."""
+        vendored = self.product.root / "kernel_adoption_control"
+        shutil.copytree(GOVERNANCE_ROOT / "kernel_adoption_control", vendored)
+        return self.product.root
+
+    def test_a_vendored_copy_cannot_assert_it_is_governance(self) -> None:
+        root = self.vendor()
+        self.product.declare(not_applicable())
+        self.product.commit()
+        with self.assertRaises(RunnerError) as caught:
+            run(
+                product_root=root,
+                governance_root=root,
+                observer_reference=f"{__name__}:observe_kernel_free",
+                as_of=AS_OF,
+            )
+        self.assertIn("dotmac_erp", str(caught.exception))
+        self.assertIn(CANONICAL_GOVERNANCE, str(caught.exception))
+
+    def test_a_product_measured_against_a_governance_it_did_not_pin_is_refused(
+        self,
+    ) -> None:
+        """The pin is the product's consent to be measured by that code.
+
+        A product pinning an older Governance must not be reported as enforced
+        by a newer one it has not adopted -- which is the whole sequencing
+        claim, made checkable instead of asserted.
+        """
+        self.product.declare(applicable())
+        self.product.profile(
+            {"governance_model": self.product.governance_model("c" * 40)}
+        )
+        with self.assertRaises(RunnerError) as caught:
+            self.go()
+        self.assertIn("pins Governance at " + "c" * 40, str(caught.exception))
+
+    def test_a_pin_to_some_other_repository_is_refused(self) -> None:
+        model = self.product.governance_model()
+        model["canonical_url"] = "https://github.com/michaelayoade/dotmac_erp"
+        self.product.declare(applicable())
+        self.product.profile({"governance_model": model})
+        with self.assertRaises(RunnerError) as caught:
+            self.go()
+        self.assertIn("pins governance at", str(caught.exception))
+
+    def test_a_product_claiming_a_local_governance_model_is_refused(self) -> None:
+        """`local` is Governance's own statement, and this is not Governance."""
+        self.product.declare(applicable())
+        self.product.profile(
+            {
+                "governance_model": {
+                    "kind": "local",
+                    "source": "docs/adr/0006-x.md",
+                    "status": "accepted",
+                }
+            }
+        )
+        with self.assertRaises(RunnerError) as caught:
+            self.go()
+        self.assertIn(
+            "only the Governance repository itself may state", str(caught.exception)
+        )
+
+    def test_a_product_with_no_profile_is_refused(self) -> None:
+        self.product.declare(applicable())
+        (self.product.root / ".dotmac" / "standards-profile.json").unlink()
+        with self.assertRaises(RunnerError) as caught:
+            self.go()
+        self.assertIn("states no governance_model", str(caught.exception))
+
+    def test_the_matching_pin_is_admitted(self) -> None:
+        """The near-miss all four refusals above must not be catching."""
+        self.product.declare(applicable())
+        self.assertIs(Provenance.PINNED, self.go().provenance)
+
+    def test_governance_measuring_itself_is_self_provenance(self) -> None:
+        result = run(
+            product_root=REPO_ROOT,
+            observer_reference="tools.kernel_adoption_observation:observe",
+            as_of=AS_OF,
+        )
+        self.assertIs(Provenance.SELF, result.provenance)
+
+
+class PinSufficiencyIsApplicabilityAware(RunnerTestCase):
+    """ "Enough to detect a disagreement" is a different number for each state.
+
+    The arm previously emitted a NOTICE below two sites and the report stayed
+    conforming and citable -- a check that structurally could not fail, counted
+    as one that passed.
+    """
+
+    def test_an_applicable_declaration_with_one_pin_site_is_an_error(self) -> None:
+        self.product.declare(applicable())
+        result = self.go(observer=f"{__name__}:observe_one_pin")
+        self.assertIn(FindingCode.PIN_UNDETECTABLE, self.codes(result))
+        self.assertFalse(result.report.conforms)
+
+    def test_two_observations_at_one_location_are_one_observation(self) -> None:
+        """Independence is a distinct (path, line), not a count of entries."""
+        self.product.declare(applicable())
+        result = self.go(observer=f"{__name__}:observe_duplicate_pin")
+        self.assertIn(FindingCode.PIN_UNDETECTABLE, self.codes(result))
+
+    def test_two_independent_observations_are_enough(self) -> None:
+        """The near-miss: the arm becomes capable of failing and stays silent."""
+        self.product.declare(applicable())
+        result = self.go()
+        self.assertNotIn(FindingCode.PIN_UNDETECTABLE, self.codes(result))
+
+    def test_a_not_applicable_declaration_that_pins_the_kernel_is_refused(self) -> None:
+        """Zero pin sites AND zero imports, or the stated premise is false."""
+        self.product.declare(not_applicable())
+        result = self.go(observer=f"{__name__}:observe_na_but_pinned")
+        self.assertIn(FindingCode.DECLARATION_PREMISE_FALSE, self.codes(result))
+        self.assertFalse(result.report.conforms)
+
+    def test_a_not_applicable_declaration_with_no_pins_is_silent(self) -> None:
+        """The near-miss, and this repository's own real shape."""
+        self.product.declare(not_applicable())
+        result = self.go(observer=f"{__name__}:observe_kernel_free")
+        self.assertEqual([], self.codes(result), result.to_dict())
+
+    def test_a_refused_declaration_leaves_the_sufficiency_question_unanswered(
+        self,
+    ) -> None:
+        """The requirement is a function of an applicability nobody stated.
+
+        So the pin arm reports nothing, and the refusal says so rather than
+        letting the silence read as a pass.
+        """
+        self.product.declare(None)
+        result = self.go(observer=f"{__name__}:observe_one_pin")
+        self.assertNotIn(FindingCode.PIN_UNDETECTABLE, self.codes(result))
+        message = result.report.findings[0].message
+        self.assertIn("Arms 1, 4, 6 and 7", message)
+
+
+class TheExitCodeConsultsCitability(RunnerTestCase):
+    """`is_enforced` was printed and nothing acted on it.
+
+    A step could go green while its own log said the result was not citable,
+    and the badge is what gets quoted.
+    """
+
+    def invoke(self) -> int:
+        self.product.commit()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            return main(
+                [
+                    "--root",
+                    str(self.product.root),
+                    "--observer",
+                    f"{__name__}:observe_consumer",
+                    "--as-of",
+                    AS_OF.isoformat(),
+                ]
+            )
+
+    def test_a_conforming_applicable_run_exits_nonzero(self) -> None:
+        """Conforming and NOT citable is its own outcome, and it is not success."""
+        self.product.declare(applicable())
+        self.assertEqual(3, self.invoke())
+
+    def test_a_run_with_findings_exits_one(self) -> None:
+        self.product.declare(None)
+        self.assertEqual(1, self.invoke())
+
+    def test_a_refused_run_exits_two(self) -> None:
+        self.product.declare(applicable())
+        self.product.profile("{ not json\n")
+        self.assertEqual(2, self.invoke())
+
+    def test_a_citable_run_exits_zero(self) -> None:
+        """The admit control. Without it every assertion above could hold while
+        nothing at all could ever succeed."""
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            code = main(
+                [
+                    "--root",
+                    str(REPO_ROOT),
+                    "--observer",
+                    "tools.kernel_adoption_observation:observe",
+                    "--as-of",
+                    AS_OF.isoformat(),
+                ]
+            )
+        if code == 3 and "uncommitted changes" in buffer.getvalue():
+            self.skipTest(
+                "this checkout is dirty; CI runs on a clean one and that is "
+                "the run whose exit code is the claim"
+            )
+        self.assertEqual(0, code, buffer.getvalue())
+
+
+class TheImportRootIsScopedAndRestored(RunnerTestCase):
+    """The measured checkout is on `sys.path` for the observer load and no longer.
+
+    It used to be inserted at position 0 and left there, making the measured
+    tree the primary import root for the rest of the process -- broader than
+    the "an observer is called" exposure ADR 0042 § A9 names.
+    """
+
+    def test_sys_path_is_unchanged_after_a_run(self) -> None:
+        self.product.declare(applicable())
+        before = list(sys.path)
+        self.go()
+        self.assertEqual(before, sys.path)
+
+    def test_sys_path_is_unchanged_after_a_refused_observer(self) -> None:
+        """The finally arm. A refusal must not leave the path widened."""
+        self.product.declare(applicable())
+        before = list(sys.path)
+        with self.assertRaises(RunnerError):
+            self.go(observer=f"{__name__}:observe_by_raising")
+        self.assertEqual(before, sys.path)
+
+
 class EnforcementIsVisible(RunnerTestCase):
     """A run report is what "CI-enforced" must exhibit, and each way it fails.
 
@@ -722,8 +1094,20 @@ class EnforcementIsVisible(RunnerTestCase):
         return {
             "contract": RUN_CONTRACT,
             "as_of": TODAY,
-            "governance": {"revision": "a" * 40, "worktree_clean": True},
-            "product": {"revision": "b" * 40, "worktree_clean": True},
+            "governance": {
+                "provenance": "self",
+                "revision": "a" * 40,
+                "worktree_clean": True,
+                "canonical_url": CANONICAL_GOVERNANCE,
+            },
+            "product": {
+                "revision": "b" * 40,
+                "worktree_clean": True,
+                "declaration": {
+                    "state": "present",
+                    "applicability": "not_applicable",
+                },
+            },
             "observation": {"source_count": 12},
             "findings": {"conforms": True},
         }
@@ -745,23 +1129,81 @@ class EnforcementIsVisible(RunnerTestCase):
         self.assertFalse(enforced)
         self.assertIn(RUN_CONTRACT, reason)
 
+    def test_a_report_naming_another_repository_is_not_enforcement(self) -> None:
+        """The vendoring claim, checked at the predicate as well as at the run."""
+        document = self.base()
+        governance = dict(document["governance"])
+        governance["canonical_url"] = "https://github.com/michaelayoade/dotmac_erp"
+        document["governance"] = governance
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("not the authority behind it", reason)
+
+    def test_a_report_with_no_established_provenance_is_not_enforcement(self) -> None:
+        document = self.base()
+        governance = dict(document["governance"])
+        governance["provenance"] = "assumed"
+        document["governance"] = governance
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("not an established one", reason)
+
+    def test_an_applicable_declaration_is_not_citable(self) -> None:
+        """The narrowing that makes the rest honest.
+
+        Three declared fields are unread, so a run over an applicable
+        declaration cannot be cited as enforcing that declaration. Governance's
+        truthful `not_applicable` self-run has no unread fields and stays
+        citable, which is what makes this a self-enforcement foundation rather
+        than a product gate that overclaims.
+        """
+        document = self.base()
+        product = dict(document["product"])
+        product["declaration"] = {"state": "present", "applicability": "applicable"}
+        document["product"] = product
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("decision 52", reason)
+        self.assertIn("required_surfaces", reason)
+
+    def test_a_refused_declaration_is_not_citable(self) -> None:
+        document = self.base()
+        product = dict(document["product"])
+        product["declaration"] = {"state": "DeclarationMissing", "detail": "gone"}
+        document["product"] = product
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("which is a refusal", reason)
+
     def test_a_moving_governance_coordinate_is_not_enforcement(self) -> None:
         document = self.base()
-        document["governance"] = {"revision": "main", "worktree_clean": True}
+        document["governance"] = {
+            "provenance": "self",
+            "revision": "main",
+            "worktree_clean": True,
+            "canonical_url": CANONICAL_GOVERNANCE,
+        }
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
         self.assertIn("not a peeled commit", reason)
 
     def test_a_dirty_governance_checkout_is_not_enforcement(self) -> None:
         document = self.base()
-        document["governance"] = {"revision": "a" * 40, "worktree_clean": False}
+        document["governance"] = {
+            "provenance": "self",
+            "revision": "a" * 40,
+            "worktree_clean": False,
+            "canonical_url": CANONICAL_GOVERNANCE,
+        }
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
         self.assertIn("not the code that ran", reason)
 
     def test_a_dirty_product_checkout_is_not_enforcement(self) -> None:
         document = self.base()
-        document["product"] = {"revision": "b" * 40, "worktree_clean": False}
+        product = dict(document["product"])
+        product["worktree_clean"] = False
+        document["product"] = product
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
         self.assertIn("not the source that was read", reason)
@@ -784,10 +1226,12 @@ class EnforcementIsVisible(RunnerTestCase):
         """Non-vacuity: the predicate is satisfiable by the runner's own output.
 
         A predicate that rejected every real report would make every assertion
-        above pass while nothing could ever be enforced.
+        above pass while nothing could ever be enforced. The satisfiable shape
+        is a truthful `not_applicable` declaration -- which is exactly the shape
+        this repository has, and exactly the scope activation now claims.
         """
-        self.product.declare(applicable())
-        document = self.go().to_dict()
+        self.product.declare(not_applicable())
+        document = self.go(observer=f"{__name__}:observe_kernel_free").to_dict()
         # The Governance worktree under test is the one this suite runs from and
         # may legitimately be dirty; substitute only that one fact.
         document["governance"] = dict(document["governance"])

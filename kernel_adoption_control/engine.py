@@ -20,12 +20,15 @@ Two vacuity hazards are handled as verdicts rather than assumed away:
 
 - A run over no source emits `INVENTORY_EMPTY`. Every sweep below would
   otherwise report "no findings" over nothing.
-- The pin-disagreement arm needs at least two sites to be capable of
-  disagreeing. Given fewer it emits a NOTICE saying so, because a check that
-  structurally cannot fail must not read as one that passed. This matters here
-  specifically: no pin disagreement exists in any of the three products today,
-  so the arm's health cannot be inferred from a green run and is established by
-  a planted defect instead.
+- The pin-disagreement arm needs at least two INDEPENDENT observations to be
+  capable of disagreeing. Given fewer it is an ERROR under an `applicable`
+  declaration — it was a notice, and the report stayed conforming and citable,
+  which is a check that structurally cannot fail being counted as one that
+  passed. Under `not_applicable` the requirement inverts: any pin site at all
+  contradicts the stated premise. Either way the sufficiency question has an
+  answer rather than a shrug, and the arm's health is established by a planted
+  defect, because no pin disagreement exists in any of the three products
+  today.
 """
 
 from __future__ import annotations
@@ -205,18 +208,77 @@ def _prohibited_match(module: str, prohibited: frozenset[str]) -> str | None:
     return None
 
 
-def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
+def _pin_sufficiency(inputs: KernelAdoptionInputs) -> list[Finding]:
+    """Whether the pin arm was even CAPABLE of reporting what it is asked to.
+
+    Applicability-aware, because "enough" is a different number for the two
+    states and the old arm asked neither question. It emitted a NOTICE at fewer
+    than two sites and the report stayed conforming and citable -- a check that
+    structurally could not fail, counted as one that passed. That is the exact
+    shape this repository exists to catch, arriving inside the package built to
+    catch it.
+
+    - **applicable** -- two or more INDEPENDENT observations, where independence
+      is a distinct `(path, line)`. Two entries at one line are one observation
+      written twice, and a disagreement between a value and itself is not
+      detectable. Fewer is an ERROR.
+    - **not_applicable** -- zero pin sites AND zero Kernel imports. A repository
+      declaring it consumes no Kernel while pinning the Kernel has stated a
+      premise its own packaging contradicts, which is the same fault as
+      importing one, so it is reported as the same code.
+
+    A declaration that could not be read gets neither requirement, because the
+    requirement is a function of a value nobody stated. The refusal in
+    `_check_declaration` already names this arm as unmonitored.
+    """
+    outcome = inputs.declaration
+    if not isinstance(outcome, DeclarationPresent):
+        return []
     sites = inputs.pin_sites
-    if len(sites) < 2:
+    if outcome.declaration.applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
+        if not sites:
+            return []
+        rendered = ", ".join(
+            f"{site.path.as_posix()}:{site.line} ({site.kind}) {site.version!r}"
+            for site in sites
+        )
         return [
-            _notice(
-                FindingCode.PIN_DISAGREES,
-                f"the pin-disagreement arm was given {len(sites)} pin site(s); it "
-                "cannot disagree with itself, so this run establishes nothing "
-                "about pin agreement. Two or more sites are required for the "
-                "check to be capable of failing",
+            _error(
+                FindingCode.DECLARATION_PREMISE_FALSE,
+                f"the declaration states applicability 'not_applicable' and "
+                f"this repository states {len(sites)} {KERNEL_ROOT} pin "
+                f"site(s): {rendered}. A repository that consumes no Kernel "
+                "does not pin one; the premise is contradicted by its own "
+                "packaging, and an exemption states an ENFORCEABLE premise or "
+                "the region is unmonitored rather than exempt",
+                path=sites[0].path,
+                line=sites[0].line,
             )
         ]
+    independent = {(site.path, site.line) for site in sites}
+    if len(independent) >= 2:
+        return []
+    return [
+        _error(
+            FindingCode.PIN_UNDETECTABLE,
+            f"the declaration states applicability 'applicable' and this run "
+            f"was given {len(sites)} pin site(s) at {len(independent)} distinct "
+            "location(s). The pin-disagreement arm cannot disagree with itself, "
+            "so it established nothing -- and a check incapable of failing must "
+            "not be counted as one that passed. Supply the product's real pin "
+            "sites (a dependency declaration and its lock resolution are the "
+            "usual two), or the arm is unmonitored rather than clean",
+        )
+    ]
+
+
+def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
+    sites = inputs.pin_sites
+    if len({(site.path, site.line) for site in sites}) < 2:
+        # Sufficiency is `_pin_sufficiency`'s question now, and it answers with
+        # an error or with nothing. Returning silently here would be silence
+        # only in the arm that cannot run; it is never the whole verdict.
+        return []
 
     by_version: dict[str, list[tuple[PurePosixPath, int, str]]] = defaultdict(list)
     for site in sites:
@@ -412,10 +474,12 @@ def _check_declaration(
         return [
             _error(
                 code,
-                f"{outcome.detail}. Arms 4, 6 and 7 are therefore UNMONITORED "
-                "rather than clean: no prohibited surface, no transitional "
-                "surface and no expired transition can be reported, and that "
-                "is a refusal rather than a pass",
+                f"{outcome.detail}. Arms 1, 4, 6 and 7 are therefore "
+                "UNMONITORED rather than clean: no prohibited surface, no "
+                "transitional surface and no expired transition can be "
+                "reported, and the pin arm cannot even be told how many "
+                "observations it needs, because that is a function of an "
+                "applicability nobody stated. This is a refusal, not a pass",
             )
         ]
 
@@ -439,7 +503,23 @@ def _check_declaration(
             )
         ]
 
-    findings: list[Finding] = []
+    findings: list[Finding] = [
+        _notice(
+            FindingCode.DECLARATION_FIELDS_UNEVALUATED,
+            "this declaration is 'applicable' and states product_revision "
+            f"{declaration.product_revision}, a kernel_catalogue and "
+            f"{len(declaration.required_surfaces)} required surface(s). NONE of "
+            "those three is evaluated by this runner. They are published here "
+            "rather than left silent because a declared field nothing compares "
+            "is the defect this package exists to catch, and a reader must not "
+            "infer from a clean run that they were checked. The repair is a "
+            "versioned successor contract carrying a non-self-referential "
+            "source coordinate, a catalogue digest comparison and "
+            "required-surface floor semantics -- open decision 52 -- and NOT an "
+            "edit to KernelAdoptionDeclaration.v1, which is frozen. Until it "
+            "exists an 'applicable' run is not citable as enforcement",
+        )
+    ]
     citations = {item.module: item.citation for item in declaration.prohibited_surfaces}
     prohibited = declaration.prohibited_modules
     for path, line, module in kernel_import_sites:
@@ -604,6 +684,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             )
 
     findings.extend(_check_pins(inputs))
+    findings.extend(_pin_sufficiency(inputs))
     findings.extend(
         _check_declaration(
             inputs,

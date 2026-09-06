@@ -417,25 +417,92 @@ an unreadable one must not read as an empty list. `evaluate` raises rather than
 falling through if a sixth outcome is ever added without a code, so a new
 refusal cannot arrive as silence.
 
-### A8. Binding, and how an unenforced enrolment stays visible
+### A8. Binding, provenance, and what activation actually covers
 
-A run report is `KernelAdoptionRun.v1` and names the exact Governance revision
-that produced it and the exact product revision it measured. Both are **derived
-from Git, not supplied**: the Governance root comes from the package's own file
-location, so a product cannot state a Governance revision it did not run.
+**This section was narrowed on 2026-09-06 after independent review, and the
+narrowing is the substance of the second pass.** As first written it claimed
+that any conforming run was citable as enforcement. Three findings invalidated
+that claim, and each is repaired rather than argued with.
 
-`kernel_adoption_control.is_enforced` is the predicate anything citing an
-enrolment must use. It requires the run contract, two peeled 40-character
-commits, two clean worktrees, a non-empty source inventory and a conforming
-run, and it returns the reason when it refuses.
+**Finding one: three declared fields are never read.** An `applicable`
+declaration carries `product_revision`, `kernel_catalogue` and
+`required_surfaces`, and this runner evaluates none of them —
+declared-and-never-read inside the package built to catch
+declared-and-never-read. Governance's own declaration names `f8f90aef…`, which
+is not this branch's HEAD, and the run was clean.
 
-**The sequencing this makes legible:** a product pinning a Governance revision
-from before this amendment produces **no report at all**, and no report is not
-a pass — `is_enforced({})` is `False` with the reason naming the missing
-contract. A report that exists and fails a binding condition says which one.
-Platform's enrolment is therefore not describable as "CI-enforced" until it
-pins a Governance revision containing this runner and can exhibit a report the
-predicate accepts.
+The reviewer's proposed repair — compare `product_revision` against HEAD — is
+**unimplementable as stated**, and Michael said why: *"a committed file cannot
+contain its own commit."* Reaching for it would produce something worse than
+the gap, because the only way to make the comparison pass is to weaken it into
+something that no longer means what its name says. So the three fields are
+handled two ways instead. They are **published** as a NOTICE
+(`kernel.declaration.fields-unevaluated`) on every applicable run, naming each
+one and citing decision 52, so no reader can infer from a clean run that they
+were checked. And their real repair is a **versioned successor contract** —
+a non-self-referential source coordinate, a catalogue digest comparison, and
+required-surface/floor semantics — which is open decision 52 and is **not** an
+edit to `KernelAdoptionDeclaration.v1`. A v1 is never redefined.
+
+**Consequently, an `applicable` report is explicitly NON-CITABLE.**
+`is_enforced` refuses it by name. This is the structural move that makes
+everything else honest: a run that reads part of a declaration cannot be cited
+as enforcing the declaration. Governance's own truthful `not_applicable`
+self-run has no unread fields, so it remains citable — which is why this change
+is a **self-enforcement foundation** and not a product gate. **Applicable-product
+activation is the next change and is gated on the successor contract; Platform's
+enrolment stays blocked until that change lands.** Nothing in this record may be
+read as making enrolment available today.
+
+**Finding two: CI stayed green when `is_enforced` was false.** `main` printed
+the predicate and gated only on `conforms`, so a step could go green while its
+own log announced that its result was not citable — and the badge is what gets
+quoted. The exit code now consults it. Four codes: `0` conforming and citable,
+`1` findings, `2` the run could not be made, `3` conforming and not citable.
+An applicable declaration lands on `3` today, by decision rather than defect.
+
+**Finding three: a vendored runner could claim to be Governance.**
+`GOVERNANCE_ROOT` was the package's own parent directory, so a product that
+copied the package got its own root, its own peeled HEAD and `is_enforced ==
+True` naming a revision that is not a Governance commit — including from a
+MODIFIED copy, which is the case that matters, because a modified copy can be
+made to conform.
+
+Provenance is now established and typed, with two values and no third:
+
+- **self** — the measured root IS the Governance root, and that checkout's
+  `origin` is `https://github.com/michaelayoade/dotmac_governance`. The remote
+  is checked on this path too, precisely because a vendored copy also makes the
+  two roots coincide.
+- **pinned** — the measured repository's own profile states a `governance_model`
+  pinning that canonical URL and an exact revision, and the Governance checkout
+  is at that revision. **A run against a Governance revision the product did not
+  pin is refused**, so a product pinning an older Governance cannot be reported
+  as enforced by a newer one it never adopted. That is the sequencing claim made
+  checkable rather than asserted.
+
+There is no "unverified" provenance value: a run whose provenance cannot be
+established is a refusal, because a caveat in a field is what a later reader
+stops noticing. The pin is read through `standards_control`'s own field parser,
+newly exposed as `parse_governance_model`, rather than reimplemented — the whole
+profile parser could not be used, because it requires `schema_version` 11 and
+the three products are still at 9.
+
+**What the remote check is and is not.** It stops a product that COPIES the
+package from inheriting the ability to assert it is Governance, which is a
+mistake somebody makes by accident. It does not stop deliberate forgery by
+someone who already controls the runner's checkout and can set a remote URL.
+Nothing available here would, and claiming otherwise would be this record's own
+failure mode.
+
+**How an unenforced enrolment stays visible.** A report is
+`KernelAdoptionRun.v1` and names the canonical Governance repository, the
+provenance, the Governance revision and the product revision — the revisions
+derived from Git, never supplied. `is_enforced` returns `(bool, reason)` and
+requires all of that plus two clean worktrees, a non-empty inventory, a present
+`not_applicable` declaration and a conforming run. A product pinning a
+Governance revision from before this amendment produces **no report at all**,
+and no report is not a pass.
 
 ### A9. What the runner executes, and the boundary on that
 
@@ -462,6 +529,42 @@ review.
   `TransitionalSurfaceDeclaration`, which the package does not export, so
   `from kernel_adoption_control import *` raised. That is ADR 0041's defect —
   a name with no referent — and it is removed.
+
+Added in the second pass, after review:
+
+- **The pin arm's sufficiency question is applicability-aware and can now
+  fail.** It emitted a NOTICE below two sites and the report stayed conforming
+  and citable — a check that structurally could not fail, counted as one that
+  passed, which is this repository's own subject arriving in its own package.
+  An `applicable` declaration now requires two INDEPENDENT observations —
+  independence being a distinct `(path, line)`, because two entries at one line
+  are one observation written twice — and fewer is an ERROR. A
+  `not_applicable` declaration requires zero pin sites and zero Kernel imports;
+  a pin under `not_applicable` is reported as the same premise-false code as an
+  import, because it is the same fault. A declaration that could not be read
+  gets neither requirement, and the refusal now names the pin arm among the
+  unmonitored ones rather than letting its silence read as a pass.
+- **The measured checkout is on `sys.path` only while the observer loads.**
+  `main` inserted it at position 0 and left it there, making the measured tree
+  the primary import root for the rest of the process — broader than the "an
+  observer is called" exposure § A9 names, because any later import in the same
+  process would resolve there first. It is scoped and restored, including on a
+  refusal. What that does NOT undo is that the observer module stays in
+  `sys.modules` and its import already ran the product's code; restoring a path
+  cannot unrun that, and § A9's boundary still stands.
+- **The clock sweep is parsed rather than grepped.** The substring version
+  failed on `contracts.py`'s own docstring — the sentence explaining that no
+  clock is read contains the token the guard looked for, so the guard fired on
+  the prose documenting the guard. Parsing also closed four routes the
+  substring rule missed: an aliased import, `time.time()`, a stat `st_mtime`,
+  and a Git `--format=%cI`. All four are permanent plants and the prose is a
+  permanent near-miss.
+- **`.gitignore` covers the tool caches.** `ruff` and `mypy` run before this
+  step and write `.ruff_cache/` and `.mypy_cache/` into the root, and
+  `_worktree_clean` counts untracked entries — so both `worktree_clean` fields
+  would have read `False` and the step would have gone green while printing
+  that its own result was uncitable. Found by review, settled by observation:
+  CI now prints `True`.
 
 ## Consequences
 

@@ -105,6 +105,12 @@ class FindingCode(str, Enum):
     DECLARATION_PREMISE_FALSE = "kernel.declaration.premise-false"
 
     PIN_DISAGREES = "kernel.pin.disagrees"
+    #: The pin arm was not given enough independent observations to be CAPABLE
+    #: of reporting a disagreement. An ERROR for an `applicable` declaration,
+    #: because a check that structurally cannot fail must not be counted as one
+    #: that passed -- which is exactly what it was doing: a notice, and a
+    #: report that stayed citable.
+    PIN_UNDETECTABLE = "kernel.pin.undetectable"
     SURFACE_UNKNOWN = "kernel.surface.unknown"
     SURFACE_PRIVATE = "kernel.surface.private"
     SURFACE_PROHIBITED = "kernel.surface.prohibited"
@@ -120,6 +126,15 @@ class FindingCode(str, Enum):
     #: cannot expire -- the "declared and never read" defect inside the very
     #: obligation that exists to make a retirement noticeable.
     TRANSITIONAL_EXPIRED = "kernel.transitional.expired"
+
+    #: An `applicable` declaration carries three fields this runner does not
+    #: read: `product_revision`, `kernel_catalogue` and `required_surfaces`.
+    #: Published as a NOTICE on every applicable run rather than left silent,
+    #: because declared-and-never-read inside the package built to catch
+    #: declared-and-never-read is the defect wearing the guard's uniform. The
+    #: repair is a versioned successor contract, not an edit to
+    #: `KernelAdoptionDeclaration.v1`; it is open decision 52.
+    DECLARATION_FIELDS_UNEVALUATED = "kernel.declaration.fields-unevaluated"
 
     #: A Kernel import was measured and no surface catalogue was supplied, so
     #: the unknown-surface arm could not run. A refusal rather than silence: a

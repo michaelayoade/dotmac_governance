@@ -46,13 +46,18 @@ cannot establish about itself.
 
 from __future__ import annotations
 
+import contextlib
+import importlib
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 
 from kernel_adoption_control import (
@@ -99,7 +104,8 @@ from kernel_adoption_control.surface import (
 )
 from kernel_adoption_control.versions import VersionError, compare_versions
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURES = REPO_ROOT / "tests" / "fixtures"
 
 TODAY = date(2026, 9, 6)
 #: Two peeled commits used as coordinates. Neither is real, which is why every
@@ -2264,13 +2270,20 @@ class TheRootFacadeIsASeparatelyPublishedSurface(Base):
         )
 
 
-#: v1's rendering and digest over a fixed fact set, taken from the code at
-#: `298eaad` -- the revision BEFORE `dmg-kernel-surface-v2` existed -- and
-#: pinned here as bytes. This is how "v1 was not redefined" is proved rather
-#: than assumed: any edit to `SOURCE_SURFACE_ALGORITHM`, to `SurfaceFact
-#: .render`, to the field or record separators, to the sort, or to the trailing
-#: newline moves one of these two values and fails. A test that only compared
-#: v1 with itself would pass over a v1 that had been rewritten in place.
+#: v1's rendering and digest over a fixed fact set, transcribed from the code
+#: at `298eaad` -- the revision BEFORE `dmg-kernel-surface-v2` existed.
+#:
+#: A TRANSCRIPTION, not an oracle, and it is no longer the proof. These are
+#: literals somebody typed; the comment naming the commit they came from is
+#: documentation, and a comment cannot be wrong in a way that fails a build.
+#: The proof is `V1IsProvedAgainstItsOwnHistoricalImplementation`, which loads
+#: and EXECUTES that revision's own `surface.py` and `engine.py` and compares
+#: rendering, digest and evaluation against the current ones.
+#:
+#: Kept because it still earns its place: it pins the exact bytes in the
+#: repository where a reviewer sees them without running Git, and it fails
+#: immediately and legibly when v1's rendering moves. It is a fast canary in
+#: front of the real comparison, not a substitute for it.
 V1_GOLDEN_RENDERING = (
     "dmg-kernel-surface-v1\n"
     "a.py\tdotmac_kernel\tY\t-\n"
@@ -2333,11 +2346,14 @@ class CanonicalKernelIdentity(Base):
             surface_digest(facts_of(ALIASED_A)), surface_digest(facts_of(ALIASED_B))
         )
 
-    def test_v1_renders_and_digests_exactly_what_it_did_before_v2_existed(
-        self,
-    ) -> None:
-        """v1 unredefined, proved against bytes taken at `298eaad` rather than
-        against v1's present self. See `V1_GOLDEN_RENDERING`."""
+    def test_v1_renders_and_digests_the_transcribed_pre_v2_bytes(self) -> None:
+        """The fast canary, against transcribed bytes. NOT the oracle.
+
+        These literals were copied out of `298eaad`; nothing here executes that
+        revision. `V1IsProvedAgainstItsOwnHistoricalImplementation` does, and
+        that is the test which establishes v1 was not redefined. This one
+        catches the same regression sooner and shows a reviewer the values.
+        """
         self.assertEqual(V1_GOLDEN_RENDERING, render_surface(V1_GOLDEN_FACTS))
         self.assertEqual(V1_GOLDEN_DIGEST, surface_digest(V1_GOLDEN_FACTS))
 
@@ -2544,6 +2560,12 @@ class CanonicalKernelIdentity(Base):
         `dmg-kernel-surface-v2` existed -- and produced the SAME two findings
         unclassified and the SAME clean report once classified. v1's evaluation
         is byte-identical across the change; the document was under-specified.
+
+        That cross-check is no longer an ad-hoc one. This test exercises the
+        CURRENT engine only, and the historical comparison it depends on is
+        committed as
+        `V1IsProvedAgainstItsOwnHistoricalImplementation
+        ::test_the_historical_and_current_engines_agree_on_a_v1_declaration`.
         """
         sources = {
             PurePosixPath("a.py"): "from dotmac_kernel import Y\n",
@@ -2706,6 +2728,362 @@ class CanonicalKernelIdentity(Base):
         v2_facts = surface_identity_facts(self.aliased())
         with self.assertRaises(AttributeError):
             render_surface(v2_facts)  # type: ignore[arg-type]
+
+
+#: The revision v1 is proved against: the commit before `dmg-kernel-surface-v2`
+#: existed, in full rather than abbreviated. It is an ANCESTOR of every commit
+#: on this branch, which is what makes it resolvable from any checkout that
+#: contains HEAD's history -- see `V1_HISTORY` for why that is not assumed.
+PRE_V2_REVISION = "298eaad2e6b7079e75e62fda75b5e05f6862428f"
+
+#: The isolated package's top-level name. NOT `kernel_adoption_control`: the
+#: historical modules are imported under a name of their own, so they cannot
+#: shadow the current package, cannot be shadowed by it, and cannot be resolved
+#: to it by any import inside them. Every intra-package import at
+#: `PRE_V2_REVISION` is RELATIVE, so they all resolve within this name --
+#: verified by `test_the_historical_package_touches_no_current_module`.
+HISTORICAL_PACKAGE = "kac_pre_v2"
+
+
+@contextlib.contextmanager
+def historical_package() -> Iterator[Any]:
+    """The pre-v2 package, extracted and imported under its own name.
+
+    `git archive` into a temporary directory, renamed, and put on `sys.path`
+    for the duration. `sys.modules` is purged of the historical name on the way
+    out so a later load cannot resolve to a module whose files have been
+    deleted; the CURRENT package's entries are never touched.
+
+    The temporary directory is a context manager, so it is removed on the way
+    out whether or not the body raised.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        archive = base / "package.tar"
+        with archive.open("wb") as handle:
+            subprocess.run(
+                ["git", "archive", PRE_V2_REVISION, "kernel_adoption_control"],
+                cwd=REPO_ROOT,
+                check=True,
+                stdout=handle,
+            )
+        subprocess.run(["tar", "-xf", str(archive), "-C", str(base)], check=True)
+        (base / "kernel_adoption_control").rename(base / HISTORICAL_PACKAGE)
+        sys.path.insert(0, str(base))
+        try:
+            yield SimpleNamespace(
+                root=base,
+                surface=importlib.import_module(f"{HISTORICAL_PACKAGE}.surface"),
+                engine=importlib.import_module(f"{HISTORICAL_PACKAGE}.engine"),
+                contracts=importlib.import_module(f"{HISTORICAL_PACKAGE}.contracts"),
+                contract_v2=importlib.import_module(
+                    f"{HISTORICAL_PACKAGE}.declaration_contract_v2"
+                ),
+                errors=importlib.import_module(
+                    f"{HISTORICAL_PACKAGE}.declaration_contract"
+                ),
+            )
+        finally:
+            sys.path.remove(str(base))
+            for name in [
+                module
+                for module in sys.modules
+                if module == HISTORICAL_PACKAGE
+                or module.startswith(f"{HISTORICAL_PACKAGE}.")
+            ]:
+                del sys.modules[name]
+
+
+class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
+    """v1 unredefined, established by EXECUTING the code that defined it.
+
+    Every other statement in this suite that v1 did not move is a transcription
+    -- literals copied out of `298eaad`, with a comment naming where they came
+    from. A comment is documentation. It cannot be wrong in a way that fails a
+    build, and a literal is only as good as the hand that copied it.
+
+    This class loads that revision's own `surface.py` and `engine.py`, runs
+    them, and compares three things with the current ones over the same inputs:
+    the RENDERING, the DIGEST, and the EVALUATION RESULT. The third is the one
+    nothing else covers -- the through-the-contract test exercises the current
+    engine alone, so it can only show today's code is self-consistent.
+
+    **It never skips.** `PRE_V2_REVISION` is an ancestor of every commit on this
+    branch, so it is in HEAD's own history; the workflow pins `fetch-depth: 0`
+    with a comment saying why, and two other committed guards
+    (`check_commit_identity`, `check_receipts`) already fail closed on an
+    unreachable base. A guard that goes quiet exactly when it cannot see its
+    subject is worse than the literal it replaced, so an unresolvable revision
+    is a FAILURE here that names the repair.
+    """
+
+    #: The measured surface both implementations are asked to render. Derived
+    #: from real source through the current sweep rather than hand-written --
+    #: what is under test is the RENDERING of a fact set, not the sweep that
+    #: produced it, and the evaluation arm below covers the sweep anyway.
+    SOURCES = {
+        PurePosixPath("a.py"): "from dotmac_kernel import Y\n",
+        PurePosixPath("b.py"): "from dotmac_kernel.db import Session, get_session\n",
+    }
+
+    def fact_tuples(self) -> list[tuple[str, str, tuple[str, ...], bool]]:
+        """One measured surface, as plain data both `SurfaceFact` classes accept.
+
+        The two classes are different types from different modules. Passing one
+        module's instances to the other's renderer would be duck-typing across
+        the boundary the isolation exists to hold, so each side builds its own
+        objects from this shared, primitive description.
+        """
+        return sorted(
+            (fact.path.as_posix(), fact.module, fact.symbols, fact.star)
+            for fact in facts_of(dict(self.SOURCES))
+        )
+
+    def test_the_revision_is_reachable_and_this_never_skips(self) -> None:
+        """Fail-closed reachability, asserted before anything depends on it.
+
+        `git show`/`git archive` against an unfetched object fails, and on a
+        shallow clone that is exactly what would happen. The workflow checks
+        out with `fetch-depth: 0`; this is the arm that turns a regression in
+        that setting into a red build naming the cause, instead of a class that
+        quietly stops proving anything.
+        """
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", PRE_V2_REVISION, "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+        )
+        self.assertEqual(
+            0,
+            ancestor.returncode,
+            f"{PRE_V2_REVISION} is not an ancestor of HEAD in this checkout. "
+            "It is the revision v1 is proved against and it is in this "
+            "branch's own history, so the usual cause is a shallow clone: the "
+            "workflow must check out with fetch-depth: 0",
+        )
+
+    def test_the_historical_package_touches_no_current_module(self) -> None:
+        """Non-vacuity for every comparison below, and it is the load-bearing one.
+
+        If loading the historical package resolved any import to the CURRENT
+        package, every arm below would be comparing today's code with itself
+        and would pass no matter what had changed. Three closures: the
+        historical modules load from the temporary directory, importing them
+        pulls in no `kernel_adoption_control` module, and the code really is
+        pre-v2 -- it has neither the successor algorithm's constant nor its
+        fact type, and its parser refuses the successor's name.
+        """
+        before = {
+            name for name in sys.modules if name.startswith("kernel_adoption_control")
+        }
+        with historical_package() as old:
+            self.assertTrue(str(old.surface.__file__).startswith(str(old.root)))
+            self.assertTrue(str(old.engine.__file__).startswith(str(old.root)))
+            after = {
+                name
+                for name in sys.modules
+                if name.startswith("kernel_adoption_control")
+            }
+            self.assertEqual(
+                before, after, "the historical import reached current code"
+            )
+
+            self.assertFalse(hasattr(old.surface, "SOURCE_SURFACE_IDENTITY_ALGORITHM"))
+            self.assertFalse(hasattr(old.surface, "SurfaceIdentityFact"))
+            self.assertEqual(
+                SOURCE_SURFACE_ALGORITHM, old.surface.SOURCE_SURFACE_ALGORITHM
+            )
+            with self.assertRaises(old.errors.DeclarationError):
+                old.contract_v2._source_surface(
+                    {
+                        "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                        "digest": "sha256:" + "a" * 64,
+                    }
+                )
+
+    def test_the_historical_and_current_renderings_are_byte_identical(self) -> None:
+        """Comparison one of three: the canonical bytes v1 renders."""
+        tuples = self.fact_tuples()
+        self.assertEqual(2, len(tuples), tuples)
+        with historical_package() as old:
+            historical = old.surface.render_surface(
+                frozenset(
+                    old.surface.SurfaceFact(
+                        path=PurePosixPath(path),
+                        module=module,
+                        symbols=symbols,
+                        star=star,
+                    )
+                    for path, module, symbols, star in tuples
+                )
+            )
+        current = render_surface(
+            frozenset(
+                SurfaceFact(
+                    path=PurePosixPath(path), module=module, symbols=symbols, star=star
+                )
+                for path, module, symbols, star in tuples
+            )
+        )
+        self.assertEqual(historical, current)
+        # And it is the same rendering the transcription claims, which is what
+        # makes that literal trustworthy rather than merely present.
+        self.assertEqual(V1_GOLDEN_RENDERING, historical)
+
+    def test_the_historical_and_current_digests_are_equal(self) -> None:
+        """Comparison two of three."""
+        tuples = self.fact_tuples()
+        with historical_package() as old:
+            historical = old.surface.surface_digest(
+                frozenset(
+                    old.surface.SurfaceFact(
+                        path=PurePosixPath(path),
+                        module=module,
+                        symbols=symbols,
+                        star=star,
+                    )
+                    for path, module, symbols, star in tuples
+                )
+            )
+        current = surface_digest(
+            frozenset(
+                SurfaceFact(
+                    path=PurePosixPath(path), module=module, symbols=symbols, star=star
+                )
+                for path, module, symbols, star in tuples
+            )
+        )
+        self.assertEqual(historical, current)
+        self.assertEqual(V1_GOLDEN_DIGEST, historical)
+
+    def document(self, digest: str) -> dict[str, Any]:
+        """One document dict, parsed by each implementation's OWN parser.
+
+        A plain dict belongs to neither module, so both sides are handed the
+        same bytes rather than two documents built by two builders. The
+        algorithm is v1, which is the only one the historical contract admits
+        and precisely the subject: v1 evaluates as it always did.
+        """
+        return {
+            "contract": KERNEL_ADOPTION_CONTRACT_V2,
+            "applicability": "applicable",
+            "declared_at": "2026-09-01",
+            "source_predecessor": PREDECESSOR,
+            "source_surface": {
+                "algorithm": SOURCE_SURFACE_ALGORITHM,
+                "digest": digest,
+            },
+            "kernel_catalogue": {
+                "version": "0.1.0a98",
+                "revision": KERNEL_REVISION,
+                "artifact_digest": WHEEL,
+                "catalogue_digest": catalogue_digest(
+                    version="0.1.0a98",
+                    revision=KERNEL_REVISION,
+                    supported=frozenset({"dotmac_kernel.db"}),
+                    internal=frozenset(),
+                    root_exports=frozenset({"Y"}),
+                ),
+            },
+            "required_surfaces": [
+                {"module": "dotmac_kernel", "floor": "0.1.0a90", "proven_by": "a.py"},
+                {
+                    "module": "dotmac_kernel.db",
+                    "floor": "0.1.0a90",
+                    "proven_by": "b.py",
+                },
+            ],
+            "prohibited_surfaces": [],
+            "transitional_surfaces": [],
+        }
+
+    def evaluate_with(self, modules: Any, document: dict[str, Any]) -> list[str]:
+        """One document and one source inventory through one implementation."""
+        contracts = modules.contracts
+        item = contracts.KernelSurfaceCatalogue(
+            revision=KERNEL_REVISION,
+            version="0.1.0a98",
+            supported=frozenset({"dotmac_kernel.db"}),
+            internal=frozenset(),
+            artifact_digest=WHEEL,
+            root_exports=frozenset({"Y"}),
+        )
+        report = modules.engine.evaluate(
+            contracts.KernelAdoptionInputs(
+                sources=dict(self.SOURCES),
+                catalogue=item,
+                declaration=contracts.DeclarationPresent(
+                    modules.contract_v2.parse_any_declaration(document)
+                ),
+                as_of=TODAY,
+                pin_sites=(
+                    contracts.PinSite(
+                        PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"
+                    ),
+                    contracts.PinSite(
+                        PurePosixPath("poetry.lock"), 430, "0.1.0a98", "lock resolution"
+                    ),
+                ),
+                predecessor=contracts.PredecessorObservation(
+                    declared=PREDECESSOR,
+                    measured=MEASURED,
+                    is_strict_ancestor=True,
+                    detail="fixture: decided",
+                ),
+            )
+        )
+        return sorted(code.value for code in report.codes())
+
+    def current_modules(self) -> Any:
+        import kernel_adoption_control.contracts as current_contracts
+        import kernel_adoption_control.declaration_contract_v2 as current_contract_v2
+        import kernel_adoption_control.engine as current_engine
+
+        return SimpleNamespace(
+            engine=current_engine,
+            contracts=current_contracts,
+            contract_v2=current_contract_v2,
+        )
+
+    def test_the_historical_and_current_engines_agree_on_a_v1_declaration(
+        self,
+    ) -> None:
+        """Comparison three of three, and the arm nothing else supplies.
+
+        The rendering and the digest are pure functions; the EVALUATION is the
+        whole path -- parse, dispatch, sweep, merge, compare -- and it is the
+        one the dispatch work could plausibly have moved. Two subjects, because
+        a comparison that only ever comes out "both clean" cannot distinguish
+        two agreeing implementations from two that both do nothing:
+
+        - a matching digest, where both must report NOTHING;
+        - a digest that does not describe the source, where both must report
+          `kernel.source.surface-drift` and only that.
+        """
+        current = self.current_modules()
+        tuples = self.fact_tuples()
+        matching = surface_digest(
+            frozenset(
+                SurfaceFact(
+                    path=PurePosixPath(path), module=module, symbols=symbols, star=star
+                )
+                for path, module, symbols, star in tuples
+            )
+        )
+        stale = "sha256:" + "0" * 64
+        self.assertNotEqual(matching, stale)
+
+        with historical_package() as old:
+            historical_clean = self.evaluate_with(old, self.document(matching))
+            historical_drift = self.evaluate_with(old, self.document(stale))
+        current_clean = self.evaluate_with(current, self.document(matching))
+        current_drift = self.evaluate_with(current, self.document(stale))
+
+        self.assertEqual([], historical_clean)
+        self.assertEqual(historical_clean, current_clean)
+
+        self.assertEqual([FindingCode.SOURCE_SURFACE_DRIFT.value], historical_drift)
+        self.assertEqual(historical_drift, current_drift)
 
 
 if __name__ == "__main__":

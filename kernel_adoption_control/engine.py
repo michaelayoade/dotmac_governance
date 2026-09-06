@@ -1206,9 +1206,18 @@ def observed_surface_identity(
     Same purpose and same reason for existing. A product migrating from
     `dmg-kernel-surface-v1` to `dmg-kernel-surface-v2` needs the value the
     runner would derive, and it must come from the runner rather than from a
-    second implementation. Nothing COMPARES a v2 digest yet -- the v2 document
-    contract admits v1 only -- so this derives a value a product can inspect,
-    and says so rather than implying a gate that is not there.
+    second implementation.
+
+    A v2 digest IS compared. `declaration_contract_v2` admits
+    `ACCEPTED_SOURCE_SURFACE_ALGORITHMS` -- exactly `{dmg-kernel-surface-v1,
+    dmg-kernel-surface-v2}` -- and `_check_source_surface` dispatches on the
+    declared name, so a product that declares the value this function returns
+    is measured against it and refused when its source moves.
+
+    (This paragraph previously said the opposite. It was true when written and
+    the same change that made it false is the change that admitted v2, which is
+    exactly the shape a stale docstring takes: nothing fails when a comment
+    stops being true.)
     """
     return surface_identity_digest(facts), render_surface_identity(facts)
 

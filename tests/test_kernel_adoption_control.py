@@ -865,9 +865,11 @@ PACKAGE_OWNED_DIGEST_NAMES: dict[str, frozenset[str]] = {
         }
     ),
     # Imported, not defined: the engine is where the coordinates are compared.
-    # v2 is DERIVED here and compared nowhere yet -- the v2 document contract
-    # admits v1 only -- so its presence is a derivation a migrating product can
-    # call, and that is stated rather than implying a gate.
+    # BOTH source-surface coordinates are compared here -- `_check_source_surface`
+    # dispatches on the declared algorithm, and the parser admits exactly
+    # `{dmg-kernel-surface-v1, dmg-kernel-surface-v2}`. An earlier revision of
+    # this comment said v2 was derived and compared nowhere; that was true
+    # before the contract was widened in this same branch.
     "engine": frozenset(
         {"catalogue_digest", "surface_digest", "surface_identity_digest"}
     ),

@@ -508,7 +508,7 @@ def _check_declaration(
             FindingCode.DECLARATION_FIELDS_UNEVALUATED,
             "this declaration is 'applicable' and states product_revision "
             f"{declaration.product_revision}, a kernel_catalogue and "
-            f"{len(declaration.required_surfaces)} required surface(s). NONE of "
+            f"{len(declaration.required_surfaces)} entries in required_surfaces. NONE of "
             "those three is evaluated by this runner. They are published here "
             "rather than left silent because a declared field nothing compares "
             "is the defect this package exists to catch, and a reader must not "

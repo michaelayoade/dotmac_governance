@@ -210,6 +210,17 @@ def codes_of(report: AdoptionReport, code: FindingCode) -> list[Finding]:
     return [item for item in report.findings if item.code == code]
 
 
+def errors_of(report: AdoptionReport) -> list[Finding]:
+    """Findings that make a report non-conforming.
+
+    Distinct from "no findings at all", which stopped being the shape of a
+    clean run when an `applicable` declaration began publishing its
+    unevaluated fields as a notice.
+    """
+
+    return [item for item in report.findings if item.severity is Severity.ERROR]
+
+
 class AdmitControl(unittest.TestCase):
     """The clean case, so a later failure is attributable to the plant."""
 
@@ -221,7 +232,15 @@ class AdmitControl(unittest.TestCase):
                 PinSite(PurePosixPath("poetry.lock"), 118, "0.1.0a98", "lock"),
             ),
         )
-        self.assertEqual([], list(report.findings), report.to_dict())
+        # No ERROR, which is what this test is named for. Not an empty list:
+        # an `applicable` declaration now publishes
+        # `kernel.declaration.fields-unevaluated` as a NOTICE on every run,
+        # because three declared fields are read by nothing and a reader must
+        # not infer from a clean report that they were checked.
+        self.assertEqual([], errors_of(report), report.to_dict())
+        self.assertIn(
+            FindingCode.DECLARATION_FIELDS_UNEVALUATED, report.codes(), report.to_dict()
+        )
 
 
 class Vacuity(unittest.TestCase):
@@ -239,10 +258,16 @@ class Vacuity(unittest.TestCase):
                 PinSite(PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"),
             ),
         )
-        notices = codes_of(report, FindingCode.PIN_DISAGREES)
-        self.assertEqual(1, len(notices))
-        self.assertIs(Severity.NOTICE, notices[0].severity)
-        self.assertIn("cannot disagree with itself", notices[0].message)
+        # An ERROR, not a notice. One observation cannot disagree with itself,
+        # so this arm established nothing -- and a report carrying only a
+        # notice was citable, which made "the pin agrees" indistinguishable
+        # from "the pin was never compared". That is the vacuous pass this
+        # class exists to refuse, and it was inside the vacuity guard itself.
+        found = codes_of(report, FindingCode.PIN_UNDETECTABLE)
+        self.assertEqual(1, len(found))
+        self.assertIs(Severity.ERROR, found[0].severity)
+        self.assertFalse(report.conforms)
+        self.assertEqual([], codes_of(report, FindingCode.PIN_DISAGREES))
 
     def test_unparseable_source_is_refused_not_reported_clean(self) -> None:
         report = evaluate_sources({PurePosixPath("app/broken.py"): "def (:\n"})

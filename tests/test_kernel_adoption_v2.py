@@ -116,14 +116,23 @@ def catalogue(
     revision: str = KERNEL_REVISION,
     internal: frozenset[str] = frozenset(),
     artifact_digest: str | None = WHEEL,
+    root_exports: frozenset[str] = frozenset(),
 ) -> KernelSurfaceCatalogue:
-    """A catalogue fixture. Production callers pass the Kernel's real lists."""
+    """A catalogue fixture. Production callers pass the Kernel's real lists.
+
+    `root_exports` DEFAULTS TO EMPTY, matching the production default and
+    matching every observer written before the root façade was normalised. So
+    the fixtures that say nothing about the root keep describing a run whose
+    observer never read `dotmac_kernel.__all__` -- which is the state the
+    refusal `kernel.root.exports-unobserved` exists to name.
+    """
     return KernelSurfaceCatalogue(
         revision=revision,
         version=version,
         supported=supported,
         internal=internal,
         artifact_digest=artifact_digest,
+        root_exports=root_exports,
     )
 
 
@@ -138,6 +147,7 @@ def binding(item: KernelSurfaceCatalogue, **overrides: str) -> dict[str, object]
             revision=item.revision,
             supported=item.supported,
             internal=item.internal,
+            root_exports=item.root_exports,
         ),
     }
     document.update(overrides)
@@ -1351,6 +1361,8 @@ class EveryNewCodeIsReachable(unittest.TestCase):
             FindingCode.CATALOGUE_UNBOUND,
             FindingCode.CATALOGUE_EMPTY,
             FindingCode.REQUIRED_UNPUBLISHED,
+            FindingCode.ROOT_EXPORTS_UNOBSERVED,
+            FindingCode.ROOT_SYMBOL_UNEXPORTED,
             FindingCode.REQUIRED_UNUSED,
             FindingCode.SURFACE_UNCLASSIFIED,
             FindingCode.REQUIRED_FLOOR_UNSATISFIED,
@@ -1438,6 +1450,244 @@ class TheSuccessorHasNoUnreadField(unittest.TestCase):
 
         for field, reader in self.READERS.items():
             self.assertTrue(hasattr(engine, reader), f"{field} -> {reader}")
+
+
+# ── the root façade ──────────────────────────────────────────────────────────
+#
+# `SUPPORTED_MODULES` and `INTERNAL_MODULES` enumerate SUBMODULES; the bare
+# `dotmac_kernel` is in neither. Read at `dotmac-kernel-v0.1.0a102`, peeled
+# 7a3c128b06eaba09784a9d8409d036169b3caa68, they carry 89 and 4 names and
+# neither list contains the root. So before the root was normalised, a product
+# importing it had NO reachable clean verdict: declaring it required reported
+# `kernel.required.unpublished`, and omitting it reported
+# `kernel.surface.unclassified`.
+#
+# The root's publication authority is its own `__all__`, carried on the
+# catalogue as `root_exports` and bound into `catalogue_digest`.
+
+#: A root catalogue. `Party` and `resolve_value` are real a102 root exports;
+#: `_Internal` is deliberately NOT one, and neither is `NotAThing`.
+ROOT_EXPORTS = frozenset({"Party", "resolve_value", "settings"})
+ROOT_MODULE = catalogue(
+    frozenset({"dotmac_kernel.messaging"}), root_exports=ROOT_EXPORTS
+)
+#: The same Kernel, observed by an observer that never read `__all__`.
+ROOT_UNOBSERVED = catalogue(frozenset({"dotmac_kernel.messaging"}))
+
+ROOT_PUBLIC = {PurePosixPath("src/app/service.py"): "from dotmac_kernel import Party\n"}
+ROOT_PRIVATE = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel import _Internal\n"
+}
+ROOT_NONEXISTENT = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel import NotAThing\n"
+}
+ROOT_ALIASED = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel import Party as P\n"
+}
+#: An alias whose LOCAL name is a public export and whose KERNEL name is not.
+#: The near-miss for resolving on the wrong side of `as`: an arm asking `bound`
+#: would admit this, because `Party` is in `__all__`.
+ROOT_ALIASED_TO_A_PUBLIC_NAME = {
+    PurePosixPath(
+        "src/app/service.py"
+    ): "from dotmac_kernel import _Internal as Party\n"
+}
+ROOT_MODULE_ONLY = {PurePosixPath("src/app/service.py"): "import dotmac_kernel\n"}
+
+#: The root declared as a required surface. This is the classification that was
+#: unreachable: `required` + root reported `kernel.required.unpublished`.
+REQUIRED_ROOT = [
+    {
+        "module": "dotmac_kernel",
+        "floor": "0.1.0a90",
+        "proven_by": "src/app/service.py",
+    }
+]
+
+
+class TheRootFacadeIsASeparatelyPublishedSurface(Base):
+    """Defect 1. Exit 0 was unreachable for any product importing the root.
+
+    Platform imports 28 symbols from `dotmac_kernel` directly. The engine
+    recorded the module verbatim and asked the SUBMODULE lists about it, so
+    both available classifications failed. The repair normalises the root as a
+    published surface whose allowed names come from the installed artifact's
+    `__all__` -- and the load-bearing half is that this is not a blanket pass.
+    """
+
+    def test_a_required_root_facade_is_no_longer_unpublished(self) -> None:
+        """The admit control. Without it the five refusals below are
+        indistinguishable from a rule that refuses every root import."""
+        codes = report(
+            v2_document(ROOT_PUBLIC, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            ROOT_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_the_defect_itself_the_root_had_no_reachable_verdict(self) -> None:
+        """Both horns, planted together, against a catalogue with NO root
+        exports -- which is exactly the pre-repair state, because before this
+        change the field did not exist and no observer supplied it.
+
+        Declaring the root required must not be answered by the submodule
+        lists, and omitting it must still be unclassified. The first is the
+        defect; the second is the arm that must stay awake.
+        """
+        omitted = report(
+            v2_document(ROOT_PUBLIC, ROOT_UNOBSERVED),
+            ROOT_PUBLIC,
+            ROOT_UNOBSERVED,
+        )
+        self.assertNamed(omitted, FindingCode.SURFACE_UNCLASSIFIED)
+
+    def test_a_public_export_is_admitted(self) -> None:
+        codes = report(
+            v2_document(ROOT_PUBLIC, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            ROOT_MODULE,
+        )
+        self.assertSilent(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+        self.assertSilent(codes, FindingCode.ROOT_EXPORTS_UNOBSERVED)
+
+    def test_a_private_name_is_refused(self) -> None:
+        codes = report(
+            v2_document(ROOT_PRIVATE, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PRIVATE,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+
+    def test_a_nonexistent_name_is_refused(self) -> None:
+        """The same refusal as the private one, and deliberately so: the arm
+        asks `__all__`, not the spelling. A leading underscore is not what
+        decides it -- `_private_components` reads MODULE path components and
+        returns nothing for the bare root, so the private-surface arm never
+        sees a root symbol at all."""
+        codes = report(
+            v2_document(ROOT_NONEXISTENT, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_NONEXISTENT,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+        self.assertSilent(codes, FindingCode.SURFACE_PRIVATE)
+
+    def test_an_aliased_public_import_is_resolved_on_the_kernels_name(self) -> None:
+        codes = report(
+            v2_document(ROOT_ALIASED, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_ALIASED,
+            ROOT_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_an_alias_cannot_launder_a_private_name_into_a_public_one(self) -> None:
+        """The near-miss that proves the arm reads the far side of `as`.
+
+        `from dotmac_kernel import _Internal as Party` binds the LOCAL name
+        `Party`, which IS in `__all__`. An arm asking what the statement bound
+        locally would admit it. The Kernel's name is `_Internal`, and that is
+        the name admission is decided on.
+        """
+        codes = report(
+            v2_document(
+                ROOT_ALIASED_TO_A_PUBLIC_NAME,
+                ROOT_MODULE,
+                required_surfaces=REQUIRED_ROOT,
+            ),
+            ROOT_ALIASED_TO_A_PUBLIC_NAME,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+
+    def test_a_module_only_import_names_no_export_and_is_admitted(self) -> None:
+        """`import dotmac_kernel` imports the package and names nothing.
+
+        There is no symbol to admit or refuse, so the symbol arm is silent --
+        and the module is still MEASURED, so the declaration still has to
+        classify it. Both halves matter: silence without classification would
+        be a root import that escaped the inventory.
+        """
+        codes = report(
+            v2_document(ROOT_MODULE_ONLY, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_MODULE_ONLY,
+            ROOT_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_a_module_only_import_still_has_to_be_classified(self) -> None:
+        """The other half. Silence on symbols is not silence on inventory."""
+        codes = report(
+            v2_document(ROOT_MODULE_ONLY, ROOT_MODULE),
+            ROOT_MODULE_ONLY,
+            ROOT_MODULE,
+        )
+        self.assertNamed(codes, FindingCode.SURFACE_UNCLASSIFIED)
+
+    def test_an_observer_that_never_read_all_is_refused_not_admitted(self) -> None:
+        """The vacuity guard on the whole arm.
+
+        If an empty `root_exports` were read as "no list, admit anything", the
+        eight tests above would all pass over a catalogue nobody populated and
+        the arm would be decoration. An empty list is a stated absence whose
+        repair is in the OBSERVER, and it refuses.
+        """
+        codes = report(
+            v2_document(ROOT_PUBLIC, ROOT_UNOBSERVED, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            ROOT_UNOBSERVED,
+        )
+        self.assertNamed(codes, FindingCode.ROOT_EXPORTS_UNOBSERVED)
+
+    def test_a_submodule_import_never_reaches_the_root_arm(self) -> None:
+        """The near-miss for the branch itself: normalising the root must not
+        change how a submodule is classified."""
+        codes = report(
+            v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE),
+            ONE_IMPORT,
+            ONE_MODULE,
+        )
+        self.assertSilent(codes, FindingCode.ROOT_SYMBOL_UNEXPORTED)
+        self.assertSilent(codes, FindingCode.ROOT_EXPORTS_UNOBSERVED)
+
+    def test_the_root_exports_are_bound_into_the_catalogue_digest(self) -> None:
+        """A widened `__all__` is a different catalogue.
+
+        Without this, an observer could quietly grow the admitted set and the
+        declaration would go on matching. The digest is the coordinate that
+        makes it a reviewable edit.
+        """
+        widened = catalogue(
+            frozenset({"dotmac_kernel.messaging"}),
+            root_exports=ROOT_EXPORTS | {"NotAThing"},
+        )
+        codes = report(
+            # The document binds the NARROW catalogue; the run supplies the
+            # widened one.
+            v2_document(ROOT_PUBLIC, ROOT_MODULE, required_surfaces=REQUIRED_ROOT),
+            ROOT_PUBLIC,
+            widened,
+        )
+        self.assertNamed(codes, FindingCode.CATALOGUE_DISAGREES)
+
+    def test_two_catalogues_differing_only_in_root_exports_differ(self) -> None:
+        """The digest sensitivity proof, taken directly rather than through a
+        finding: a check over two identical inputs proves nothing about the
+        input it is supposed to be sensitive to."""
+        common = {
+            "version": "0.1.0a102",
+            "revision": KERNEL_REVISION,
+            "supported": frozenset({"dotmac_kernel.db"}),
+            "internal": frozenset(),
+        }
+        self.assertNotEqual(
+            catalogue_digest(**common, root_exports=frozenset({"Party"})),
+            catalogue_digest(**common, root_exports=frozenset({"Party", "settings"})),
+        )
+        # And the near-miss: same lists, same digest.
+        self.assertEqual(
+            catalogue_digest(**common, root_exports=frozenset({"Party"})),
+            catalogue_digest(**common, root_exports=frozenset({"Party"})),
+        )
 
 
 if __name__ == "__main__":

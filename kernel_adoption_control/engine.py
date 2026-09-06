@@ -39,6 +39,7 @@ from datetime import date
 from pathlib import PurePosixPath
 
 from .contracts import (
+    KERNEL_ROOT,
     AdoptionReport,
     AnyKernelAdoptionDeclaration,
     DeclarationEmpty,
@@ -74,9 +75,9 @@ REFUSAL_CODES: dict[type, FindingCode] = {
     DeclarationUnreadable: FindingCode.DECLARATION_UNREADABLE,
 }
 
-#: The distribution's import name. One constant, so a rename is one edit.
-KERNEL_ROOT = "dotmac_kernel"
-
+#: The distribution's import name. Now DEFINED in `contracts`, because
+#: `KernelSurfaceCatalogue.publishes` has to know which module is the root
+#: façade; re-exported here unchanged so no importer moved.
 _KERNEL_PREFIX = f"{KERNEL_ROOT}."
 
 
@@ -111,15 +112,35 @@ class _KernelImport:
     the facade arm needs. `module` is the dotted Kernel path, which is what the
     surface arms need. Both come from the same statement, so they are carried
     together rather than recovered twice from the tree.
+
+    `names` is the third, and it is NOT `bound`. `bound` holds LOCAL names, so
+    `from dotmac_kernel import Party as P` puts `P` in it — and `P` is not a
+    name the Kernel publishes or could ever publish. The root-façade arm has to
+    ask whether the KERNEL's name is in the Kernel's `__all__`, so it needs the
+    name as written on the far side of `as`. Asking `bound` would refuse every
+    aliased public import and admit an alias that happens to spell a public
+    name, which is the arm getting both directions wrong at once.
+
+    `names` is EMPTY for a plain `import dotmac_kernel`, and that emptiness is
+    a fact rather than a gap: such a statement imports the package and names no
+    export, so there is no symbol to admit or refuse.
     """
 
-    __slots__ = ("bound", "line", "module", "star")
+    __slots__ = ("bound", "line", "module", "names", "star")
 
-    def __init__(self, module: str, line: int, bound: frozenset[str], star: bool):
+    def __init__(
+        self,
+        module: str,
+        line: int,
+        bound: frozenset[str],
+        star: bool,
+        names: frozenset[str] = frozenset(),
+    ):
         self.module = module
         self.line = line
         self.bound = bound
         self.star = star
+        self.names = names
 
 
 def _kernel_imports(tree: ast.Module) -> list[_KernelImport]:
@@ -152,7 +173,10 @@ def _kernel_imports(tree: ast.Module) -> list[_KernelImport]:
             bound = frozenset(
                 alias.asname or alias.name for alias in node.names if alias.name != "*"
             )
-            found.append(_KernelImport(module, node.lineno, bound, star))
+            # The names as the KERNEL spells them, before any `as`. See
+            # `_KernelImport.names` for why this is not `bound`.
+            names = frozenset(alias.name for alias in node.names if alias.name != "*")
+            found.append(_KernelImport(module, node.lineno, bound, star, names))
     return found
 
 
@@ -204,6 +228,101 @@ def _private_components(module: str) -> tuple[str, ...]:
     return tuple(
         part for part in parts if part.startswith("_") and not part.startswith("__")
     )
+
+
+def _check_root_facade(
+    path: PurePosixPath,
+    entry: _KernelImport,
+    catalogue: KernelSurfaceCatalogue | None,
+) -> list[Finding]:
+    """One import of the bare `dotmac_kernel`, admitted only by NAMED export.
+
+    The root façade is a published surface and it is not a submodule.
+    `SUPPORTED_MODULES` and `INTERNAL_MODULES` enumerate submodules and the
+    bare root is in neither — at `dotmac-kernel-v0.1.0a102` (peeled
+    `7a3c128b06eaba09784a9d8409d036169b3caa68`) they carry 89 and 4 names and
+    neither is `dotmac_kernel`. A product importing the root therefore had no
+    reachable clean verdict at all: declaring it required reported
+    `kernel.required.unpublished`, and omitting it reported
+    `kernel.surface.unclassified`.
+
+    Normalising it must not become a blanket pass, and this function is the
+    difference. The root is classifiable, and each name it is asked for is
+    checked against the artifact's OWN publication authority,
+    `dotmac_kernel.__all__`, carried on the catalogue as `root_exports`. A name
+    absent from that list is refused exactly as an unpublished submodule is.
+
+    Four import shapes reach here and each gets a different answer:
+
+    - **public** — `from dotmac_kernel import Party`, and `Party` is in
+      `__all__`: admitted, no finding.
+    - **private or nonexistent** — `_Internal`, or a name that was never
+      there: `kernel.root.unexported`. Note that the leading-underscore case is
+      not decided by the underscore. `_private_components` looks at MODULE path
+      components and returns nothing for a SYMBOL, so `dotmac_kernel` never
+      reaches the private-surface arm; the refusal here comes from the name's
+      absence from `__all__`, which is also what refuses a plain typo.
+    - **aliased** — `from dotmac_kernel import Party as P` is resolved on
+      `Party`. Admission is a question about the Kernel's name, and the local
+      one is the importer's business.
+    - **module-only** — `import dotmac_kernel` names no export, so there is
+      nothing to admit and nothing to refuse. The module is still MEASURED and
+      still has to be classified by the declaration. What follows the statement
+      — `dotmac_kernel.anything` by attribute access — is invisible to an
+      import-shape arm, and that limit is stated rather than papered over: this
+      arm reports on names an import statement binds, not on attribute reads.
+
+    A star import is left to `kernel.facade.local`, which already refuses it
+    and refuses it for the stronger reason: `from dotmac_kernel import *` binds
+    every public name at once, so the import inventory stops being readable off
+    the source at all. Reporting it twice would send one reader to two edits.
+    """
+    if catalogue is None:
+        return [
+            _error(
+                FindingCode.CATALOGUE_ABSENT,
+                f"imports the {KERNEL_ROOT} root façade, and this run was "
+                "given no surface catalogue, so the façade's published names "
+                "are unknown and no import of it can be classified",
+                path=path,
+                line=entry.line,
+            )
+        ]
+    if not catalogue.root_exports:
+        return [
+            _error(
+                FindingCode.ROOT_EXPORTS_UNOBSERVED,
+                f"imports the {KERNEL_ROOT} root façade, and the supplied "
+                f"catalogue carries no root exports. {KERNEL_ROOT} publishes "
+                "the root through its own `__all__`, which is a SEPARATE "
+                "authority from SUPPORTED_MODULES and INTERNAL_MODULES -- "
+                f"those enumerate submodules and neither contains the bare "
+                f"{KERNEL_ROOT}. The repair is in the OBSERVER: read "
+                f"`{KERNEL_ROOT}.__all__` off the installed artifact and put "
+                "it on the catalogue. Refused rather than admitted, because a "
+                "root arm with no list to check against admits every name",
+                path=path,
+                line=entry.line,
+            )
+        ]
+    findings: list[Finding] = []
+    for name in sorted(entry.names - catalogue.root_exports):
+        findings.append(
+            _error(
+                FindingCode.ROOT_SYMBOL_UNEXPORTED,
+                f"imports {name} from the {KERNEL_ROOT} root façade, and "
+                f"{KERNEL_ROOT} {catalogue.version} does not export that name: "
+                f"its `__all__`, read at {catalogue.revision}, carries "
+                f"{len(catalogue.root_exports)} name(s) and this is not one. "
+                "The root is a published surface, and what it publishes is "
+                "that enumerated list -- not every attribute an importer can "
+                "reach through the package object. A name absent from it is a "
+                "typo, a private detail, or a name that was removed",
+                path=path,
+                line=entry.line,
+            )
+        )
+    return findings
 
 
 def _prohibited_match(module: str, prohibited: frozenset[str]) -> str | None:
@@ -693,6 +812,7 @@ def _check_catalogue_binding(
         revision=catalogue.revision,
         supported=catalogue.supported,
         internal=catalogue.internal,
+        root_exports=catalogue.root_exports,
     )
     if derived != binding.catalogue_digest:
         findings.append(
@@ -700,9 +820,10 @@ def _check_catalogue_binding(
                 FindingCode.CATALOGUE_DISAGREES,
                 f"the declaration binds catalogue_digest "
                 f"{binding.catalogue_digest} and the supplied catalogue -- "
-                f"{len(catalogue.supported)} supported and "
-                f"{len(catalogue.internal)} internal name(s) -- digests to "
-                f"{derived}. This is the comparison the other three cannot "
+                f"{len(catalogue.supported)} supported, "
+                f"{len(catalogue.internal)} internal and "
+                f"{len(catalogue.root_exports)} root export name(s) -- digests "
+                f"to {derived}. This is the comparison the other three cannot "
                 "make: without it a product may state the right version and "
                 "hand the run another Kernel's module lists, and every surface "
                 "verdict is taken against a catalogue nobody bound",
@@ -778,7 +899,12 @@ def _check_required_surfaces(
     findings: list[Finding] = []
     version = None if catalogue is None else catalogue.version
     for surface in declaration.required_surfaces:
-        if catalogue is not None and surface.module not in catalogue.known:
+        # `publishes`, not `known`: `known` enumerates SUBMODULES and cannot
+        # answer for the bare root, which is in neither Kernel list. Asking it
+        # made a required root façade report `kernel.required.unpublished`
+        # while omitting it reported `kernel.surface.unclassified`, so exit 0
+        # was unreachable for any product importing the root.
+        if catalogue is not None and not catalogue.publishes(surface.module):
             findings.append(
                 _error(
                     FindingCode.REQUIRED_UNPUBLISHED,
@@ -786,9 +912,12 @@ def _check_required_surfaces(
                     f"{KERNEL_ROOT} {catalogue.version} does not publish it. "
                     f"Its lists were read at {catalogue.revision} and carry "
                     f"{len(catalogue.supported)} supported and "
-                    f"{len(catalogue.internal)} internal name(s). A required "
-                    "surface that is not in the Kernel is either a typo or a "
-                    "dependency on something that was removed",
+                    f"{len(catalogue.internal)} internal name(s), and its root "
+                    f"façade publishes {len(catalogue.root_exports)} name(s). "
+                    "A required surface that is not in the Kernel is either a "
+                    "typo or a dependency on something that was removed -- or, "
+                    f"for the bare {KERNEL_ROOT}, an observer that never read "
+                    "the root's `__all__`",
                 )
             )
         if surface.module not in observed_modules:
@@ -1197,7 +1326,12 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                         line=entry.line,
                     )
                 )
-            elif module != KERNEL_ROOT:
+            elif module == KERNEL_ROOT:
+                # The root façade is its own published surface, classified
+                # against `__all__` rather than against the submodule lists.
+                # See `_check_root_facade` for the four import shapes.
+                findings.extend(_check_root_facade(path, entry, catalogue))
+            else:
                 # Nested rather than a second `elif`, so the absent-catalogue
                 # case cannot fall through to the arm that would have to read
                 # it. An unclassifiable surface is REFUSED; it never lands in

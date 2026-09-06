@@ -67,6 +67,30 @@ module lists nobody bound to the declared version.
 the revision, and the sorted supported and internal module lists. Declaring the
 version is then not enough; the lists behind it are bound too.
 
+### The root façade is the third list, and why the name moved to v2
+
+`SUPPORTED_MODULES` and `INTERNAL_MODULES` enumerate SUBMODULES. The bare
+`dotmac_kernel` is in neither — checked at `dotmac-kernel-v0.1.0a102`, peeled
+`7a3c128b06eaba09784a9d8409d036169b3caa68`, where they carry 89 and 4 names.
+The root façade has its own publication authority, `dotmac_kernel.__all__`, and
+that list is bound here as `root_export` records so a verdict about a root
+import is taken against a set the declaration named.
+
+`CATALOGUE_DIGEST_ALGORITHM` moved from `dmg-kernel-catalogue-v1` to
+`dmg-kernel-catalogue-v2` because of the rule stated at the top of this module:
+a later canonicalization is a NEW name. Every stored `catalogue_digest` taken
+under v1 must be re-derived. That is a visible refusal — `catalogue.disagrees`
+— rather than a silent re-interpretation, which is the outcome the naming rule
+exists to buy.
+
+What is NOT repaired, and is stated rather than left to be discovered:
+`kernel_catalogue` carries no `algorithm` field, unlike `source_surface`. So a
+stored catalogue digest does not say which canonicalization produced it, and a
+reader holding only the document cannot tell. The Governance pin is exact and
+the runner refuses a product measured by an unpinned revision, so in practice
+one implementation produces and compares every value — but that is a property
+of the pin, not of this coordinate, and it is a gap.
+
 **What it does not prove:** that any such Kernel was published. It is a digest
 over lists the observer supplied from its own checkout, not a registry
 attestation. The distribution artifact digest is carried separately and
@@ -96,7 +120,7 @@ __all__ = [
 #: would make one declared digest describe two different renderings, and a
 #: reader could not tell which one a stored value was taken under.
 SOURCE_SURFACE_ALGORITHM: Final = "dmg-kernel-surface-v1"
-CATALOGUE_DIGEST_ALGORITHM: Final = "dmg-kernel-catalogue-v1"
+CATALOGUE_DIGEST_ALGORITHM: Final = "dmg-kernel-catalogue-v2"
 
 #: Field and record separators chosen because neither can occur in any field.
 #: A module path, a symbol and a POSIX path cannot contain a tab or a newline,
@@ -151,16 +175,35 @@ def surface_digest(facts: frozenset[SurfaceFact]) -> str:
 
 
 def catalogue_digest(
-    *, version: str, revision: str, supported: frozenset[str], internal: frozenset[str]
+    *,
+    version: str,
+    revision: str,
+    supported: frozenset[str],
+    internal: frozenset[str],
+    root_exports: frozenset[str],
 ) -> str:
-    """`sha256:<hex>` over the catalogue's version, revision and module lists.
+    """`sha256:<hex>` over the catalogue's version, revision and published names.
 
-    The two lists are rendered separately and labelled, so moving a module from
+    The lists are rendered separately and labelled, so moving a module from
     `internal` to `supported` changes the digest. That move changes what the
     unknown-surface arm would say about nothing — both are `known` — but it
     changes what the PRIVATE arm's near-miss rests on, and more importantly it
     is a change to the Kernel's published classification. A digest that let it
     pass would be binding a summary rather than the catalogue.
+
+    `root_exports` is the third list and is bound for the same reason as the
+    first two. It is the ROOT FAÇADE's publication authority — the installed
+    artifact's `dotmac_kernel.__all__` — and it is the set the root arm admits
+    against. Left out of the digest, an observer could widen it silently and
+    the declaration would go on matching while the arm admitted names the
+    Kernel never published; a declaration that binds the catalogue must bind
+    every list a verdict is taken against.
+
+    `root_exports` is a REQUIRED keyword with no default, deliberately. A
+    default of `frozenset()` would let a caller that has root exports omit them
+    and produce a digest that silently disagrees with the catalogue it was
+    supposed to describe — which is a mismatch reported as "the catalogue
+    moved" for a call that forgot an argument.
     """
     body = _RECORD.join(
         (
@@ -169,6 +212,7 @@ def catalogue_digest(
             f"revision{_FIELD}{revision}",
             *(f"supported{_FIELD}{name}" for name in sorted(supported)),
             *(f"internal{_FIELD}{name}" for name in sorted(internal)),
+            *(f"root_export{_FIELD}{name}" for name in sorted(root_exports)),
         )
     )
     return "sha256:" + hashlib.sha256((body + _RECORD).encode("utf-8")).hexdigest()

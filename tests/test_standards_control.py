@@ -32,7 +32,11 @@ from standards_control.engine import (
     connector_scope,
     verify_repository,
 )
-from standards_control.profile import ProfileError, parse_profile
+from standards_control.profile import (
+    KERNEL_ADOPTION_CONTRACT_VERSIONS,
+    ProfileError,
+    parse_profile,
+)
 from standards_control.retirement import (
     RetirementError,
     parse_observation_bundle,
@@ -6533,13 +6537,95 @@ class KernelAdoptionBindingTests(unittest.TestCase):
         value["kernel_adoption"] = {"applicability": "applicable"}
         self.assertRefused(value, "unknown keys: kernel_adoption")
 
-    def test_a_binding_to_a_contract_nobody_owns_is_refused(self) -> None:
+    def test_a_v2_binding_parses(self) -> None:
+        """The admit control for the widened vocabulary.
+
+        This test previously asserted the OPPOSITE -- that a v2 binding is
+        refused -- and it was correct when written: only v1 was published. It
+        is repointed rather than deleted, because deleting it would leave the
+        widening with no positive proof at all, and the pair below is what
+        distinguishes "two contracts are published" from "the check was
+        dropped".
+
+        `#82` shipped the v2 DECLARATION parser without widening this
+        vocabulary, so a repository whose declaration was a v2 could not bind
+        it: the only admissible binding named a contract its document was not
+        written under.
+        """
         value = profile()
         value["kernel_adoption_binding"] = {
             "declaration_path": ".dotmac/kernel-adoption.json",
             "contract_version": "KernelAdoptionDeclaration.v2",
         }
-        self.assertRefused(value, "points at nothing")
+        parsed = parse_profile(value)
+        binding = parsed.kernel_adoption_binding
+        assert binding is not None
+        self.assertEqual("KernelAdoptionDeclaration.v2", binding.contract_version)
+
+    def test_a_binding_to_a_contract_nobody_owns_is_refused(self) -> None:
+        """The planted violation, and the sensitivity proof for the widening.
+
+        A vocabulary widened by deleting the check would admit `v3` too. It is
+        `v3` rather than an obvious nonsense string on purpose: the plausible
+        near-miss is a version that does not exist YET, which is exactly what a
+        product writes when it gets ahead of the contract.
+        """
+        for unknown in ("KernelAdoptionDeclaration.v3", "v1", "kerneladoption"):
+            with self.subTest(unknown=unknown):
+                value = profile()
+                value["kernel_adoption_binding"] = {
+                    "declaration_path": ".dotmac/kernel-adoption.json",
+                    "contract_version": unknown,
+                }
+                self.assertRefused(value, "points at nothing")
+
+    def test_an_empty_contract_version_is_refused_earlier_and_differently(self) -> None:
+        """Refused, and NOT by the vocabulary arm.
+
+        Asserted apart from the loop above because it is refused by `_string`
+        before the vocabulary is consulted, so it carries a different message.
+        Folding it in under the same needle would have made this test pass for
+        a reason that has nothing to do with the vocabulary -- and would have
+        gone on passing if the vocabulary check were deleted.
+        """
+        value = profile()
+        value["kernel_adoption_binding"] = {
+            "declaration_path": ".dotmac/kernel-adoption.json",
+            "contract_version": "",
+        }
+        with self.assertRaises(ProfileError) as caught:
+            parse_profile(value)
+        self.assertNotIn("points at nothing", str(caught.exception))
+
+    def test_v1_stays_admissible_and_frozen(self) -> None:
+        """Widening must not retire the contract it was widened alongside.
+
+        `dotmac_governance`'s own declaration is a v1 `not_applicable`, and its
+        own profile binds v1. A widening that quietly moved the vocabulary on
+        would break this repository's own citable self-run.
+        """
+        self.assertIn("KernelAdoptionDeclaration.v1", KERNEL_ADOPTION_CONTRACT_VERSIONS)
+        self.assertEqual(2, len(KERNEL_ADOPTION_CONTRACT_VERSIONS))
+        declared = json.loads((ROOT / ".dotmac/standards-profile.json").read_text())
+        self.assertEqual(
+            "KernelAdoptionDeclaration.v1",
+            declared["kernel_adoption_binding"]["contract_version"],
+        )
+
+    def test_the_schema_publishes_the_same_vocabulary_as_the_parser(self) -> None:
+        """Two documents, one vocabulary. A schema that admitted a different
+        set would be a second, disagreeing gate on the same field -- and the
+        schema is what an editor validates against before the parser ever
+        runs."""
+        schema = json.loads(
+            (
+                ROOT / "standards_control/schema/standards-profile.schema.json"
+            ).read_text()
+        )
+        published = schema["$defs"]["kernel_adoption_binding"]["properties"][
+            "contract_version"
+        ]["enum"]
+        self.assertEqual(sorted(KERNEL_ADOPTION_CONTRACT_VERSIONS), sorted(published))
 
     def test_the_binding_carries_no_classification(self) -> None:
         """A prohibited surface may not arrive as a line in the profile."""

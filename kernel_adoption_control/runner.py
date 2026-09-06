@@ -80,6 +80,7 @@ from pathlib import Path, PurePosixPath
 
 from standards_control.contracts import (
     GovernanceSourceKind,
+    KernelAdoptionBinding,
     PinnedGovernanceModelRef,
 )
 from standards_control.profile import (
@@ -465,12 +466,16 @@ def _provenance(
     return Provenance.PINNED, literal, observed
 
 
-def _declaration_location(root: Path) -> PurePosixPath:
-    """Where this repository's declaration lives, per its own profile binding.
+def _declaration_binding(root: Path) -> KernelAdoptionBinding | None:
+    """This repository's Kernel-adoption binding, or `None` if it states none.
 
     The binding is read through `standards_control`'s own parser rather than by
     reaching into the JSON here, because that contract has an owner and a
-    second reader of it is a second parser.
+    second reader of it is a second parser. What comes back is the WHOLE
+    binding, not just the path: `contract_version` is the other half, and until
+    2026-09-06 it was parsed, validated against a vocabulary and then compared
+    with nothing -- a declared field no arm read, inside the package that
+    exists to catch declared fields no arm reads.
 
     A profile that exists and cannot be read is a REFUSAL, not a fall back to
     the default path: if the binding may name a non-default location, then an
@@ -479,7 +484,7 @@ def _declaration_location(root: Path) -> PurePosixPath:
     """
     path = root / PROFILE_PATH
     if not path.is_file():
-        return DECLARATION_PATH
+        return None
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -490,15 +495,73 @@ def _declaration_location(root: Path) -> PurePosixPath:
             "path as though the binding had been checked"
         ) from error
     if not isinstance(document, dict) or "kernel_adoption_binding" not in document:
-        return DECLARATION_PATH
+        return None
     try:
-        binding = parse_kernel_adoption_binding(document["kernel_adoption_binding"])
+        return parse_kernel_adoption_binding(document["kernel_adoption_binding"])
     except ProfileError as error:
         raise RunnerError(
             f"{PROFILE_PATH.as_posix()} states a kernel_adoption_binding that "
             f"does not parse: {error}"
         ) from error
-    return binding.declaration_path
+
+
+def _location_for(binding: KernelAdoptionBinding | None) -> PurePosixPath:
+    """Where the declaration lives: the bound path, or the default if unbound.
+
+    ONE writer of this rule, called by both `run` and `_declaration_location`.
+    Two spellings of "which file do we read" is precisely the shape that lets a
+    fall-back reappear on one of them.
+
+    The default is reached ONLY when `binding` is `None` -- an explicit absence
+    of a binding. There is no path on which a STATED binding resolves here: a
+    binding that does not parse raises in `_declaration_binding`, and a binding
+    that names a file refuses on that file. A product that names a document and
+    gets a different one evaluated is worse off than one that names nothing,
+    because it has been told its own choice was honoured.
+    """
+    return DECLARATION_PATH if binding is None else binding.declaration_path
+
+
+def _declaration_location(root: Path) -> PurePosixPath:
+    """`_location_for` over this repository's own binding. Read by tests."""
+    return _location_for(_declaration_binding(root))
+
+
+def _check_bound_contract(
+    binding: KernelAdoptionBinding | None, outcome: DeclarationOutcome
+) -> None:
+    """The profile bound a contract; is the document written under it?
+
+    A `RunnerError` and not a `Finding`, deliberately, and the boundary is the
+    reason. `FindingCode` is a closed vocabulary about PRODUCT SOURCE, and
+    `test_no_finding_code_speaks_about_a_profile_document` holds it there --
+    adding a code about a profile binding would be this package acquiring an
+    opinion on a document `standards_control` owns. A binding that names the
+    wrong contract is also not a finding in the ordinary sense: nothing was
+    measured wrongly, the wrong document was measured.
+
+    Silent when the repository states NO binding. That is not a loophole: an
+    unbound repository is read at the default path and has claimed no contract,
+    so there is nothing to disagree with. It is also silent when the
+    declaration did not parse -- one of the four refusals already stands, and
+    reporting that a refusal is not the bound contract sends the reader to the
+    profile when the repair is in the document.
+    """
+    if binding is None or not isinstance(outcome, DeclarationPresent):
+        return
+    stated = outcome.declaration.contract
+    if stated == binding.contract_version:
+        return
+    raise RunnerError(
+        f"{PROFILE_PATH.as_posix()} binds "
+        f"{binding.declaration_path.as_posix()} as "
+        f"{binding.contract_version} and that document states {stated!r}. The "
+        "repository is bound to one contract and has written another, so the "
+        "fields the binding promised would be measured are not the fields the "
+        "document carries. Refusing rather than reading the document under "
+        "whichever contract it happens to name: a binding that is overridden "
+        "by the file it points at is not a binding"
+    )
 
 
 def _predecessor_observation(
@@ -680,6 +743,11 @@ class RunReport:
                         "revision": self.catalogue.revision,
                         "supported": len(self.catalogue.supported),
                         "internal": len(self.catalogue.internal),
+                        # Reported for the same reason the other two are: the
+                        # root façade is a published surface measured against
+                        # its own list, and a reader must be able to see
+                        # whether that list was observed at all.
+                        "root_exports": len(self.catalogue.root_exports),
                     }
                 ),
             },
@@ -705,8 +773,10 @@ def run(
         governance_root, root, governance_revision
     )
 
-    location = _declaration_location(root)
+    binding = _declaration_binding(root)
+    location = _location_for(binding)
     outcome = read_declaration(root, location)
+    _check_bound_contract(binding, outcome)
 
     with _import_root(root):
         observer = resolve_observer(observer_reference)

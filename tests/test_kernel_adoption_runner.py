@@ -46,6 +46,7 @@ from kernel_adoption_control import (
     catalogue_digest,
     surface_digest,
 )
+from kernel_adoption_control.declaration_contract import KERNEL_ADOPTION_CONTRACT
 from kernel_adoption_control.declaration_contract_v2 import (
     KERNEL_ADOPTION_CONTRACT_V2,
 )
@@ -240,6 +241,7 @@ def applicable_v2(predecessor: str, **overrides: Any) -> dict[str, Any]:
                 revision=V2_CATALOGUE.revision,
                 supported=V2_CATALOGUE.supported,
                 internal=V2_CATALOGUE.internal,
+                root_exports=V2_CATALOGUE.root_exports,
             ),
         },
         "required_surfaces": [
@@ -1822,3 +1824,201 @@ class TheRunnerRunsWhereTheSubjectIs(unittest.TestCase):
         self.assertGreater(result.source_count, 20)
         self.assertTrue(result.report.conforms, result.to_dict())
         self.assertIsNotNone(observation.observe)
+
+
+class TheBindingNamesAContractAndTheDocumentMustBeIt(RunnerTestCase):
+    """Defect 2. `contract_version` was parsed, validated and read by nothing.
+
+    `#82` shipped the v2 DECLARATION parser without widening the PROFILE
+    binding vocabulary, so `KERNEL_ADOPTION_CONTRACT_VERSIONS` admitted only
+    `KernelAdoptionDeclaration.v1` and a v2 product could not bind its own
+    document. Widening that set alone would have been half a repair: the field
+    was compared with nothing, so a v1 binding over a v2 document passed in
+    silence. Both halves are here.
+
+    The refusal is a `RunnerError` and not a `Finding`, and the boundary is
+    why: `FindingCode` is a closed vocabulary about PRODUCT SOURCE, held there
+    by `test_no_finding_code_speaks_about_a_profile_document`. A code about a
+    profile binding would be this package acquiring an opinion on a document
+    `standards_control` owns.
+    """
+
+    def bind(self, contract: str, path: str = ".dotmac/kernel-adoption.json") -> None:
+        self.product.profile(
+            {
+                "kernel_adoption_binding": {
+                    "declaration_path": path,
+                    "contract_version": contract,
+                }
+            }
+        )
+
+    def enrol_v2(self) -> str:
+        """Commit source, read HEAD, write a v2 naming it. `go` commits again.
+
+        The order is the coordinate's own requirement, not a fixture habit: a
+        committed file cannot contain its own commit, so `source_predecessor`
+        has to be read before the declaration that names it is committed.
+        """
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        self.product.declare(applicable_v2(predecessor))
+        return predecessor
+
+    # -- 1. the one most likely to be skipped --------------------------------
+
+    def test_a_stated_binding_never_falls_back_to_the_default_path(self) -> None:
+        """A bound path that is not there REFUSES; it does not read the default.
+
+        The plant is deliberate and is the whole test: a perfectly good,
+        conforming declaration is written at `.dotmac/kernel-adoption.json`,
+        and the binding names `.dotmac/elsewhere.json`, which does not exist.
+        A runner that fell back would find the good document, report a clean
+        run, and tell the product its own choice had been honoured. The correct
+        outcome is `kernel.declaration.missing` naming the BOUND path.
+        """
+        self.product.declare(applicable())
+        self.bind("KernelAdoptionDeclaration.v1", ".dotmac/elsewhere.json")
+        result = self.go()
+        self.assertIn(FindingCode.DECLARATION_MISSING, self.codes(result))
+        self.assertFalse(result.report.conforms)
+        self.assertEqual(
+            ".dotmac/elsewhere.json",
+            result.to_dict()["product"]["declaration_path"],
+        )
+        # The fall-back is refuted by NAME, not only by outcome: the default
+        # document exists and conforms, so a clean run here would have been a
+        # run over the wrong file.
+        detail = result.to_dict()["product"]["declaration"]["detail"]
+        self.assertIn(".dotmac/elsewhere.json", detail)
+        self.assertNotIn("kernel-adoption.json", detail)
+
+    def test_the_near_miss_a_bound_path_that_exists_is_read(self) -> None:
+        """The paired near-miss. Refusing every bound path would satisfy the
+        test above for the wrong reason."""
+        self.product.declare(None)
+        self.bind("KernelAdoptionDeclaration.v1", ".dotmac/elsewhere.json")
+        (self.product.root / ".dotmac" / "elsewhere.json").write_text(
+            json.dumps(applicable()) + "\n", encoding="utf-8"
+        )
+        result = self.go()
+        self.assertNotIn(FindingCode.DECLARATION_MISSING, self.codes(result))
+        self.assertEqual(
+            ".dotmac/elsewhere.json",
+            result.to_dict()["product"]["declaration_path"],
+        )
+
+    # -- 2. missing or corrupt bound file ------------------------------------
+
+    def test_a_corrupt_bound_file_fails(self) -> None:
+        self.product.declare(None)
+        self.bind("KernelAdoptionDeclaration.v1", ".dotmac/elsewhere.json")
+        (self.product.root / ".dotmac" / "elsewhere.json").write_text(
+            "{ not json\n", encoding="utf-8"
+        )
+        result = self.go()
+        self.assertIn(FindingCode.DECLARATION_UNREADABLE, self.codes(result))
+        self.assertFalse(result.report.conforms)
+
+    def test_an_empty_bound_file_fails_as_its_own_refusal(self) -> None:
+        """Empty is not missing and not corrupt. Asserted here too, because a
+        bound path is exactly where the three are easiest to collapse."""
+        self.product.declare(None)
+        self.bind("KernelAdoptionDeclaration.v1", ".dotmac/elsewhere.json")
+        (self.product.root / ".dotmac" / "elsewhere.json").write_text(
+            "   \n", encoding="utf-8"
+        )
+        result = self.go()
+        self.assertIn(FindingCode.DECLARATION_EMPTY, self.codes(result))
+
+    # -- 3. an unknown version -----------------------------------------------
+
+    def test_an_unknown_contract_version_refuses_the_run(self) -> None:
+        """Widening the vocabulary to two must not open it to any string.
+
+        This is the sensitivity proof for the widening itself: had the check
+        been dropped rather than widened, this would go quiet.
+        """
+        self.product.declare(applicable())
+        self.bind("KernelAdoptionDeclaration.v3")
+        with self.assertRaises(RunnerError) as caught:
+            self.go()
+        self.assertIn("does not parse", str(caught.exception))
+        self.assertIn("points at nothing", str(caught.exception))
+
+    def test_an_empty_contract_version_refuses_the_run(self) -> None:
+        """The near-miss on the same arm: not an unrecognised NAME, but a value
+        with no name in it at all."""
+        self.product.declare(applicable())
+        self.bind("")
+        with self.assertRaises(RunnerError):
+            self.go()
+
+    # -- 4. and 5. the binding and the document must agree -------------------
+
+    def test_a_v1_binding_over_a_v2_document_fails(self) -> None:
+        """The half a vocabulary widening alone would have left silent."""
+        self.enrol_v2()
+        self.bind("KernelAdoptionDeclaration.v1")
+        with self.assertRaises(RunnerError) as caught:
+            self.go(observer=f"{__name__}:observe_v2_consumer")
+        message = str(caught.exception)
+        self.assertIn(KERNEL_ADOPTION_CONTRACT, message)
+        self.assertIn(KERNEL_ADOPTION_CONTRACT_V2, message)
+        self.assertIn("not a binding", message)
+
+    def test_a_v2_binding_over_a_v1_document_fails(self) -> None:
+        self.product.declare(applicable())
+        self.bind("KernelAdoptionDeclaration.v2")
+        with self.assertRaises(RunnerError) as caught:
+            self.go()
+        message = str(caught.exception)
+        self.assertIn(KERNEL_ADOPTION_CONTRACT_V2, message)
+        self.assertIn(KERNEL_ADOPTION_CONTRACT, message)
+
+    def test_an_unbound_repository_is_not_told_its_contract_disagrees(self) -> None:
+        """The near-miss for the comparison arm.
+
+        A repository that states no binding has claimed no contract, so there
+        is nothing to disagree with and the default path is read. Had the arm
+        been written to REQUIRE agreement rather than to check a stated one, it
+        would refuse every unbound product -- including the enrolled ones that
+        carry no binding.
+        """
+        self.product.declare(applicable())
+        self.product.profile({})
+        result = self.go()
+        self.assertEqual(
+            [FindingCode.DECLARATION_FIELDS_UNEVALUATED], self.codes(result)
+        )
+
+    def test_a_binding_over_an_absent_document_reports_the_absence(self) -> None:
+        """The other near-miss: the contract arm must not fire over a refusal.
+
+        The document is missing, so there is no contract to compare. Reporting
+        a contract disagreement here would send the reader to the profile when
+        the repair is to write the file.
+        """
+        self.product.declare(None)
+        self.bind("KernelAdoptionDeclaration.v2")
+        result = self.go()
+        self.assertIn(FindingCode.DECLARATION_MISSING, self.codes(result))
+
+    # -- 6. the admit control ------------------------------------------------
+
+    def test_a_v2_binding_over_a_v2_document_passes(self) -> None:
+        """Without this, the refusals above are indistinguishable from a rule
+        that refuses everything.
+
+        This is also the shape the defect made unreachable: before the
+        vocabulary was widened, a v2 product's only admissible binding named
+        v1, so it had to either bind the wrong contract or omit the binding and
+        thereby state no contract at all.
+        """
+        predecessor = self.enrol_v2()
+        self.bind("KernelAdoptionDeclaration.v2")
+        result = self.go(observer=f"{__name__}:observe_v2_consumer")
+        self.assertEqual([], self.codes(result), result.to_dict())
+        summary = result.to_dict()["product"]["declaration"]
+        self.assertEqual(KERNEL_ADOPTION_CONTRACT_V2, summary["contract"])
+        self.assertEqual(predecessor, summary["source_predecessor"])

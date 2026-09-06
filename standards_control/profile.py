@@ -588,9 +588,23 @@ def _deployment_artefact_surface(
     )
 
 
-#: The contract this profile's binding may claim. One value today; a second
+#: The contracts this profile's binding may claim. TWO values, and a third
 #: would be a reviewed change here rather than a string a product invents.
-KERNEL_ADOPTION_CONTRACT_VERSIONS = frozenset({"KernelAdoptionDeclaration.v1"})
+#:
+#: `KernelAdoptionDeclaration.v2` was added on 2026-09-06. `kernel_adoption_
+#: control` had shipped the v2 DECLARATION parser without widening this
+#: vocabulary, so a repository whose declaration was a v2 could not bind it:
+#: the only admissible binding named a contract its document was not written
+#: under. The binding is not omitted to route around that -- an omitted binding
+#: reads the default path and states no contract at all, which is a repository
+#: declining to say which contract governs it.
+#:
+#: `KernelAdoptionDeclaration.v1` stays here and stays frozen. Governance's own
+#: declaration is a v1 `not_applicable`, and widening this set does not touch
+#: it: a v1 binding over a v1 document is exactly as admissible as it was.
+KERNEL_ADOPTION_CONTRACT_VERSIONS = frozenset(
+    {"KernelAdoptionDeclaration.v1", "KernelAdoptionDeclaration.v2"}
+)
 
 #: Where the declaration lives when a profile states no binding.
 DEFAULT_KERNEL_ADOPTION_PATH = PurePosixPath(".dotmac/kernel-adoption.json")

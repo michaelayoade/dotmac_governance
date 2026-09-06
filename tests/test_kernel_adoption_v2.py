@@ -1197,6 +1197,21 @@ class ThePlatformSubject(Base):
             (FIXTURES / "kernel-a102-catalogue.json").read_text(encoding="utf-8")
         )
 
+    def catalogue_of(self, kernel: dict[str, Any]) -> KernelSurfaceCatalogue:
+        """The a102 catalogue as a `KernelSurfaceCatalogue`. One builder.
+
+        Three lists, three publication authorities, none of them derived from
+        another -- which is the whole point of reading them from the Kernel
+        rather than from a product's imports.
+        """
+        return catalogue(
+            frozenset(kernel["supported_modules"]),
+            version=kernel["version"],
+            revision=kernel["revision"],
+            internal=frozenset(kernel["internal_modules"]),
+            root_exports=frozenset(kernel["root_exports"]),
+        )
+
     def sources(self, fixture: dict[str, Any]) -> dict[PurePosixPath, str]:
         """One import statement per measured fact.
 
@@ -1204,13 +1219,16 @@ class ThePlatformSubject(Base):
         `(path, module, symbols)` facts; the statements are the smallest source
         that reproduces it.
 
-        A KNOWN limitation, stated because one fact exercises it: `symbols`
-        records the names the statement BOUND LOCALLY, matching
-        `SurfaceFact.symbols`. An aliased import (`from dotmac_kernel import X
-        as Y`) is recorded as `Y`, and this synthesis then re-emits it as an
-        unaliased `from dotmac_kernel import Y` -- asserting that the Kernel's
-        own name is `Y`. For 27 of Platform's 28 root symbols that is true. See
-        `test_one_root_symbol_is_not_resolvable_from_a_local_name_record`.
+        `symbols` holds CANONICAL Kernel-side names -- the name before any
+        `as` -- so this synthesis reproduces the surface the Kernel sees. The
+        file previously recorded LOCAL bound names, which made an aliased
+        import indistinguishable from a name the Kernel does not publish; it
+        was regenerated on 2026-09-06 and carries the one known alias
+        separately, in `known_aliases`.
+
+        What is therefore NOT reproduced here is the alias itself. The synthesis
+        emits the Kernel's name unaliased, so the aliased shape needs its own
+        subject -- see `test_the_platform_alias_is_admitted_on_the_kernels_name`.
         """
         by_path: dict[PurePosixPath, list[str]] = {}
         for fact in fixture["facts"]:
@@ -1257,13 +1275,7 @@ class ThePlatformSubject(Base):
     ) -> tuple[dict[str, Any], KernelSurfaceCatalogue]:
         modules = sorted({fact["module"] for fact in fixture["facts"]})
         kernel = self.kernel()
-        item = catalogue(
-            frozenset(kernel["supported_modules"]),
-            version=kernel["version"],
-            revision=kernel["revision"],
-            internal=frozenset(kernel["internal_modules"]),
-            root_exports=frozenset(kernel["root_exports"]),
-        )
+        item = self.catalogue_of(kernel)
         first_use = {
             module: sorted(
                 fact["path"] for fact in fixture["facts"] if fact["module"] == module
@@ -1318,23 +1330,22 @@ class ThePlatformSubject(Base):
         of Platform's own lock -- measured against the REAL a102 catalogue
         rather than one derived from Platform's own imports.
 
-        It admits 84 of the 85 measured symbol facts, every one of the 16
-        submodules, and 27 of the 28 root symbols. The single remaining finding
-        is asserted EXACTLY, in the test below, and it is an artefact of how
-        this fixture records names rather than a verdict on Platform.
+        NO findings: all 85 measured symbol facts, all 16 submodules and all 28
+        root symbols are admitted by the real a102 catalogue.
 
-        This test previously asserted NO findings, and it did so against a
-        catalogue built from `frozenset(observed_modules)` -- which published
-        the bare `dotmac_kernel` because Platform imported it. That is why it
-        was green while Platform's real enrolment was red.
+        Two separate things had to be true before this could be clean, and
+        neither was reached by adjusting anything to get here. The catalogue
+        stopped being `frozenset(observed_modules)` -- which published whatever
+        Platform imported, including the bare `dotmac_kernel`, and is why this
+        was green while Platform's real enrolment was red. And the fixture
+        stopped recording LOCAL bound names, which had made Platform's alias
+        for `UndeclaredCapabilityError` look like a name the Kernel does not
+        publish.
         """
         fixture = self.load()
         sources = self.sources(fixture)
         document, item = self.declaration(fixture, sources)
-        codes = report(document, sources, item)
-        self.assertEqual(
-            (FindingCode.ROOT_SYMBOL_UNEXPORTED,), codes, [c.value for c in codes]
-        )
+        self.assertClean(report(document, sources, item))
 
     def test_submodules_reached_through_the_root_are_admitted(self) -> None:
         """`from dotmac_kernel import audit` binds a SUPPORTED module.
@@ -1351,13 +1362,7 @@ class ThePlatformSubject(Base):
             with self.subTest(name=name):
                 self.assertNotIn(name, kernel["root_exports"])
                 self.assertIn(f"dotmac_kernel.{name}", kernel["supported_modules"])
-        item = catalogue(
-            frozenset(kernel["supported_modules"]),
-            version=kernel["version"],
-            revision=kernel["revision"],
-            internal=frozenset(kernel["internal_modules"]),
-            root_exports=frozenset(kernel["root_exports"]),
-        )
+        item = self.catalogue_of(kernel)
         sources = {
             PurePosixPath("alembic/env.py"): (
                 "from dotmac_kernel import audit, models_platform, settings_models\n"
@@ -1389,13 +1394,7 @@ class ThePlatformSubject(Base):
         """
         kernel = self.kernel()
         self.assertIn("dotmac_kernel._transactions", kernel["internal_modules"])
-        item = catalogue(
-            frozenset(kernel["supported_modules"]),
-            version=kernel["version"],
-            revision=kernel["revision"],
-            internal=frozenset(kernel["internal_modules"]),
-            root_exports=frozenset(kernel["root_exports"]),
-        )
+        item = self.catalogue_of(kernel)
         sources = {
             PurePosixPath("app/x.py"): "from dotmac_kernel import _transactions\n"
         }
@@ -1409,45 +1408,231 @@ class ThePlatformSubject(Base):
             FindingCode.ROOT_SYMBOL_UNEXPORTED,
         )
 
-    def test_one_root_symbol_is_not_resolvable_from_a_local_name_record(self) -> None:
-        """OPEN QUESTION, recorded rather than decided or papered over.
+    def test_the_platform_alias_is_admitted_on_the_kernels_name(self) -> None:
+        """The alias admit control. Platform's local name, the Kernel's verdict.
 
-        `src/vendor_cp/offers/catalog.py` is recorded as binding
-        `KernelUndeclaredCapabilityError`. a102 publishes no such name and no
-        `Kernel`-prefixed name at all; it does publish
-        `UndeclaredCapabilityError`. The overwhelmingly likely statement is
+        `src/vendor_cp/offers/catalog.py` writes
         `from dotmac_kernel import UndeclaredCapabilityError as
-        KernelUndeclaredCapabilityError` -- an ALIAS, recorded by a fixture
-        whose `symbols` are local names.
+        KernelUndeclaredCapabilityError` -- Platform disambiguating the
+        Kernel's error from its own. The Kernel publishes
+        `UndeclaredCapabilityError` at the a102 root and publishes no
+        `Kernel`-prefixed name at all.
 
-        This run cannot decide between the two readings, and neither can this
-        repository: the answer is in Platform's source, which Governance does
-        not read. So the finding stands rather than being silenced by adding a
-        name to `root_exports` that the Kernel does not export -- that would
-        fabricate a Kernel export to make a test green, which is the exact
-        move the root arm exists to refuse.
+        This is exercised on the REAL aliased statement rather than on the
+        fixture's unaliased synthesis, because the synthesis cannot carry an
+        alias. It is the one shape the admit control above structurally cannot
+        reach, so it gets its own subject rather than being assumed covered.
 
-        The repair belongs to whoever regenerates the fixture: record the
-        KERNEL-side name for the root module, or carry the alias explicitly.
-        Until then this asserts the finding is exactly one, about exactly this
-        symbol, so it cannot quietly grow.
+        The refusal was NOT weakened to get here and no name was added to the
+        Kernel: the fixture was recording local names, and it now records
+        canonical ones.
         """
+        kernel = self.kernel()
+        alias = self.load()["known_aliases"][0]
+        self.assertEqual("UndeclaredCapabilityError", alias["kernel_name"])
+        self.assertEqual("KernelUndeclaredCapabilityError", alias["local_name"])
+        self.assertIn(alias["kernel_name"], kernel["root_exports"])
+        self.assertNotIn(alias["local_name"], kernel["root_exports"])
+
+        item = self.catalogue_of(kernel)
+        path = PurePosixPath(alias["path"])
+        sources = {
+            path: (
+                f"from dotmac_kernel import {alias['kernel_name']} as "
+                f"{alias['local_name']}\n"
+            )
+        }
+        required = [
+            {
+                "module": "dotmac_kernel",
+                "floor": "0.1.0a98",
+                "proven_by": path.as_posix(),
+            }
+        ]
+        self.assertClean(
+            report(
+                v2_document(sources, item, required_surfaces=required), sources, item
+            )
+        )
+
+    def test_the_local_half_of_that_alias_is_still_refused(self) -> None:
+        """The paired near-miss, and the reason the admit control above is not
+        an exemption.
+
+        Had the alias been "fixed" by adding `KernelUndeclaredCapabilityError`
+        to the Kernel's exports -- the move that was refused -- this would go
+        quiet. The Kernel's name is admitted; Platform's local name, asked of
+        the Kernel, is not.
+        """
+        kernel = self.kernel()
+        alias = self.load()["known_aliases"][0]
+        item = self.catalogue_of(kernel)
+        sources = {
+            PurePosixPath("x.py"): f"from dotmac_kernel import {alias['local_name']}\n"
+        }
+        required = [
+            {"module": "dotmac_kernel", "floor": "0.1.0a98", "proven_by": "x.py"}
+        ]
+        self.assertNamed(
+            report(
+                v2_document(sources, item, required_surfaces=required), sources, item
+            ),
+            FindingCode.ROOT_SYMBOL_UNEXPORTED,
+        )
+
+    def test_the_fixture_records_canonical_kernel_names(self) -> None:
+        """The property the regeneration established, asserted rather than
+        assumed: every recorded root symbol is one the a102 root actually
+        publishes, under one of its two authorities."""
         fixture = self.load()
         kernel = self.kernel()
-        root = [f for f in fixture["facts"] if f["module"] == "dotmac_kernel"]
         unresolved = sorted(
             {
                 symbol
-                for fact in root
+                for fact in fixture["facts"]
+                if fact["module"] == "dotmac_kernel"
                 for symbol in fact["symbols"]
                 if symbol not in kernel["root_exports"]
                 and f"dotmac_kernel.{symbol}" not in kernel["supported_modules"]
             }
         )
-        self.assertEqual(["KernelUndeclaredCapabilityError"], unresolved)
-        self.assertIn("UndeclaredCapabilityError", kernel["root_exports"])
-        self.assertEqual(
-            [], [n for n in kernel["root_exports"] if n.startswith("Kernel")]
+        self.assertEqual([], unresolved)
+        self.assertIn("symbol_name_convention", fixture)
+
+    # ── the collision the second publication authority created ──────────────
+    #
+    # `facet_principal` is BOTH: `dotmac_kernel.facet_principal` is a supported
+    # SUBMODULE, and `facet_principal` is a NAME in the root's `__all__` (the
+    # module defines the object and the root re-exports it). It is the only
+    # name at a102 holding both roles -- verified in the first test below
+    # rather than asserted -- and it is the ambiguity the submodule-through-root
+    # arm made reachable.
+    #
+    # NOTE: the review proposed `settings` for this. It does not hold both
+    # roles: `settings` is in `__all__` (it is the Settings INSTANCE, imported
+    # from `dotmac_kernel.config`) and there is no `dotmac_kernel/settings.py`
+    # in the a102 tree at all, so `dotmac_kernel.settings` is in no module
+    # list. Asserting on it would have proved the opposite of the intended
+    # property. `settings` is used below as the near-miss instead, which is
+    # what it is actually good for.
+
+    COLLIDING = "facet_principal"
+
+    def test_the_colliding_name_really_holds_both_roles(self) -> None:
+        """Non-vacuity for the four tests below.
+
+        If this name ever stops being both a supported module and a root
+        export, those tests stop testing a collision and start testing two
+        unrelated things while still passing.
+        """
+        kernel = self.kernel()
+        self.assertIn(f"dotmac_kernel.{self.COLLIDING}", kernel["supported_modules"])
+        self.assertIn(self.COLLIDING, kernel["root_exports"])
+        both = sorted(
+            name
+            for name in kernel["root_exports"]
+            if f"dotmac_kernel.{name}" in kernel["supported_modules"]
+        )
+        self.assertEqual([self.COLLIDING], both)
+
+    def collide(self, statement: str, module: str) -> tuple[FindingCode, ...]:
+        """Measure one statement, classifying exactly `module` and nothing else.
+
+        Classifying ONE surface is what gives these tests teeth: if the
+        statement were classified as the other surface, the declaration would
+        not cover what was measured and `kernel.surface.unclassified` fires.
+        """
+        item = self.catalogue_of(self.kernel())
+        sources = {PurePosixPath("app/x.py"): statement}
+        required = [{"module": module, "floor": "0.1.0a98", "proven_by": "app/x.py"}]
+        return report(
+            v2_document(sources, item, required_surfaces=required), sources, item
+        )
+
+    def test_the_dotted_form_is_classified_as_the_submodule(self) -> None:
+        self.assertClean(
+            self.collide(
+                f"import dotmac_kernel.{self.COLLIDING}\n",
+                f"dotmac_kernel.{self.COLLIDING}",
+            )
+        )
+
+    def test_the_from_root_form_is_classified_as_the_root_export(self) -> None:
+        self.assertClean(
+            self.collide(
+                f"from dotmac_kernel import {self.COLLIDING}\n", "dotmac_kernel"
+            )
+        )
+
+    def test_the_two_forms_are_not_interchangeable(self) -> None:
+        """The collision must not let one declaration entry cover both shapes.
+
+        This is the half that would go quiet if the root and the submodule were
+        ever conflated into one surface: each form is measured as the surface
+        it actually names, so classifying the OTHER one leaves the measured
+        import unclassified.
+        """
+        self.assertNamed(
+            self.collide(f"import dotmac_kernel.{self.COLLIDING}\n", "dotmac_kernel"),
+            FindingCode.SURFACE_UNCLASSIFIED,
+        )
+        self.assertNamed(
+            self.collide(
+                f"from dotmac_kernel import {self.COLLIDING}\n",
+                f"dotmac_kernel.{self.COLLIDING}",
+            ),
+            FindingCode.SURFACE_UNCLASSIFIED,
+        )
+
+    def test_both_aliased_forms_keep_their_canonical_kernel_identity(self) -> None:
+        """The clause with teeth: an alias changes the LOCAL name and nothing
+        the classification depends on.
+
+        On the root path this is `names` vs `bound`, already proven elsewhere.
+        On the SUBMODULE path it has never been exercised: `import
+        dotmac_kernel.facet_principal as fp` binds `fp`, and if the module were
+        ever read off the `as` clause the measured surface would become `fp` --
+        a name in no catalogue, classified by nothing. Both forms are asserted
+        here so neither half of the distinction can regress.
+        """
+        self.assertClean(
+            self.collide(
+                f"import dotmac_kernel.{self.COLLIDING} as fp\n",
+                f"dotmac_kernel.{self.COLLIDING}",
+            )
+        )
+        self.assertClean(
+            self.collide(
+                f"from dotmac_kernel import {self.COLLIDING} as fp\n",
+                "dotmac_kernel",
+            )
+        )
+        # And the aliases really are different local names, so the two clean
+        # results above are not two spellings of one statement.
+        self.assertNotEqual(
+            f"import dotmac_kernel.{self.COLLIDING} as fp",
+            f"from dotmac_kernel import {self.COLLIDING} as fp",
+        )
+
+    def test_a_root_export_that_is_not_a_module_is_not_importable_as_one(
+        self,
+    ) -> None:
+        """The near-miss keeping the two authorities apart, on the name the
+        review proposed for the collision.
+
+        `settings` is a root export and is NOT a module: there is no
+        `dotmac_kernel/settings.py` at a102. So the root authority must not
+        leak into the submodule path -- `import dotmac_kernel.settings` names
+        something the Kernel does not publish, and a run that admitted it would
+        be reading `__all__` to answer a question about modules.
+        """
+        kernel = self.kernel()
+        self.assertIn("settings", kernel["root_exports"])
+        self.assertNotIn("dotmac_kernel.settings", kernel["supported_modules"])
+        self.assertNotIn("dotmac_kernel.settings", kernel["internal_modules"])
+        self.assertNamed(
+            self.collide("import dotmac_kernel.settings\n", "dotmac_kernel.settings"),
+            FindingCode.SURFACE_UNKNOWN,
         )
 
     def test_the_eleventh_site_is_inside_the_measured_surface(self) -> None:

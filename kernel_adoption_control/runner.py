@@ -90,6 +90,7 @@ from .contracts import (
     KernelAdoptionInputs,
     KernelSurfaceCatalogue,
     PinSite,
+    Severity,
 )
 from .declaration import DECLARATION_PATH, read_declaration
 from .engine import evaluate
@@ -277,22 +278,84 @@ class Provenance(str, Enum):
     PINNED = "pinned"
 
 
-def _canonical_remote(root: Path) -> str:
-    """The `origin` URL of `root`, normalised, or a refusal.
+#: The three spellings of a forge remote this accepts, and no fourth. Each
+#: captures `host` and `path`, and everything else -- `file://`, a relative
+#: path, a bare directory, an unrecognised scheme -- is REFUSED rather than
+#: guessed at, because a spelling nobody wrote a rule for is a spelling nobody
+#: reviewed.
+_ORIGIN_SPELLINGS = (
+    re.compile(r"^https://(?P<host>[^/]+)/(?P<path>.+?)/?$"),
+    re.compile(r"^ssh://(?:[^@/]+@)?(?P<host>[^/]+)/(?P<path>.+?)/?$"),
+    re.compile(r"^[^@/]+@(?P<host>[^:/]+):(?P<path>.+?)/?$"),
+)
 
-    The whole vendoring defence is this one comparison. It is not a strong
-    cryptographic claim -- a remote URL can be set to anything by whoever
-    controls the checkout -- and saying so is part of the claim: what it stops
-    is a product that COPIES the package into its own tree and thereby inherits
-    the ability to assert it is Governance, which is a mistake somebody makes
-    by accident. It does not stop deliberate forgery by someone who already
-    controls the runner's checkout, and nothing available here would.
+
+def _normalise_origin(url: str) -> str | None:
+    """One canonical spelling of a forge remote, or None if it is not one.
+
+    Host is lower-cased; the owner/repo path is NOT, and the comparison against
+    `CANONICAL_GOVERNANCE` is therefore case-sensitive on it. That is
+    deliberate and fail-closed: whether `Owner/Repo` and `owner/repo` are the
+    same repository is a per-forge question, and a case-folding rule that is
+    right for GitHub and wrong elsewhere is worse than a refusal whose repair
+    is writing the canonical spelling.
     """
-    url = _git(root, "remote", "get-url", "origin")
-    if url.startswith("git@") and ":" in url:
-        host, _, path = url.partition(":")
-        url = f"https://{host.removeprefix('git@')}/{path}"
-    return url.removesuffix(".git").rstrip("/")
+    raw = url.strip()
+    for pattern in _ORIGIN_SPELLINGS:
+        match = pattern.fullmatch(raw)
+        if match is None:
+            continue
+        host = match.group("host").lower()
+        path = match.group("path").removesuffix(".git").strip("/")
+        if not path:
+            return None
+        return f"https://{host}/{path}"
+    return None
+
+
+def _observed_origin(root: Path) -> tuple[str, str]:
+    """Return (literal, normalised) `remote.origin.url` as CONFIGURED at `root`.
+
+    `git config --local --get`, deliberately, and NOT `git remote get-url`.
+    `get-url` applies `url.<base>.insteadOf`, so a single rewrite rule in the
+    runner's GLOBAL git config makes any remote report as the canonical one --
+    a bypass that leaves nothing at all in the tree and is cheaper than
+    modifying the checkout. Measured on 2026-09-06: with an `insteadOf` rule
+    present, `get-url` returned the canonical URL for a remote configured to
+    `dotmac_erp`, and `config --local --get` returned `dotmac_erp`. The plant
+    is a permanent control.
+
+    **What this is: configured-origin EVIDENCE.** It is a local configuration
+    value that says which repository this checkout was set up to talk to. It is
+    NOT proof that the checkout descends from the canonical repository, and
+    nothing here observes ancestry, signatures or the remote itself. What it
+    stops is a product that COPIES this package into its own tree and thereby
+    inherits the ability to assert it is Governance -- a mistake somebody makes
+    by accident. It does not stop anyone who controls the checkout and writes
+    the value they want.
+    """
+    completed = subprocess.run(
+        ["git", "-C", str(root), "config", "--local", "--get", "remote.origin.url"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        raise RunnerError(
+            f"{root} configures no local remote.origin.url, so which repository "
+            "supplied this runner is unobserved. Refusing to assume it is "
+            f"{CANONICAL_GOVERNANCE}"
+        )
+    literal = completed.stdout.strip()
+    normalised = _normalise_origin(literal)
+    if normalised is None:
+        raise RunnerError(
+            f"the configured remote.origin.url {literal!r} is not a spelling "
+            "this recognises (https://, ssh:// or user@host:path). Refusing to "
+            "compare an unrecognised spelling: a guess here is the whole "
+            "provenance claim"
+        )
+    return literal, normalised
 
 
 def _governance_pin(root: Path) -> PinnedGovernanceModelRef | None:
@@ -336,7 +399,7 @@ def _governance_pin(root: Path) -> PinnedGovernanceModelRef | None:
 
 def _provenance(
     governance_root: Path, product_root: Path, governance_revision: str
-) -> Provenance:
+) -> tuple[Provenance, str, str]:
     """Establish that the code doing the measuring really is Governance's.
 
     Two admissible shapes, and everything else refuses:
@@ -353,17 +416,17 @@ def _provenance(
       cannot be measured by code it never agreed to be measured by, and cannot
       claim enforcement from a Governance checkout it silently moved.
     """
-    remote = _canonical_remote(governance_root)
-    if remote != CANONICAL_GOVERNANCE:
+    literal, observed = _observed_origin(governance_root)
+    if observed != CANONICAL_GOVERNANCE:
         raise RunnerError(
-            f"the checkout supplying this runner has origin {remote!r}, not "
-            f"{CANONICAL_GOVERNANCE!r}. Only the canonical Governance "
-            "repository may assert that a run was performed by Governance; a "
-            "vendored copy of this package is a copy of the code and not the "
-            "authority behind it"
+            f"the checkout supplying this runner configures origin {literal!r} "
+            f"({observed}), not {CANONICAL_GOVERNANCE!r}. Only the canonical "
+            "Governance repository may assert that a run was performed by "
+            "Governance; a vendored copy of this package is a copy of the code "
+            "and not the authority behind it"
         )
     if governance_root.resolve() == product_root.resolve():
-        return Provenance.SELF
+        return Provenance.SELF, literal, observed
     pin = _governance_pin(product_root)
     if pin is None:
         raise RunnerError(
@@ -386,7 +449,7 @@ def _provenance(
             "to, and a product that pinned an older Governance would appear "
             "enforced by a newer one it has not adopted"
         )
-    return Provenance.PINNED
+    return Provenance.PINNED, literal, observed
 
 
 def _declaration_location(root: Path) -> PurePosixPath:
@@ -444,6 +507,8 @@ class RunReport:
 
     as_of: date
     provenance: Provenance
+    governance_origin_configured: str
+    governance_origin: str
     governance_revision: str
     governance_worktree_clean: bool
     product_root: str
@@ -463,9 +528,16 @@ class RunReport:
             "as_of": self.as_of.isoformat(),
             "governance": {
                 "provenance": self.provenance.value,
+                # What was OBSERVED, never the module constant. Emitting
+                # `CANONICAL_GOVERNANCE` here made every copy of this runner --
+                # vendored or not -- report the canonical URL, so the
+                # predicate's vendoring arm could not fail on any report the
+                # runner actually produced. The run-side check was real and the
+                # predicate-side one was decoration.
+                "origin_configured": self.governance_origin_configured,
+                "origin": self.governance_origin,
                 "revision": self.governance_revision,
                 "worktree_clean": self.governance_worktree_clean,
-                "canonical_url": CANONICAL_GOVERNANCE,
             },
             "product": {
                 "root": self.product_root,
@@ -507,7 +579,9 @@ def run(
 
     governance_revision = _revision(governance_root, "governance")
     product_revision = _revision(root, "product")
-    provenance = _provenance(governance_root, root, governance_revision)
+    provenance, origin_configured, origin = _provenance(
+        governance_root, root, governance_revision
+    )
 
     location = _declaration_location(root)
     outcome = read_declaration(root, location)
@@ -541,6 +615,8 @@ def run(
     return RunReport(
         as_of=as_of,
         provenance=provenance,
+        governance_origin_configured=origin_configured,
+        governance_origin=origin,
         governance_revision=governance_revision,
         governance_worktree_clean=_worktree_clean(governance_root),
         product_root=str(root),
@@ -579,12 +655,12 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
     governance = document.get("governance")
     if not isinstance(governance, Mapping):
         return reject("the report names no governance revision")
-    if governance.get("canonical_url") != CANONICAL_GOVERNANCE:
+    if governance.get("origin") != CANONICAL_GOVERNANCE:
         return reject(
-            f"the report names governance repository "
-            f"{governance.get('canonical_url')!r}, not {CANONICAL_GOVERNANCE!r}: "
-            "a vendored copy of this package is a copy of the code and not the "
-            "authority behind it"
+            f"the report records observed origin {governance.get('origin')!r}, "
+            f"not {CANONICAL_GOVERNANCE!r}: a vendored copy of this package is "
+            "a copy of the code and not the authority behind it. This is "
+            "configured-origin evidence and not proof of remote ancestry"
         )
     if governance.get("provenance") not in {item.value for item in Provenance}:
         return reject(
@@ -622,10 +698,14 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
     if not isinstance(observation, Mapping):
         return reject("the report records no observation")
     count = observation.get("source_count")
-    if not isinstance(count, int) or count < 1:
+    # `isinstance(True, int)` is True, so `source_count: true` read as one file
+    # and satisfied this arm. A boolean where a count belongs is a malformed
+    # report, not a small one.
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
         return reject(
             f"the observation supplied {count!r} source files; a sweep over an "
-            "empty inventory passes for the wrong reason"
+            "empty inventory passes for the wrong reason, and a non-integer "
+            "count is a malformed report rather than a small one"
         )
     declaration = product.get("declaration")
     if not isinstance(declaration, Mapping):
@@ -663,11 +743,48 @@ def is_enforced(document: Mapping[str, object]) -> tuple[bool, str]:
     findings = document.get("findings")
     if not isinstance(findings, Mapping):
         return reject("the report records no findings section")
+    #: `conforms` was taken on trust, so `{"conforms": true, "findings": [ten
+    #: errors]}` was citable: the predicate checked the report's SHAPE and
+    #: never checked the report against ITSELF. A summary verdict that nothing
+    #: recomputes is the same defect as a declared field nothing reads.
+    items = findings.get("findings")
+    if not isinstance(items, list):
+        return reject(
+            f"the findings section carries {type(items).__name__} where a list "
+            "of findings belongs, so `conforms` summarises nothing"
+        )
+    known = {item.value for item in Severity}
+    errors: list[str] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, Mapping):
+            return reject(f"findings[{index}] is not an object")
+        severity = item.get("severity")
+        if severity not in known:
+            return reject(
+                f"findings[{index}] states severity {severity!r}, which is not "
+                f"one of {sorted(known)}. An unrecognised severity must not "
+                "read as a harmless one: that is how a report comes to contain "
+                "a failure nobody counted"
+            )
+        if severity == Severity.ERROR.value:
+            errors.append(str(item.get("code")))
+    if errors:
+        return reject(
+            f"the report carries {len(errors)} error finding(s) "
+            f"({', '.join(sorted(set(errors)))}), so it is not citable "
+            f"regardless of what `conforms` says — and it says "
+            f"{findings.get('conforms')!r}"
+        )
     if findings.get("conforms") is not True:
-        return reject("the run did not conform")
+        return reject(
+            f"the run states conforms {findings.get('conforms')!r} over "
+            f"{len(items)} finding(s), none of them an error. A report that "
+            "disagrees with itself is refused in both directions"
+        )
     return True, (
         f"conforming run of Governance {revision} over product {measured}, "
-        f"{count} source file(s), as of {document.get('as_of')}"
+        f"{count} source file(s), {len(items)} notice(s), no errors, as of "
+        f"{document.get('as_of')}"
     )
 
 

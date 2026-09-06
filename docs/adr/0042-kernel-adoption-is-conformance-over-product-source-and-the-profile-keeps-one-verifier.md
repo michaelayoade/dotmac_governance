@@ -497,21 +497,75 @@ newly exposed as `parse_governance_model`, rather than reimplemented — the who
 profile parser could not be used, because it requires `schema_version` 11 and
 the three products are still at 9.
 
-**What the remote check is and is not.** It stops a product that COPIES the
-package from inheriting the ability to assert it is Governance, which is a
-mistake somebody makes by accident. It does not stop deliberate forgery by
-someone who already controls the runner's checkout and can set a remote URL.
-Nothing available here would, and claiming otherwise would be this record's own
-failure mode.
+**Provenance is OBSERVED, and that took a third pass.** Re-review found that
+`to_dict` emitted the module constant `CANONICAL_GOVERNANCE` under
+`canonical_url`. Every copy of this runner therefore reported the canonical URL
+whatever its checkout actually said, so the predicate's vendoring arm **could
+not fail on any report the runner produced** — it was satisfiable only by a
+hand-built document. The run-side check was real; the predicate-side one was
+decoration. The report now carries what was measured: `origin_configured` (the
+literal configured value) and `origin` (its normalised form), and `is_enforced`
+compares the latter.
+
+**The read is `git config --local --get remote.origin.url`, not `git remote
+get-url`,** and the difference is a bypass rather than a detail. `get-url`
+expands `url.<base>.insteadOf`, so **one rewrite rule in the runner's global
+git config makes any remote report as the canonical one, leaving nothing at all
+in the tree** — cheaper than modifying the checkout, which is what the previous
+wording assumed an attacker would have to do. Measured 2026-09-06: with such a
+rule present, `get-url` returned the canonical URL for a remote configured to
+`dotmac_erp` while `config --local --get` returned `dotmac_erp`. The plant is a
+permanent control and asserts both halves — the bypass working against the
+rejected instrument, and failing against the chosen one.
+
+Three spellings are accepted and normalised — `https://host/path`,
+`ssh://[user@]host/path` and `user@host:path`, each with an optional `.git` and
+trailing slash — and everything else is REFUSED rather than guessed at. Host is
+lower-cased; the owner/repo path is not, so the comparison is case-sensitive on
+it. That is deliberate and fail-closed: whether `Owner/Repo` and `owner/repo`
+are the same repository is a per-forge question, and a case-folding rule that
+is right for GitHub and wrong elsewhere is worse than a refusal whose repair is
+writing the canonical spelling.
+
+**What this is, stated so nothing downstream reads more into it: it is
+configured-origin EVIDENCE, not cryptographic proof of remote ancestry.** A
+remote URL is a local configuration value saying which repository a checkout
+was set up to talk to. Nothing here observes ancestry, a signature, or the
+remote itself. What it stops is a product that COPIES this package into its own
+tree and thereby inherits the ability to assert it is Governance — a mistake
+somebody makes by accident. It does not stop anyone who controls the checkout
+and writes the value they want, and no wording in this record may imply
+otherwise.
+
+**`is_enforced` checks the report against ITSELF, not only its shape.**
+`{"conforms": true, "findings": [ten errors]}` was citable, because `conforms`
+was taken on trust — a summary verdict nothing recomputes, which is the same
+defect as a declared field nothing reads, one level up. The predicate now
+requires a well-formed findings list, refuses an unrecognised or malformed
+severity rather than letting it read as harmless, refuses any error finding
+whatever `conforms` says, and refuses a `conforms` that disagrees with the
+findings in either direction. `source_count: true` no longer reads as one file
+(`isinstance(True, int)`). The admit control is a notice-only report, which is
+this repository's own citable shape — it discloses its unread `product_revision`
+as a notice — so the arm is demonstrably not one that rejects everything.
 
 **How an unenforced enrolment stays visible.** A report is
-`KernelAdoptionRun.v1` and names the canonical Governance repository, the
-provenance, the Governance revision and the product revision — the revisions
-derived from Git, never supplied. `is_enforced` returns `(bool, reason)` and
-requires all of that plus two clean worktrees, a non-empty inventory, a present
-`not_applicable` declaration and a conforming run. A product pinning a
-Governance revision from before this amendment produces **no report at all**,
-and no report is not a pass.
+`KernelAdoptionRun.v1` and carries the observed origin, the provenance, the
+Governance revision and the product revision — the revisions derived from Git,
+never supplied. `is_enforced` returns `(bool, reason)` and requires all of that
+plus two clean worktrees, a non-empty inventory, a present `not_applicable`
+declaration, a self-consistent findings list and no error finding. A product
+pinning a Governance revision from before this amendment produces **no report at
+all**, and no report is not a pass.
+
+**The gate is not in the pre-commit block, and that is a correction.** It
+refuses a run it cannot bind to a committed revision, and a pre-commit tree is
+by definition uncommitted — so documenting it as a pre-commit step made it fail
+every time it was run as documented, which trains a reader to ignore the one
+exit code whose point is that it means something. It is `ci-owned` in
+`.dotmac/validation-contract.json`, runs in CI, and may be run by hand after
+committing as a DIAGNOSTIC. A dirty-tree run exits 3 and is explicitly
+non-citable.
 
 ### A9. What the runner executes, and the boundary on that
 

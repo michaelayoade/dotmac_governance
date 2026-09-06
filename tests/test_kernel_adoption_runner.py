@@ -51,6 +51,8 @@ from kernel_adoption_control.runner import (
     Provenance,
     RunnerError,
     _declaration_location,
+    _normalise_origin,
+    _observed_origin,
     is_enforced,
     main,
     resolve_observer,
@@ -968,6 +970,97 @@ class ProvenanceIsBoundToGovernance(RunnerTestCase):
         self.assertIs(Provenance.SELF, result.provenance)
 
 
+class TheOriginIsObservedNotAsserted(RunnerTestCase):
+    """The report must carry what was MEASURED, and the measurement must be literal.
+
+    `to_dict` used to emit the module constant `CANONICAL_GOVERNANCE`, so every
+    copy of this runner -- vendored or not -- reported the canonical URL. The
+    predicate's vendoring arm therefore could not fail on any report the runner
+    produced: the run-side check was real and the predicate-side one was
+    decoration, satisfiable only by a hand-built document.
+    """
+
+    def configure_origin(self, url: str) -> None:
+        _git(self.product.root, "config", "--local", "remote.origin.url", url)
+
+    def test_a_report_carries_the_origin_that_was_observed(self) -> None:
+        self.product.declare(not_applicable())
+        document = self.go(observer=f"{__name__}:observe_kernel_free").to_dict()
+        self.assertEqual(
+            CANONICAL_GOVERNANCE, document["governance"]["origin"], document
+        )
+        self.assertIn(
+            "dotmac_governance", str(document["governance"]["origin_configured"])
+        )
+
+    def test_an_insteadof_rewrite_does_not_move_the_observed_value(self) -> None:
+        """The bypass the literal read exists to close.
+
+        `git remote get-url` applies `url.<base>.insteadOf`, so ONE rewrite
+        rule -- in the runner's global config, leaving nothing in the tree --
+        makes any remote report as the canonical one. `git config --local
+        --get` returns the configured value and ignores the rewrite. Both
+        halves are asserted here: the bypass is shown WORKING against the
+        rejected instrument, and shown ineffective against the chosen one.
+        """
+        self.configure_origin("https://github.com/michaelayoade/dotmac_erp.git")
+        _git(
+            self.product.root,
+            "config",
+            "--local",
+            f"url.{CANONICAL_GOVERNANCE}.insteadOf",
+            "https://github.com/michaelayoade/dotmac_erp",
+        )
+        rewritten = _git(self.product.root, "remote", "get-url", "origin")
+        self.assertIn("dotmac_governance", rewritten, "the bypass no longer works")
+
+        literal, observed = _observed_origin(self.product.root)
+        self.assertIn("dotmac_erp", literal)
+        self.assertEqual("https://github.com/michaelayoade/dotmac_erp", observed)
+
+    def test_the_three_accepted_spellings_normalise_to_one(self) -> None:
+        for spelling in (
+            "https://github.com/michaelayoade/dotmac_governance",
+            "https://github.com/michaelayoade/dotmac_governance.git",
+            "https://GitHub.com/michaelayoade/dotmac_governance.git/",
+            "ssh://git@github.com/michaelayoade/dotmac_governance.git",
+            "git@github.com:michaelayoade/dotmac_governance.git",
+        ):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(CANONICAL_GOVERNANCE, _normalise_origin(spelling))
+
+    def test_a_spelling_nobody_wrote_a_rule_for_is_refused(self) -> None:
+        """Refused, not guessed at. A guess here is the whole provenance claim."""
+        for spelling in (
+            "file:///tmp/governance",
+            "../governance",
+            "/srv/git/governance",
+            "https://github.com/",
+            "",
+        ):
+            with self.subTest(spelling=spelling):
+                self.assertIsNone(_normalise_origin(spelling))
+
+    def test_a_near_miss_repository_is_not_normalised_into_the_canonical_one(
+        self,
+    ) -> None:
+        """The normaliser must not be so eager that it erases the difference."""
+        for spelling in (
+            "https://github.com/michaelayoade/dotmac_governance_fork",
+            "https://github.com/someone/dotmac_governance",
+            "https://gitlab.com/michaelayoade/dotmac_governance",
+            "https://github.com/Michaelayoade/dotmac_governance",
+        ):
+            with self.subTest(spelling=spelling):
+                self.assertNotEqual(CANONICAL_GOVERNANCE, _normalise_origin(spelling))
+
+    def test_a_checkout_with_no_configured_origin_is_refused(self) -> None:
+        _git(self.product.root, "remote", "remove", "origin")
+        with self.assertRaises(RunnerError) as caught:
+            _observed_origin(self.product.root)
+        self.assertIn("configures no local remote.origin.url", str(caught.exception))
+
+
 class PinSufficiencyIsApplicabilityAware(RunnerTestCase):
     """ "Enough to detect a disagreement" is a different number for each state.
 
@@ -1136,9 +1229,10 @@ class EnforcementIsVisible(RunnerTestCase):
             "as_of": TODAY,
             "governance": {
                 "provenance": "self",
+                "origin_configured": CANONICAL_GOVERNANCE + ".git",
+                "origin": CANONICAL_GOVERNANCE,
                 "revision": "a" * 40,
                 "worktree_clean": True,
-                "canonical_url": CANONICAL_GOVERNANCE,
             },
             "product": {
                 "revision": "b" * 40,
@@ -1149,7 +1243,16 @@ class EnforcementIsVisible(RunnerTestCase):
                 },
             },
             "observation": {"source_count": 12},
-            "findings": {"conforms": True},
+            "findings": {
+                "conforms": True,
+                "findings": [
+                    {
+                        "code": "kernel.declaration.fields-unevaluated",
+                        "severity": "notice",
+                        "message": "disclosed",
+                    }
+                ],
+            },
         }
 
     def test_a_complete_conforming_report_is_citable(self) -> None:
@@ -1173,7 +1276,7 @@ class EnforcementIsVisible(RunnerTestCase):
         """The vendoring claim, checked at the predicate as well as at the run."""
         document = self.base()
         governance = dict(document["governance"])
-        governance["canonical_url"] = "https://github.com/michaelayoade/dotmac_erp"
+        governance["origin"] = "https://github.com/michaelayoade/dotmac_erp"
         document["governance"] = governance
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
@@ -1217,24 +1320,18 @@ class EnforcementIsVisible(RunnerTestCase):
 
     def test_a_moving_governance_coordinate_is_not_enforcement(self) -> None:
         document = self.base()
-        document["governance"] = {
-            "provenance": "self",
-            "revision": "main",
-            "worktree_clean": True,
-            "canonical_url": CANONICAL_GOVERNANCE,
-        }
+        governance = dict(document["governance"])
+        governance["revision"] = "main"
+        document["governance"] = governance
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
         self.assertIn("not a peeled commit", reason)
 
     def test_a_dirty_governance_checkout_is_not_enforcement(self) -> None:
         document = self.base()
-        document["governance"] = {
-            "provenance": "self",
-            "revision": "a" * 40,
-            "worktree_clean": False,
-            "canonical_url": CANONICAL_GOVERNANCE,
-        }
+        governance = dict(document["governance"])
+        governance["worktree_clean"] = False
+        document["governance"] = governance
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
         self.assertIn("not the code that ran", reason)
@@ -1257,10 +1354,82 @@ class EnforcementIsVisible(RunnerTestCase):
 
     def test_a_non_conforming_run_is_not_enforcement(self) -> None:
         document = self.base()
-        document["findings"] = {"conforms": False}
+        document["findings"] = {"conforms": False, "findings": []}
         enforced, reason = is_enforced(document)
         self.assertFalse(enforced)
-        self.assertIn("did not conform", reason)
+        self.assertIn("disagrees with itself", reason)
+
+    def test_a_report_that_contradicts_itself_is_refused(self) -> None:
+        """`conforms` was taken on trust, so ten errors could sit beneath it.
+
+        The predicate checked the report's SHAPE and never checked the report
+        against ITSELF -- a summary verdict nothing recomputes, which is the
+        same defect as a declared field nothing reads.
+        """
+        document = self.base()
+        document["findings"] = {
+            "conforms": True,
+            "findings": [
+                {"code": "kernel.surface.prohibited", "severity": "error"}
+                for _ in range(10)
+            ],
+        }
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("10 error finding(s)", reason)
+
+    def test_a_notice_only_report_is_still_citable(self) -> None:
+        """The admit control for the arm above.
+
+        Without it the consistency check is indistinguishable from one that
+        rejects everything -- and this repository's own citable run IS
+        notice-only, because it discloses its unread `product_revision`.
+        """
+        document = self.base()
+        document["findings"] = {
+            "conforms": True,
+            "findings": [
+                {"code": "kernel.declaration.fields-unevaluated", "severity": "notice"},
+                {"code": "kernel.declaration.fields-unevaluated", "severity": "notice"},
+            ],
+        }
+        enforced, reason = is_enforced(document)
+        self.assertTrue(enforced, reason)
+        self.assertIn("2 notice(s), no errors", reason)
+
+    def test_an_unrecognised_severity_is_refused_not_read_as_harmless(self) -> None:
+        for severity in ("warning", "ERROR", "", None, 3, {"level": "error"}):
+            with self.subTest(severity=severity):
+                document = self.base()
+                document["findings"] = {
+                    "conforms": True,
+                    "findings": [{"code": "x", "severity": severity}],
+                }
+                enforced, reason = is_enforced(document)
+                self.assertFalse(enforced)
+                self.assertIn("not read as a harmless one", reason)
+
+    def test_a_findings_section_with_no_list_is_refused(self) -> None:
+        for value in ({"conforms": True}, {"conforms": True, "findings": "none"}):
+            with self.subTest(value=value):
+                enforced, reason = is_enforced({**self.base(), "findings": value})
+                self.assertFalse(enforced)
+                self.assertIn("summarises nothing", reason)
+
+    def test_a_finding_that_is_not_an_object_is_refused(self) -> None:
+        document = self.base()
+        document["findings"] = {"conforms": True, "findings": ["kernel.pin.disagrees"]}
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("is not an object", reason)
+
+    def test_a_boolean_source_count_is_not_one_file(self) -> None:
+        """`isinstance(True, int)` is True, so `source_count: true` read as 1."""
+        document = self.base()
+        document["observation"] = {"source_count": True}
+        enforced, reason = is_enforced(document)
+        self.assertFalse(enforced)
+        self.assertIn("malformed report", reason)
 
     def test_a_real_run_produces_a_document_the_predicate_accepts(self) -> None:
         """Non-vacuity: the predicate is satisfiable by the runner's own output.

@@ -54,7 +54,6 @@
     "python3 tools/check_validation_contract.py",
     "python3 -m agent_control verify --root . --profile .dotmac/agent-profile.json",
     "python3 -m programme_control --root .",
-    "python3 -m kernel_adoption_control --root . --observer tools.kernel_adoption_observation:observe --as-of \"$(date -u +%F)\"",
     "python3 -m standards_control verify --root . --profile .dotmac/standards-profile.json --default-branch main"
   ],
   "allowed_surfaces": [

@@ -1733,19 +1733,37 @@ class V2ApplicableActivationEndToEnd(RunnerTestCase):
         self.assertIs(Citability.NOT_CITABLE, verdict)
         self.assertIn("KernelAdoptionDeclaration.v1", reason)
 
-    def test_a_declaration_naming_its_own_commit_is_refused_end_to_end(self) -> None:
+    def test_a_real_non_ancestor_is_refused_end_to_end(self) -> None:
         """The planted defect against the real probe, not a constructed verdict.
 
-        `git merge-base --is-ancestor X X` exits 0, so without the explicit
-        equality refutation this impossible declaration would have passed the
-        one arm written to catch it.
+        The predecessor is a genuine commit of this repository -- made on a
+        sibling branch -- which is therefore PRESENT and yet not behind what was
+        measured. That distinction is the one the probe has to get right: an
+        ABSENT commit exits 128 and is reported undecided, so a plant using a
+        fabricated hash would exercise the undecided arm while appearing to
+        exercise this one.
+
+        **Why the equality case is not planted here.** A declaration naming the
+        revision that contains it cannot be produced by a commit flow: writing
+        the declaration and committing it advances HEAD, so the named commit
+        becomes a real ancestor. That is not a gap in this test -- it is the
+        premise the coordinate rests on, "a committed file cannot contain its
+        own commit", showing up as an unreachable state. An earlier draft of
+        this test tried to plant it anyway and silently became a second admit
+        control: it produced NO findings and asserted one. The refutation is
+        unit-tested where it can actually be reached, against a real
+        repository, in `ThePredecessorProbe
+        ::test_the_measured_revision_itself_is_refused`.
         """
         self.product.commit()
-        self.product.declare(applicable_v2("placeholder-replaced-below"))
+        _git(self.product.root, "checkout", "-q", "-b", "sibling")
+        self.product.commit()
+        sibling = _git(self.product.root, "rev-parse", "HEAD")
+        _git(self.product.root, "checkout", "-q", "main")
+        self.product.declare(applicable_v2(sibling))
         self.product.commit()
         measured = _git(self.product.root, "rev-parse", "HEAD")
-        self.product.declare(applicable_v2(measured))
-        self.product.commit()
+        self.assertNotEqual(sibling, measured)
         result = run(
             product_root=self.product.root,
             observer_reference=f"{__name__}:observe_v2_consumer",

@@ -885,7 +885,86 @@ class RequiredSurfacesAreExecutable(Base):
         )
         with self.assertRaises(DeclarationError) as caught:
             parse_declaration_v2(document)
-        self.assertIn("names one module twice", str(caught.exception))
+        message = str(caught.exception)
+        self.assertIn("required_surfaces names one module twice", message)
+        # The misdescription this ordering exists to prevent. Before same-arm
+        # duplication was checked first, this read "declared both required and
+        # required" -- not a sentence, and it sent the reader to look for a
+        # second classification that is not there.
+        self.assertNotIn("required and required", message)
+        self.assertIn("NOT a cross-classification", message)
+
+
+class SameArmDuplicationIsNotCrossClassification(Base):
+    """Ordering: a module twice in ONE list is its own defect with its own repair.
+
+    `_one_class_per_module` walks the three lists in turn and reports the first
+    name it has seen before, so before this ordering existed a duplicate inside
+    one arm came out as "declared both X and X". A refusal that misdescribes
+    its cause is worse than no refusal: the reader spends their attention on
+    the wrong edit and distrusts the next diagnostic too.
+
+    All three arms are asserted, not only the one that was noticed, and the
+    near-miss holds the boundary: a module in two DIFFERENT arms must still
+    report cross-classification.
+    """
+
+    PROHIBITED = {"module": "dotmac_kernel.db", "citation": "ADR 0042"}
+    TRANSITIONAL: dict[str, Any] = {
+        "module": "dotmac_kernel.db",
+        "owner": "the runtime owner",
+        "expiry": "2026-09-30",
+        "retirement_issue": "#179",
+        "replacement": "an injected session",
+        "baseline": [{"path": "src/app/db.py", "symbol": "session"}],
+    }
+
+    def refuse(self, **overrides: Any) -> str:
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration_v2(v2_document(ONE_IMPORT, ONE_MODULE, **overrides))
+        return str(caught.exception)
+
+    def test_a_module_twice_in_prohibited_names_that_arm(self) -> None:
+        message = self.refuse(
+            prohibited_surfaces=[self.PROHIBITED, dict(self.PROHIBITED)]
+        )
+        self.assertIn("prohibited_surfaces names one module twice", message)
+        self.assertNotIn("prohibited and prohibited", message)
+
+    def test_a_module_twice_in_transitional_names_that_arm(self) -> None:
+        message = self.refuse(
+            transitional_surfaces=[self.TRANSITIONAL, dict(self.TRANSITIONAL)]
+        )
+        self.assertIn("transitional_surfaces names one module twice", message)
+        self.assertNotIn("transitional and transitional", message)
+
+    def test_a_module_in_two_arms_still_reports_cross_classification(self) -> None:
+        """The near-miss. The reorder must not swallow the rule it runs before."""
+        message = self.refuse(
+            required_surfaces=[
+                {
+                    "module": "dotmac_kernel.db",
+                    "floor": "0.1.0a90",
+                    "proven_by": "src/app/service.py",
+                }
+            ],
+            prohibited_surfaces=[self.PROHIBITED],
+        )
+        self.assertIn("declared both required and prohibited", message)
+        self.assertNotIn("names one module twice", message)
+
+    def test_one_entry_per_arm_is_the_admit_control(self) -> None:
+        """Without it, both arms above are indistinguishable from refusing all."""
+        parsed = parse_declaration_v2(
+            v2_document(
+                ONE_IMPORT,
+                ONE_MODULE,
+                required_surfaces=REQUIRED_ONE,
+                prohibited_surfaces=[self.PROHIBITED],
+            )
+        )
+        self.assertEqual(1, len(parsed.required_surfaces))
+        self.assertEqual(1, len(parsed.prohibited_surfaces))
 
 
 class VersionOrdering(unittest.TestCase):

@@ -230,12 +230,56 @@ def _kernel_catalogue(value: object) -> KernelCatalogueBinding:
     )
 
 
+def _no_duplicate_within_one_arm(
+    required: tuple[RequiredSurface, ...],
+    prohibited: tuple[ProhibitedSurface, ...],
+    transitional: tuple[TransitionalSurface, ...],
+) -> None:
+    """One module twice in ONE list, checked BEFORE cross-classification.
+
+    The ordering is the whole point of this function existing separately.
+    `_one_class_per_module` walks the three lists in turn and reports the first
+    module it has already seen -- so a module listed twice in
+    `required_surfaces` came out as "declared both required and required",
+    which is not a sentence and sends the reader to look for a second
+    classification that is not there. A refusal that misdescribes its cause is
+    worse than no refusal, because the reader spends their attention on the
+    wrong edit and then distrusts the next diagnostic too.
+
+    Two entries for one module in one arm is its own defect with its own
+    repair -- delete one line -- and it is reported as such, for all three arms
+    rather than only the one that was noticed.
+    """
+    for arm, modules in (
+        ("required_surfaces", [item.module for item in required]),
+        ("prohibited_surfaces", [item.module for item in prohibited]),
+        ("transitional_surfaces", [item.module for item in transitional]),
+    ):
+        seen_here: set[str] = set()
+        for name in modules:
+            if name in seen_here:
+                raise DeclarationError(
+                    f"{arm} names one module twice: {name}. Two entries for one "
+                    "module in one list is two answers to one question, and "
+                    "which one binds would be decided by list order. This is "
+                    "NOT a cross-classification: nothing else classifies "
+                    f"{name}, and the repair is to delete one of the two "
+                    f"{arm} entries"
+                )
+            seen_here.add(name)
+
+
 def _one_class_per_module(
     required: tuple[RequiredSurface, ...],
     prohibited: tuple[ProhibitedSurface, ...],
     transitional: tuple[TransitionalSurface, ...],
 ) -> None:
-    """v1's rule, unchanged: no module holds two of the three undertakings."""
+    """v1's rule, unchanged: no module holds two of the three undertakings.
+
+    Called only AFTER `_no_duplicate_within_one_arm`, which is what keeps every
+    message this raises truthful: by the time it runs, a repeated name really
+    is a name in two different arms.
+    """
     seen: dict[str, str] = {}
     for kind, modules in (
         ("required", [item.module for item in required]),
@@ -347,13 +391,10 @@ def parse_declaration_v2(value: object) -> KernelAdoptionDeclarationV2:
             _sequence(data["transitional_surfaces"], "transitional_surfaces")
         )
     )
+    # Order is load-bearing, not incidental: same-arm duplication first, so a
+    # module listed twice in one list never reports as a cross-classification.
+    _no_duplicate_within_one_arm(required, prohibited, transitional)
     _one_class_per_module(required, prohibited, transitional)
-    if len({item.module for item in required}) != len(required):
-        raise DeclarationError(
-            "required_surfaces names one module twice. Two floors for one "
-            "module is two answers to one question, and which one binds would "
-            "be decided by list order"
-        )
     return KernelAdoptionDeclarationV2(
         contract=contract,
         applicability=applicability,

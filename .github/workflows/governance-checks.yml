@@ -112,14 +112,23 @@ jobs:
       # this repository's own source rather than accepting it (ADR 0042's
       # activation amendment of 2026-09-05).
       #
-      # Scoped to THIS checkout, and narrower than that: what is ACTIVATED and
-      # citable is Governance's own `not_applicable` self-run. An `applicable`
-      # declaration is explicitly NOT citable -- the runner reads none of
-      # `product_revision`, `kernel_catalogue` or `required_surfaces` -- and
-      # exits 3. Applicable-product activation waits on the versioned successor
-      # contract in open decision 52, and PLATFORM ENROLMENT STAYS BLOCKED
-      # until it lands. A declaration living in another repository is not a
-      # repository-local fact for Governance either way (ADR 0013 § 1).
+      # Scoped to THIS checkout. What this step measures is Governance's own
+      # `not_applicable` self-run, which is a KernelAdoptionDeclaration.v1 and
+      # is citable because the premise it states -- this repository consumes no
+      # Kernel -- is independently evaluated against its own imports.
+      #
+      # On the applicable side the two contract versions differ, and the
+      # difference is the point of ADR 0042's amendment of 2026-09-06:
+      # **v1 `applicable` remains NON-CITABLE, while v2 `applicable` is
+      # ACTIVATABLE through product-owned CI.** A v1 applicable declaration
+      # still exits 3, because the runner reads none of `product_revision`,
+      # `kernel_catalogue` or `required_surfaces`. A v2 applicable declaration
+      # has an arm for every field it requires and can be cited -- but it is
+      # cited by the RUN THE PRODUCT PERFORMS IN ITS OWN CI, not by this step
+      # and not by Governance. A declaration living in another repository is
+      # not a repository-local fact for Governance (ADR 0013 § 1), so nothing
+      # here measures any product, and no product is enrolled until it writes
+      # its own declaration and adds its own step.
       #
       # The step's exit code consults citability, not only conformance: a green
       # step whose own log says its result is uncitable is worse than a red

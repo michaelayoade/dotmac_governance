@@ -39,8 +39,8 @@ jobs:
 
       - name: Check control-plane lint and formatting
         run: |
-          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
-          python3 -m ruff format --check agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff check --select E4,E7,E9,F,I,B,UP agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_kernel_adoption_v2.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
+          python3 -m ruff format --check agent_control gate_control kernel_adoption_control programme_control standards_control tests/test_agent_control.py tests/test_check_adr_references.py tests/test_check_commit_identity.py tests/test_check_local_action_workspace.py tests/test_check_receipts.py tests/test_check_validation_contract.py tests/test_gate_control.py tests/test_kernel_adoption_control.py tests/test_kernel_adoption_runner.py tests/test_kernel_adoption_v2.py tests/test_programme_control.py tests/test_standards_control.py tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
 
       - name: Check typed control-plane boundaries
         run: python3 -m mypy --strict --scripts-are-modules agent_control gate_control kernel_adoption_control programme_control standards_control tools/check_adr_references.py tools/check_commit_identity.py tools/check_local_action_workspace.py tools/kernel_adoption_observation.py tools/check_receipts.py tools/check_validation_contract.py tools/dotmac-agent tools/dotmac-gates tools/dotmac-programme tools/dotmac-standards
@@ -112,14 +112,23 @@ jobs:
       # this repository's own source rather than accepting it (ADR 0042's
       # activation amendment of 2026-09-05).
       #
-      # Scoped to THIS checkout, and narrower than that: what is ACTIVATED and
-      # citable is Governance's own `not_applicable` self-run. An `applicable`
-      # declaration is explicitly NOT citable -- the runner reads none of
-      # `product_revision`, `kernel_catalogue` or `required_surfaces` -- and
-      # exits 3. Applicable-product activation waits on the versioned successor
-      # contract in open decision 52, and PLATFORM ENROLMENT STAYS BLOCKED
-      # until it lands. A declaration living in another repository is not a
-      # repository-local fact for Governance either way (ADR 0013 § 1).
+      # Scoped to THIS checkout. What this step measures is Governance's own
+      # `not_applicable` self-run, which is a KernelAdoptionDeclaration.v1 and
+      # is citable because the premise it states -- this repository consumes no
+      # Kernel -- is independently evaluated against its own imports.
+      #
+      # On the applicable side the two contract versions differ, and the
+      # difference is the point of ADR 0042's amendment of 2026-09-06:
+      # **v1 `applicable` remains NON-CITABLE, while v2 `applicable` is
+      # ACTIVATABLE through product-owned CI.** A v1 applicable declaration
+      # still exits 3, because the runner reads none of `product_revision`,
+      # `kernel_catalogue` or `required_surfaces`. A v2 applicable declaration
+      # has an arm for every field it requires and can be cited -- but it is
+      # cited by the RUN THE PRODUCT PERFORMS IN ITS OWN CI, not by this step
+      # and not by Governance. A declaration living in another repository is
+      # not a repository-local fact for Governance (ADR 0013 § 1), so nothing
+      # here measures any product, and no product is enrolled until it writes
+      # its own declaration and adds its own step.
       #
       # The step's exit code consults citability, not only conformance: a green
       # step whose own log says its result is uncitable is worse than a red

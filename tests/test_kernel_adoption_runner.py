@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import dataclasses
 import io
 import json
 import shutil
@@ -42,22 +43,32 @@ from kernel_adoption_control import (
     KernelSurfaceCatalogue,
     PinSite,
     Severity,
+    catalogue_digest,
+    surface_digest,
+)
+from kernel_adoption_control.declaration_contract_v2 import (
+    KERNEL_ADOPTION_CONTRACT_V2,
 )
 from kernel_adoption_control.runner import (
     CANONICAL_GOVERNANCE,
     GOVERNANCE_ROOT,
     RUN_CONTRACT,
+    Citability,
+    DocumentVerdict,
     ProductObservation,
     Provenance,
     RunnerError,
+    RunReport,
     _declaration_location,
     _normalise_origin,
     _observed_origin,
-    is_enforced,
+    citability,
+    inspect_report_document,
     main,
     resolve_observer,
     run,
 )
+from kernel_adoption_control.surface import SOURCE_SURFACE_ALGORITHM, SurfaceFact
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -159,6 +170,90 @@ def observe_consumer(root: Path) -> ProductObservation:
             PinSite(PurePosixPath("poetry.lock"), 9, "0.1.0a98", "lock"),
         ),
     )
+
+
+#: The v2 catalogue. Identical to `CATALOGUE` except that it carries the
+#: distribution digest, which a v2 `applicable` declaration BINDS -- an
+#: observer supplying none is `kernel.catalogue.unbound` rather than silent.
+V2_CATALOGUE = KernelSurfaceCatalogue(
+    revision=KERNEL_REVISION,
+    version="0.1.0a98",
+    supported=frozenset({"dotmac_kernel.db", "dotmac_kernel.messaging"}),
+    internal=frozenset({"dotmac_kernel.display"}),
+    artifact_digest=KERNEL_DIGEST,
+)
+
+V2_SOURCES = {PurePosixPath("app/legacy.py"): CONSUMER}
+
+#: The surface digest of `V2_SOURCES`, built from the one fact that source
+#: contains. Constructed rather than copied from a run: a literal here would be
+#: a number nobody could re-derive, which is the defect the coordinate exists
+#: to end.
+V2_SURFACE_DIGEST = surface_digest(
+    frozenset(
+        {
+            SurfaceFact(
+                path=PurePosixPath("app/legacy.py"),
+                module="dotmac_kernel.db",
+                symbols=("session",),
+                star=False,
+            )
+        }
+    )
+)
+
+
+def observe_v2_consumer(root: Path) -> ProductObservation:
+    """The product-side surface an enrolling v2 product writes. Nothing more."""
+    return ProductObservation(
+        sources=dict(V2_SOURCES),
+        catalogue=V2_CATALOGUE,
+        pin_sites=(
+            PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "dependency"),
+            PinSite(PurePosixPath("poetry.lock"), 9, "0.1.0a98", "lock"),
+        ),
+    )
+
+
+def applicable_v2(predecessor: str, **overrides: Any) -> dict[str, Any]:
+    """A v2 `applicable` declaration that agrees with `observe_v2_consumer`.
+
+    `predecessor` is supplied by the caller because it is a REAL commit from
+    the fixture repository's history -- the coordinate cannot be a constant,
+    which is the whole of decision 52 (A).
+    """
+    body: dict[str, Any] = {
+        "contract": KERNEL_ADOPTION_CONTRACT_V2,
+        "applicability": "applicable",
+        "declared_at": AS_OF.isoformat(),
+        "source_predecessor": predecessor,
+        "source_surface": {
+            "algorithm": SOURCE_SURFACE_ALGORITHM,
+            "digest": V2_SURFACE_DIGEST,
+        },
+        "kernel_catalogue": {
+            "version": "0.1.0a98",
+            "revision": KERNEL_REVISION,
+            "artifact_digest": KERNEL_DIGEST,
+            "catalogue_digest": catalogue_digest(
+                version=V2_CATALOGUE.version,
+                revision=V2_CATALOGUE.revision,
+                supported=V2_CATALOGUE.supported,
+                internal=V2_CATALOGUE.internal,
+            ),
+        },
+        "required_surfaces": [
+            {
+                "module": "dotmac_kernel.db",
+                "floor": "0.1.0a98",
+                "proven_by": "app/legacy.py",
+            }
+        ],
+        "prohibited_surfaces": [],
+        "transitional_surfaces": [],
+    }
+    body.update(overrides)
+    return body
 
 
 def observe_kernel_free(root: Path) -> ProductObservation:
@@ -1260,20 +1355,20 @@ class EnforcementIsVisible(RunnerTestCase):
         }
 
     def test_a_complete_conforming_report_is_citable(self) -> None:
-        enforced, reason = is_enforced(self.base())
-        self.assertTrue(enforced, reason)
+        verdict, reason = inspect_report_document(self.base())
+        self.assertIs(DocumentVerdict.WELL_FORMED, verdict, reason)
 
     def test_a_document_that_is_not_a_run_report_is_not_enforcement(self) -> None:
         document = self.base()
         document["contract"] = "SomethingElse.v1"
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("predating the runner produces none", reason)
 
     def test_an_absent_contract_key_is_not_enforcement(self) -> None:
         """The shape a pre-runner Governance revision leaves behind: nothing."""
-        enforced, reason = is_enforced({})
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document({})
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn(RUN_CONTRACT, reason)
 
     def test_a_report_naming_another_repository_is_not_enforcement(self) -> None:
@@ -1282,8 +1377,8 @@ class EnforcementIsVisible(RunnerTestCase):
         governance = dict(document["governance"])
         governance["origin"] = "https://github.com/michaelayoade/dotmac_erp"
         document["governance"] = governance
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("not the authority behind it", reason)
 
     def test_a_report_with_no_established_provenance_is_not_enforcement(self) -> None:
@@ -1291,35 +1386,17 @@ class EnforcementIsVisible(RunnerTestCase):
         governance = dict(document["governance"])
         governance["provenance"] = "assumed"
         document["governance"] = governance
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("not an established one", reason)
-
-    def test_an_applicable_declaration_is_not_citable(self) -> None:
-        """The narrowing that makes the rest honest.
-
-        Three declared fields are unread, so a run over an applicable
-        declaration cannot be cited as enforcing that declaration. Governance's
-        truthful `not_applicable` self-run has no unread fields and stays
-        citable, which is what makes this a self-enforcement foundation rather
-        than a product gate that overclaims.
-        """
-        document = self.base()
-        product = dict(document["product"])
-        product["declaration"] = {"state": "present", "applicability": "applicable"}
-        document["product"] = product
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
-        self.assertIn("decision 52", reason)
-        self.assertIn("required_surfaces", reason)
 
     def test_a_refused_declaration_is_not_citable(self) -> None:
         document = self.base()
         product = dict(document["product"])
         product["declaration"] = {"state": "DeclarationMissing", "detail": "gone"}
         document["product"] = product
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("which is a refusal", reason)
 
     def test_a_moving_governance_coordinate_is_not_enforcement(self) -> None:
@@ -1327,8 +1404,8 @@ class EnforcementIsVisible(RunnerTestCase):
         governance = dict(document["governance"])
         governance["revision"] = "main"
         document["governance"] = governance
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("not a peeled commit", reason)
 
     def test_a_dirty_governance_checkout_is_not_enforcement(self) -> None:
@@ -1336,8 +1413,8 @@ class EnforcementIsVisible(RunnerTestCase):
         governance = dict(document["governance"])
         governance["worktree_clean"] = False
         document["governance"] = governance
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("not the code that ran", reason)
 
     def test_a_dirty_product_checkout_is_not_enforcement(self) -> None:
@@ -1345,22 +1422,22 @@ class EnforcementIsVisible(RunnerTestCase):
         product = dict(document["product"])
         product["worktree_clean"] = False
         document["product"] = product
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("not the source that was read", reason)
 
     def test_an_empty_inventory_is_not_enforcement(self) -> None:
         document = self.base()
         document["observation"] = {"source_count": 0}
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("passes for the wrong reason", reason)
 
     def test_a_non_conforming_run_is_not_enforcement(self) -> None:
         document = self.base()
         document["findings"] = {"conforms": False, "findings": []}
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("disagrees with itself", reason)
 
     def test_a_report_that_contradicts_itself_is_refused(self) -> None:
@@ -1378,11 +1455,11 @@ class EnforcementIsVisible(RunnerTestCase):
                 for _ in range(10)
             ],
         }
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("10 error finding(s)", reason)
 
-    def test_a_notice_only_report_is_still_citable(self) -> None:
+    def test_a_notice_only_report_is_still_well_formed(self) -> None:
         """The admit control for the arm above.
 
         Without it the consistency check is indistinguishable from one that
@@ -1397,8 +1474,8 @@ class EnforcementIsVisible(RunnerTestCase):
                 {"code": "kernel.declaration.fields-unevaluated", "severity": "notice"},
             ],
         }
-        enforced, reason = is_enforced(document)
-        self.assertTrue(enforced, reason)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.WELL_FORMED, verdict, reason)
         self.assertIn("2 notice(s), no errors", reason)
 
     def test_an_unrecognised_severity_is_refused_not_read_as_harmless(self) -> None:
@@ -1409,39 +1486,42 @@ class EnforcementIsVisible(RunnerTestCase):
                     "conforms": True,
                     "findings": [{"code": "x", "severity": severity}],
                 }
-                enforced, reason = is_enforced(document)
-                self.assertFalse(enforced)
+                verdict, reason = inspect_report_document(document)
+                self.assertIs(DocumentVerdict.MALFORMED, verdict)
                 self.assertIn("not read as a harmless one", reason)
 
     def test_a_findings_section_with_no_list_is_refused(self) -> None:
         for value in ({"conforms": True}, {"conforms": True, "findings": "none"}):
             with self.subTest(value=value):
-                enforced, reason = is_enforced({**self.base(), "findings": value})
-                self.assertFalse(enforced)
+                verdict, reason = inspect_report_document(
+                    {**self.base(), "findings": value}
+                )
+                self.assertIs(DocumentVerdict.MALFORMED, verdict)
                 self.assertIn("summarises nothing", reason)
 
     def test_a_finding_that_is_not_an_object_is_refused(self) -> None:
         document = self.base()
         document["findings"] = {"conforms": True, "findings": ["kernel.pin.disagrees"]}
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("is not an object", reason)
 
     def test_a_boolean_source_count_is_not_one_file(self) -> None:
         """`isinstance(True, int)` is True, so `source_count: true` read as 1."""
         document = self.base()
         document["observation"] = {"source_count": True}
-        enforced, reason = is_enforced(document)
-        self.assertFalse(enforced)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.MALFORMED, verdict)
         self.assertIn("malformed report", reason)
 
-    def test_a_real_run_produces_a_document_the_predicate_accepts(self) -> None:
-        """Non-vacuity: the predicate is satisfiable by the runner's own output.
+    def test_a_real_run_produces_a_document_the_inspector_accepts(self) -> None:
+        """Non-vacuity: the arm is satisfiable by the runner's own output.
 
-        A predicate that rejected every real report would make every assertion
-        above pass while nothing could ever be enforced. The satisfiable shape
-        is a truthful `not_applicable` declaration -- which is exactly the shape
-        this repository has, and exactly the scope activation now claims.
+        An inspector that rejected every real report would make every assertion
+        above pass while nothing could ever be well-formed. What it establishes
+        is only that the document agrees with itself -- see
+        `ADocumentCannotEstablishThatARunProducedIt` for the claim it can never
+        make.
         """
         self.product.declare(not_applicable())
         document = self.go(observer=f"{__name__}:observe_kernel_free").to_dict()
@@ -1449,8 +1529,265 @@ class EnforcementIsVisible(RunnerTestCase):
         # may legitimately be dirty; substitute only that one fact.
         document["governance"] = dict(document["governance"])
         document["governance"]["worktree_clean"] = True
-        enforced, reason = is_enforced(document)
-        self.assertTrue(enforced, reason)
+        verdict, reason = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.WELL_FORMED, verdict, reason)
+
+
+class ADocumentCannotEstablishThatARunProducedIt(RunnerTestCase):
+    """Open decision 52 (5). The defect, its repair, and the repair's boundary.
+
+    **The defect, exhibited by this suite's own history.** `is_enforced` was a
+    predicate over a REPORT, not over a repository: anyone who could write the
+    JSON could write a passing one. The admit control for it -- the test
+    directly above, before this change -- was a hand-built dictionary that
+    returned `True`. A predicate whose positive case had only ever been
+    exhibited by a fabricated input was not measuring what its name said.
+
+    **The repair is structural rather than an added condition.**
+    `inspect_report_document` returns a `DocumentVerdict`, whose value set does
+    not CONTAIN a citable member, so no amount of document-writing produces the
+    claim. Citability is asked of a `RunReport` OBJECT and requires identity
+    membership of the set `run()` populates.
+
+    **The boundary, asserted rather than promised:** serialising a citable
+    report and reading it back yields a document, and the document is only ever
+    well-formed. Crossing that boundary needs decision 17's oracle.
+    """
+
+    def _clean(self, report: RunReport) -> RunReport:
+        """The same report with the two worktree facts forced clean.
+
+        The Governance checkout this suite runs from may legitimately be dirty,
+        and that is a fact about the developer's tree rather than about the
+        predicate. `dataclasses.replace` keeps this OUT of `_PRODUCED`, which is
+        exactly what the first assertion below needs.
+        """
+        return dataclasses.replace(
+            report, governance_worktree_clean=True, product_worktree_clean=True
+        )
+
+    def test_a_hand_built_report_is_not_citable_however_plausible(self) -> None:
+        """The planted violation. Every field is right and it did not run."""
+        self.product.declare(not_applicable())
+        produced = self.go(observer=f"{__name__}:observe_kernel_free")
+        forged = self._clean(produced)
+        verdict, reason = citability(forged)
+        self.assertIs(Citability.NOT_CITABLE, verdict)
+        self.assertIn("not produced by run() in this process", reason)
+
+    def test_a_produced_report_is_citable(self) -> None:
+        """The admit control. Without it the arm above rejects everything.
+
+        Skipped rather than forced when the developer's own checkout is dirty:
+        the substitution that makes the assertion possible is the same
+        substitution the planted violation uses, so it cannot be applied here.
+        CI runs on a clean checkout and that is the run whose verdict is the
+        claim.
+        """
+        self.product.declare(not_applicable())
+        produced = self.go(observer=f"{__name__}:observe_kernel_free")
+        if not produced.governance_worktree_clean:
+            self.skipTest("this Governance checkout is dirty; CI runs on a clean one")
+        verdict, reason = citability(produced)
+        self.assertIs(Citability.CITABLE, verdict, reason)
+        self.assertIn("produced by this run", reason)
+
+    def test_serialising_a_citable_report_yields_only_a_document(self) -> None:
+        """The boundary. A report on disk is not self-authenticating."""
+        self.product.declare(not_applicable())
+        produced = self.go(observer=f"{__name__}:observe_kernel_free")
+        document = json.loads(json.dumps(produced.to_dict()))
+        document["governance"]["worktree_clean"] = True
+        verdict, _ = inspect_report_document(document)
+        self.assertIs(DocumentVerdict.WELL_FORMED, verdict)
+        self.assertNotIn(
+            "citable",
+            {member.value for member in DocumentVerdict},
+            "DocumentVerdict must have no citable member: a value set that "
+            "cannot express the claim is what stops a document making it",
+        )
+
+    def test_a_v1_applicable_run_is_not_citable(self) -> None:
+        """The narrowing ADR 0042 § A8 settled, moved to where it can be true.
+
+        It used to be a condition over a dictionary, so it was satisfied by
+        writing `"applicability": "not_applicable"` into one. It is now read
+        off the declaration the runner itself parsed.
+        """
+        self.product.declare(applicable())
+        produced = self.go()
+        verdict, reason = citability(produced)
+        self.assertIs(Citability.NOT_CITABLE, verdict)
+        self.assertIn("KernelAdoptionDeclaration.v1", reason)
+        self.assertIn("required_surfaces", reason)
+
+
+class V2ApplicableActivationEndToEnd(RunnerTestCase):
+    """The admit control for ACTIVATION itself, through the real runner and CLI.
+
+    Engine-only tests do not prove activation. Every arm proved in
+    `test_kernel_adoption_v2` is a function of inputs somebody handed the
+    engine; the path a product will actually take is `run()` and `main()`, and
+    until it is exercised end to end the claim "a v2 applicable product can be
+    CI-enforced" rests on a composition nobody performed.
+
+    That matters more here than anywhere else in this package, because the
+    failure mode of an unproved activation is a product believing it is
+    enforced when nothing ran. Every previous pass on this package was caught
+    by the same shape -- a rule proved only in the refusing direction.
+
+    Four properties, none of them stubbed:
+
+    1. **A strict predecessor, decided by real Git.** The declaration names the
+       fixture repository's FIRST commit and is then committed on top, so the
+       coordinate is a genuine ancestor of the measured revision and
+       `_predecessor_observation` runs against a real history. No
+       `PredecessorObservation` is constructed anywhere in this class.
+    2. **Produced-report identity.** The report `citability` accepts is the one
+       `run()` returned, identity-present in the set it populated -- item 5's
+       whole claim, exercised on the activation path rather than on a fixture.
+    3. **CITABLE**, which a v1 `applicable` declaration can never be.
+    4. **Exit 0** from `main`, which is what a product's CI step actually reads.
+    """
+
+    def enrol(self) -> Any:
+        """Write and commit a v2 declaration the way a product really would.
+
+        The order is the point and is not an artefact of the fixture. A product
+        commits its source, reads the resulting HEAD, writes that commit into
+        `source_predecessor`, and commits the declaration -- at which point HEAD
+        has moved and the coordinate is strictly behind it. A declaration
+        naming the revision that contains it is not merely refused here; it
+        could not have been written.
+        """
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        self.product.declare(applicable_v2(predecessor))
+        self.product.commit()
+        measured = _git(self.product.root, "rev-parse", "HEAD")
+        self.assertNotEqual(predecessor, measured)
+        return predecessor, measured
+
+    def test_a_v2_applicable_product_runs_clean_and_is_citable(self) -> None:
+        predecessor, measured = self.enrol()
+        result = run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_v2_consumer",
+            as_of=AS_OF,
+        )
+        self.assertEqual([], self.codes(result), result.to_dict())
+        self.assertEqual(measured, result.product_revision)
+
+        # (1) the ancestor check ran for real and decided TRUE.
+        summary = result.to_dict()["product"]["declaration"]
+        self.assertEqual(predecessor, summary["source_predecessor"])
+        self.assertEqual(KERNEL_ADOPTION_CONTRACT_V2, summary["contract"])
+        self.assertEqual("applicable", summary["applicability"])
+
+        # (2)+(3) the produced report is identity-present and citable.
+        if not result.governance_worktree_clean:
+            self.skipTest(
+                "this Governance checkout is dirty; CI runs on a clean one and "
+                "that is the run whose verdict is the claim"
+            )
+        verdict, reason = citability(result)
+        self.assertIs(Citability.CITABLE, verdict, reason)
+        self.assertIn("produced by this run", reason)
+        self.assertIn(KERNEL_ADOPTION_CONTRACT_V2, reason)
+
+    def test_the_cli_exits_zero_for_a_v2_applicable_product(self) -> None:
+        """(4). The exit code is what a product's CI step actually reads.
+
+        A v1 applicable product exits 3 here -- asserted in
+        `TheExitCodeConsultsCitability` -- so this is the difference the
+        successor contract makes, read at the surface a workflow sees.
+        """
+        self.enrol()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            code = main(
+                [
+                    "--root",
+                    str(self.product.root),
+                    "--observer",
+                    f"{__name__}:observe_v2_consumer",
+                    "--as-of",
+                    AS_OF.isoformat(),
+                ]
+            )
+        if code == 3 and "uncommitted changes" in buffer.getvalue():
+            self.skipTest("this Governance checkout is dirty; CI runs on a clean one")
+        self.assertEqual(0, code, buffer.getvalue())
+        self.assertIn("citable as enforcement: citable", buffer.getvalue())
+
+    def test_the_same_product_under_v1_is_not_citable(self) -> None:
+        """The contrast that makes the admit control mean something.
+
+        Same repository, same observation, same clean report -- and a v1
+        `applicable` declaration. It must NOT be citable, or the assertion
+        above is measuring the runner rather than the contract.
+        """
+        self.product.declare(applicable())
+        result = self.go(observer=f"{__name__}:observe_v2_consumer")
+        verdict, reason = citability(result)
+        self.assertIs(Citability.NOT_CITABLE, verdict)
+        self.assertIn("KernelAdoptionDeclaration.v1", reason)
+
+    def test_a_real_non_ancestor_is_refused_end_to_end(self) -> None:
+        """The planted defect against the real probe, not a constructed verdict.
+
+        The predecessor is a genuine commit of this repository -- made on a
+        sibling branch -- which is therefore PRESENT and yet not behind what was
+        measured. That distinction is the one the probe has to get right: an
+        ABSENT commit exits 128 and is reported undecided, so a plant using a
+        fabricated hash would exercise the undecided arm while appearing to
+        exercise this one.
+
+        **Why the equality case is not planted here.** A declaration naming the
+        revision that contains it cannot be produced by a commit flow: writing
+        the declaration and committing it advances HEAD, so the named commit
+        becomes a real ancestor. That is not a gap in this test -- it is the
+        premise the coordinate rests on, "a committed file cannot contain its
+        own commit", showing up as an unreachable state. An earlier draft of
+        this test tried to plant it anyway and silently became a second admit
+        control: it produced NO findings and asserted one. The refutation is
+        unit-tested where it can actually be reached, against a real
+        repository, in `ThePredecessorProbe
+        ::test_the_measured_revision_itself_is_refused`.
+        """
+        self.product.commit()
+        _git(self.product.root, "checkout", "-q", "-b", "sibling")
+        self.product.commit()
+        sibling = _git(self.product.root, "rev-parse", "HEAD")
+        _git(self.product.root, "checkout", "-q", "main")
+        self.product.declare(applicable_v2(sibling))
+        self.product.commit()
+        measured = _git(self.product.root, "rev-parse", "HEAD")
+        self.assertNotEqual(sibling, measured)
+        result = run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_v2_consumer",
+            as_of=AS_OF,
+        )
+        self.assertIn(FindingCode.PREDECESSOR_NOT_ANCESTOR, self.codes(result))
+
+    def test_a_stale_surface_digest_is_refused_end_to_end(self) -> None:
+        """The other coordinate, through the real path: source moved, declaration did not."""
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        body = applicable_v2(predecessor)
+        body["source_surface"] = {
+            "algorithm": SOURCE_SURFACE_ALGORITHM,
+            "digest": "sha256:" + "0" * 64,
+        }
+        self.product.declare(body)
+        self.product.commit()
+        result = run(
+            product_root=self.product.root,
+            observer_reference=f"{__name__}:observe_v2_consumer",
+            as_of=AS_OF,
+        )
+        self.assertIn(FindingCode.SOURCE_SURFACE_DRIFT, self.codes(result))
 
 
 class TheRunnerRunsWhereTheSubjectIs(unittest.TestCase):

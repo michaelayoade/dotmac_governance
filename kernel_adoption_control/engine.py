@@ -40,6 +40,7 @@ from pathlib import PurePosixPath
 
 from .contracts import (
     AdoptionReport,
+    AnyKernelAdoptionDeclaration,
     DeclarationEmpty,
     DeclarationIncomplete,
     DeclarationMissing,
@@ -48,12 +49,17 @@ from .contracts import (
     Finding,
     FindingCode,
     KernelAdoptionApplicability,
+    KernelAdoptionDeclarationV2,
     KernelAdoptionInputs,
+    KernelSurfaceCatalogue,
+    RequiredSurface,
     Severity,
     TransitionalSurface,
 )
+from .surface import SurfaceFact, catalogue_digest, render_surface, surface_digest
+from .versions import VersionError, compare_versions
 
-__all__ = ["KERNEL_ROOT", "REFUSAL_CODES", "evaluate"]
+__all__ = ["KERNEL_ROOT", "REFUSAL_CODES", "evaluate", "observed_surface"]
 
 #: Four refusals, four codes, one shared consequence. The consequence is shared
 #: because it is the same in all four cases -- nothing downstream can be
@@ -219,9 +225,13 @@ def _pin_sufficiency(inputs: KernelAdoptionInputs) -> list[Finding]:
     catch it.
 
     - **applicable** -- two or more INDEPENDENT observations, where independence
-      is a distinct `(path, line)`. Two entries at one line are one observation
-      written twice, and a disagreement between a value and itself is not
-      detectable. Fewer is an ERROR.
+      is a distinct NORMALISED `(path, line)`. Two entries at one line are one
+      observation written twice, and a disagreement between a value and itself
+      is not detectable. Fewer is an ERROR. The normalization is decision
+      52 (E)'s repair and is load-bearing here rather than tidy: the paths are
+      caller-supplied, and before it `pyproject.toml` and
+      `x/../pyproject.toml` were two independent observations of one line. See
+      `contracts.normalise_observed_path`.
     - **not_applicable** -- zero pin sites AND zero Kernel imports. A repository
       declaring it consumes no Kernel while pinning the Kernel has stated a
       premise its own packaging contradicts, which is the same fault as
@@ -255,7 +265,7 @@ def _pin_sufficiency(inputs: KernelAdoptionInputs) -> list[Finding]:
                 line=sites[0].line,
             )
         ]
-    independent = {(site.path, site.line) for site in sites}
+    independent = {site.independence_key for site in sites}
     if len(independent) >= 2:
         return []
     return [
@@ -274,7 +284,7 @@ def _pin_sufficiency(inputs: KernelAdoptionInputs) -> list[Finding]:
 
 def _check_pins(inputs: KernelAdoptionInputs) -> list[Finding]:
     sites = inputs.pin_sites
-    if len({(site.path, site.line) for site in sites}) < 2:
+    if len({site.independence_key for site in sites}) < 2:
         # Sufficiency is `_pin_sufficiency`'s question now, and it answers with
         # an error or with nothing. Returning silently here would be silence
         # only in the arm that cannot run; it is never the whole verdict.
@@ -439,10 +449,466 @@ def _check_transitional(
     return findings
 
 
+# --- KernelAdoptionDeclaration.v2 arms ---------------------------------------
+#
+# Everything below reads a field v1 declared and nothing compared. Each arm is
+# a function of `inputs` alone: the Git observation the predecessor arm needs
+# arrives as `inputs.predecessor`, supplied by the runner, so the engine keeps
+# reading nothing but what it was told.
+
+
+def _check_declared_at(
+    declaration: KernelAdoptionDeclarationV2, as_of: date
+) -> list[Finding]:
+    """Decision 52 (D). A declaration has an age, and two things follow from it.
+
+    Only the two that are decidable WITHOUT inventing a policy number are
+    checked here. Whether a declaration older than some number of days is
+    stale enough to refuse is a decision with an owner, and this file is not
+    where a threshold gets invented -- see `declaration_contract_v2`'s
+    "What v2 deliberately does NOT add".
+    """
+    if declaration.declared_at > as_of:
+        return [
+            _error(
+                FindingCode.DECLARED_AT_AHEAD,
+                f"the declaration states declared_at "
+                f"{declaration.declared_at.isoformat()} and the run is asked "
+                f"about {as_of.isoformat()}. A declaration cannot have been "
+                "written after the run that reads it; either the date is wrong "
+                "or the run date is, and neither may be assumed",
+            )
+        ]
+    return []
+
+
+def _check_predecessor(inputs: KernelAdoptionInputs) -> list[Finding]:
+    """Decision 52 (A), the half a digest cannot do: anchoring in real history.
+
+    **What a satisfied predecessor proves.** The commit the declaration names
+    exists in the measured repository's own history and is STRICTLY behind the
+    revision that was measured. A fabricated hash fails, a hash from another
+    repository fails, and a hash that is the measured revision itself fails --
+    which it must, because a committed file cannot contain its own commit, so
+    a declaration claiming to name it is claiming something impossible.
+
+    **What it does not prove.** Not that the declaration was written at that
+    commit, nor that anything about that commit is related to the declaration,
+    nor that the surface it describes was the surface at that commit. A product
+    may name its repository's first commit and satisfy this forever. The
+    coordinate that binds the declaration to the SOURCE is the surface digest;
+    this one binds it to the repository. Neither is the other, and both are
+    required for exactly that reason.
+
+    **A run that cannot decide is a refusal.** A shallow clone -- the default
+    for `actions/checkout` -- makes ancestry undecidable, and the repair is
+    `fetch-depth: 0`. Reading it as satisfied would be the coordinate reporting
+    a colour.
+    """
+    observation = inputs.predecessor
+    if observation is None:
+        return [
+            _error(
+                FindingCode.PREDECESSOR_UNVERIFIABLE,
+                "the declaration states a source_predecessor and this run was "
+                "given no ancestry observation for it, so whether that commit "
+                "precedes what was measured is unknown. The runner supplies "
+                "this; an engine called directly without it must not report "
+                "the coordinate clean",
+            )
+        ]
+    if observation.is_strict_ancestor is None:
+        return [
+            _error(
+                FindingCode.PREDECESSOR_UNVERIFIABLE,
+                f"whether {observation.declared} precedes the measured "
+                f"{observation.measured} could not be decided: "
+                f"{observation.detail}. A shallow clone is the usual cause and "
+                "`fetch-depth: 0` the usual repair. An undecidable coordinate "
+                "is unmonitored, never satisfied",
+            )
+        ]
+    if observation.is_strict_ancestor:
+        return []
+    return [
+        _error(
+            FindingCode.PREDECESSOR_NOT_ANCESTOR,
+            f"the declaration names source_predecessor "
+            f"{observation.declared}, which is not a strict ancestor of the "
+            f"measured revision {observation.measured}: {observation.detail}. "
+            "The coordinate names a commit this repository's history does not "
+            "put behind what was measured, so the declaration is not anchored "
+            "in the source it describes",
+        )
+    ]
+
+
+def _check_source_surface(
+    declaration: KernelAdoptionDeclarationV2, facts: frozenset[SurfaceFact]
+) -> list[Finding]:
+    """Decision 52 (A), the half that is re-derived rather than named.
+
+    See `surface.surface_digest` for exactly what the digest is taken over,
+    what it proves and the five things it does not.
+    """
+    coordinate = declaration.source_surface
+    if coordinate is None:
+        # Unreachable through the parser, which requires the field of every
+        # `applicable` v2 document. Kept because a caller may build the
+        # dataclass directly, and a missing coordinate must fail closed rather
+        # than skip the arm.
+        return [
+            _error(
+                FindingCode.SOURCE_SURFACE_DRIFT,
+                "this applicable declaration states no source_surface, so the "
+                "source it describes cannot be identified. Refusing to read an "
+                "absent coordinate as a matching one",
+            )
+        ]
+    if not facts:
+        return [
+            _error(
+                FindingCode.SURFACE_NONE_OBSERVED,
+                "this declaration is 'applicable' and the measured source "
+                "contains no dotmac_kernel import at all. The surface digest "
+                "of an empty set is a CONSTANT that every Kernel-free product "
+                "shares, so a declaration matching it would have matched "
+                "nothing in particular. Either the product does not adopt the "
+                "Kernel -- in which case it declares not_applicable, whose "
+                "premise is checked -- or the observation is not reaching its "
+                "source",
+            )
+        ]
+    derived = surface_digest(facts)
+    if derived == coordinate.digest:
+        return []
+    return [
+        _error(
+            FindingCode.SOURCE_SURFACE_DRIFT,
+            f"the declaration states source_surface {coordinate.digest} under "
+            f"{coordinate.algorithm}, and the measured source renders to "
+            f"{derived} over {len(facts)} Kernel-surface fact(s). The "
+            "declaration was written against a different Kernel surface than "
+            "the one it is being applied to, so its classifications describe "
+            "source that is not this source. Re-derive the coordinate in the "
+            "change that moved the imports -- that edit is the review the "
+            "coordinate exists to force",
+        )
+    ]
+
+
+def _check_catalogue_binding(
+    declaration: KernelAdoptionDeclarationV2, catalogue: KernelSurfaceCatalogue | None
+) -> list[Finding]:
+    """Decision 52 (B). Which Kernel was declared, and which one was measured.
+
+    Before this arm, `kernel_catalogue` was required, syntax-checked and
+    compared with NOTHING, while the catalogue every surface verdict was taken
+    against arrived separately from the observer. A product could declare
+    Kernel `0.1.0a98` and hand the run `0.1.0a50`'s module lists, and the
+    unknown-surface arm would answer against lists nobody had bound to the
+    declared version.
+
+    Four comparisons, and the fourth is the one that makes the first three mean
+    something: version, peeled revision, distribution artifact digest, and a
+    digest over the module LISTS themselves.
+    """
+    binding = declaration.kernel_catalogue
+    if binding is None:
+        return [
+            _error(
+                FindingCode.CATALOGUE_UNBOUND,
+                "this applicable declaration binds no kernel_catalogue, so "
+                "which Kernel its surface classifications are about is "
+                "unstated",
+            )
+        ]
+    if catalogue is None:
+        return [
+            _error(
+                FindingCode.CATALOGUE_UNBOUND,
+                f"the declaration binds {KERNEL_ROOT} {binding.version} at "
+                f"{binding.revision} and this run was given no surface "
+                "catalogue, so the binding could not be checked and no import "
+                "could be classified. An applicable declaration is measured "
+                "against a catalogue or it is not measured",
+            )
+        ]
+    if not catalogue.known:
+        return [
+            _error(
+                FindingCode.CATALOGUE_EMPTY,
+                f"the supplied {KERNEL_ROOT} catalogue publishes no modules at "
+                "all. Every import would be classified against an empty set, "
+                "which is not a measurement of anything. A catalogue with no "
+                "names is a catalogue that was not read",
+            )
+        ]
+    findings: list[Finding] = []
+    if catalogue.version != binding.version:
+        findings.append(
+            _error(
+                FindingCode.CATALOGUE_DISAGREES,
+                f"the declaration binds {KERNEL_ROOT} {binding.version} and "
+                f"the catalogue supplied is {catalogue.version}. The surfaces "
+                "were classified against one Kernel and are being measured "
+                "against another",
+            )
+        )
+    if catalogue.revision != binding.revision:
+        findings.append(
+            _error(
+                FindingCode.CATALOGUE_DISAGREES,
+                f"the declaration binds catalogue revision {binding.revision} "
+                f"and the catalogue supplied was read at {catalogue.revision}. "
+                "A version string is a name; the peeled commit is the bytes, "
+                "and these are not the same bytes",
+            )
+        )
+    if catalogue.artifact_digest is None:
+        findings.append(
+            _error(
+                FindingCode.CATALOGUE_UNBOUND,
+                f"the declaration binds artifact digest {binding.artifact_digest} "
+                "and the observer supplied a catalogue carrying none, so the "
+                "distribution the product actually resolved is unobserved. "
+                "This is a repository-local read -- a lock file entry -- and "
+                "not a registry attestation, but an unread one buys silence "
+                "for the field that names the bytes",
+            )
+        )
+    elif catalogue.artifact_digest != binding.artifact_digest:
+        findings.append(
+            _error(
+                FindingCode.CATALOGUE_DISAGREES,
+                f"the declaration binds artifact digest "
+                f"{binding.artifact_digest} and the observer read "
+                f"{catalogue.artifact_digest} out of this product's own "
+                "resolution. The declaration describes a distribution the "
+                "product is not installing",
+            )
+        )
+    derived = catalogue_digest(
+        version=catalogue.version,
+        revision=catalogue.revision,
+        supported=catalogue.supported,
+        internal=catalogue.internal,
+    )
+    if derived != binding.catalogue_digest:
+        findings.append(
+            _error(
+                FindingCode.CATALOGUE_DISAGREES,
+                f"the declaration binds catalogue_digest "
+                f"{binding.catalogue_digest} and the supplied catalogue -- "
+                f"{len(catalogue.supported)} supported and "
+                f"{len(catalogue.internal)} internal name(s) -- digests to "
+                f"{derived}. This is the comparison the other three cannot "
+                "make: without it a product may state the right version and "
+                "hand the run another Kernel's module lists, and every surface "
+                "verdict is taken against a catalogue nobody bound",
+            )
+        )
+    return findings
+
+
+def _floor_findings(
+    surface: RequiredSurface, catalogue_version: str | None
+) -> list[Finding]:
+    """Is the declared floor satisfied by the Kernel the declaration binds?"""
+    if catalogue_version is None:
+        return []
+    try:
+        order = compare_versions(
+            surface.floor,
+            catalogue_version,
+            where=f"required floor for {surface.module}",
+        )
+    except VersionError as error:
+        return [
+            _error(
+                FindingCode.REQUIRED_FLOOR_UNORDERABLE,
+                f"{surface.module} declares a floor that cannot be ordered "
+                f"against the bound Kernel version: {error}. A floor nobody "
+                "can compare is a number somebody typed, which is the state "
+                "this arm exists to end",
+            )
+        ]
+    if order <= 0:
+        return []
+    return [
+        _error(
+            FindingCode.REQUIRED_FLOOR_UNSATISFIED,
+            f"{surface.module} declares floor {surface.floor} and this "
+            f"declaration binds {KERNEL_ROOT} {catalogue_version}, which is "
+            "lower. The product states it needs a Kernel it is not composing: "
+            "either the floor is aspirational or the pin is behind it, and "
+            "which one is a fact somebody has to state",
+        )
+    ]
+
+
+def _check_required_surfaces(
+    declaration: KernelAdoptionDeclarationV2,
+    catalogue: KernelSurfaceCatalogue | None,
+    observed_modules: frozenset[str],
+    sources: dict[PurePosixPath, str],
+) -> list[Finding]:
+    """Decision 52 (C). `module`, `floor` and `proven_by` each compared to something.
+
+    Five questions, and the fifth runs in the opposite direction from the rest
+    because a one-directional inventory is a sample:
+
+    1. Is the module one the bound Kernel PUBLISHES? A required dependency on a
+       name the Kernel does not carry is a dependency on nothing.
+    2. Is it IMPORTED? A declared dependency with no use is a field somebody
+       wrote and nothing reads -- this package's own subject.
+    3. Is the floor SATISFIED by the bound Kernel version?
+    4. Is `proven_by` a path the run actually READ? A proof that cannot be
+       opened is not a proof.
+    5. Is every imported Kernel module CLASSIFIED as something? This is what
+       turns `required_surfaces` from a list of whatever the author remembered
+       into an inventory, and it is the arm that will bite on real products.
+
+    The `proven_by` arm's second half is the weakest thing here and is labelled
+    as such rather than dressed up: it checks that the named file MENTIONS the
+    module it is offered as proof of. That establishes the proof is about the
+    right subject. It does not establish that the file proves anything, and no
+    check at this layer can -- a test's meaning is not readable from its text.
+    """
+    findings: list[Finding] = []
+    version = None if catalogue is None else catalogue.version
+    for surface in declaration.required_surfaces:
+        if catalogue is not None and surface.module not in catalogue.known:
+            findings.append(
+                _error(
+                    FindingCode.REQUIRED_UNPUBLISHED,
+                    f"{surface.module} is declared required and "
+                    f"{KERNEL_ROOT} {catalogue.version} does not publish it. "
+                    f"Its lists were read at {catalogue.revision} and carry "
+                    f"{len(catalogue.supported)} supported and "
+                    f"{len(catalogue.internal)} internal name(s). A required "
+                    "surface that is not in the Kernel is either a typo or a "
+                    "dependency on something that was removed",
+                )
+            )
+        if surface.module not in observed_modules:
+            findings.append(
+                _error(
+                    FindingCode.REQUIRED_UNUSED,
+                    f"{surface.module} is declared required with floor "
+                    f"{surface.floor}, and no measured source imports it. A "
+                    "declared dependency nothing uses is the defect this "
+                    "package exists to catch, arriving inside a declaration: "
+                    "the floor it carries constrains the pin for a reason that "
+                    "no longer exists. Remove the entry, or the import it "
+                    "described is not being measured",
+                )
+            )
+        findings.extend(_floor_findings(surface, version))
+        proof = sources.get(surface.proven_by)
+        if proof is None:
+            findings.append(
+                _error(
+                    FindingCode.REQUIRED_PROOF_UNREAD,
+                    f"{surface.module} names {surface.proven_by.as_posix()} as "
+                    "the proof of its floor, and this run did not read that "
+                    "path. A floor with an unreadable proof is a number "
+                    "somebody typed. Either the path is wrong or the "
+                    "observation does not cover it -- and a proof outside the "
+                    "measured inventory is a proof nobody can check",
+                    path=surface.proven_by,
+                )
+            )
+        elif surface.module not in proof:
+            findings.append(
+                _error(
+                    FindingCode.REQUIRED_PROOF_SILENT,
+                    f"{surface.module} names {surface.proven_by.as_posix()} as "
+                    "the proof of its floor, and that file never mentions the "
+                    "module. This is the weakest of the proof arms and claims "
+                    "only what it checks: a proof must at least be about its "
+                    "subject. Whether it proves the floor is not readable from "
+                    "the text and is not asserted here",
+                    path=surface.proven_by,
+                )
+            )
+
+    classified = (
+        {item.module for item in declaration.required_surfaces}
+        | {item.module for item in declaration.transitional_surfaces}
+        | set(declaration.prohibited_modules)
+    )
+    for module in sorted(observed_modules - classified):
+        findings.append(
+            _error(
+                FindingCode.SURFACE_UNCLASSIFIED,
+                f"the measured source imports {module} and this declaration "
+                "classifies it as nothing -- not required, not transitional, "
+                "not prohibited. required_surfaces is an INVENTORY of what the "
+                "product depends on, not a sample of what its author "
+                "remembered: an unclassified import carries no floor, no "
+                "retirement date and no prohibition, so nothing about it is "
+                "measured and a clean run would say otherwise",
+            )
+        )
+    return findings
+
+
+def _check_expiry_against_declaration(
+    declaration: KernelAdoptionDeclarationV2,
+) -> list[Finding]:
+    """A retirement deadline that had already passed when it was written.
+
+    Decidable from the document alone, with no staleness policy and no clock:
+    if `expiry < declared_at`, the undertaking was overdue on the day somebody
+    undertook it. That is the shape a COPIED declaration takes -- the dates
+    came with the file -- and it is exactly the case the run-date comparison
+    cannot distinguish from an honest deadline that later lapsed.
+    """
+    findings: list[Finding] = []
+    for surface in declaration.transitional_surfaces:
+        try:
+            expiry = date.fromisoformat(surface.expiry)
+        except ValueError:
+            # `_check_expiry` already refuses an unorderable expiry, with the
+            # code whose repair is fixing the date. Reporting it twice under
+            # two codes would send one reader to two edits.
+            continue
+        if expiry >= declaration.declared_at:
+            continue
+        findings.append(
+            _error(
+                FindingCode.TRANSITIONAL_EXPIRY_PREDATES_DECLARATION,
+                f"{surface.module} is classified transitional with expiry "
+                f"{surface.expiry}, and this declaration was written on "
+                f"{declaration.declared_at.isoformat()} -- the deadline had "
+                f"already passed by {(declaration.declared_at - expiry).days} "
+                "day(s) when it was undertaken. A date that was never in the "
+                "future is not a commitment; it is a date that came with a "
+                "copied file",
+            )
+        )
+    return findings
+
+
+def observed_surface(
+    facts: frozenset[SurfaceFact],
+) -> tuple[str, str]:
+    """The derived digest and its canonical rendering. For diagnosis and tooling.
+
+    A product writing its declaration for the first time needs the value the
+    runner will compare against, and it must come from the runner rather than
+    from a hand-rolled second implementation -- two renderings of one surface
+    is the drift this whole coordinate exists to prevent.
+    """
+    return surface_digest(facts), render_surface(facts)
+
+
 def _check_declaration(
     inputs: KernelAdoptionInputs,
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
     observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
+    facts: frozenset[SurfaceFact],
 ) -> list[Finding]:
     """Arms 4, 6 and 7, and the five states the declaration can be in.
 
@@ -483,7 +949,12 @@ def _check_declaration(
             )
         ]
 
-    declaration = outcome.declaration
+    declaration: AnyKernelAdoptionDeclaration = outcome.declaration
+    if isinstance(declaration, KernelAdoptionDeclarationV2):
+        return _check_v2(
+            inputs, declaration, kernel_import_sites, observed_symbols, facts
+        )
+
     #: `product_revision` is REQUIRED of every declaration, `not_applicable`
     #: included, and nothing in this package compares it with the revision the
     #: run measured. Disclosed on both paths rather than only the applicable
@@ -539,6 +1010,30 @@ def _check_declaration(
             "exists an 'applicable' run is not citable as enforcement",
         )
     ]
+    findings.extend(
+        _check_applicable_common(
+            declaration, kernel_import_sites, observed_symbols, inputs.as_of
+        )
+    )
+    return findings
+
+
+def _check_applicable_common(
+    declaration: AnyKernelAdoptionDeclaration,
+    kernel_import_sites: list[tuple[PurePosixPath, int, str]],
+    observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
+    as_of: date,
+) -> list[Finding]:
+    """The arms an `applicable` declaration gets under EITHER contract.
+
+    Prohibition and the transitional ratchet were already honest in v1 -- they
+    read fields and compare them to source -- so v2 does not reimplement them.
+    Extracted rather than duplicated: two copies of the prohibition arm would
+    be two places for a product to be measured differently depending on which
+    contract it wrote, which is the per-product adapter this package refuses,
+    wearing a version number.
+    """
+    findings: list[Finding] = []
     citations = {item.module: item.citation for item in declaration.prohibited_surfaces}
     prohibited = declaration.prohibited_modules
     for path, line, module in kernel_import_sites:
@@ -561,8 +1056,68 @@ def _check_declaration(
             )
         )
     findings.extend(
-        _check_transitional(
-            declaration.transitional_surfaces, observed_symbols, inputs.as_of
+        _check_transitional(declaration.transitional_surfaces, observed_symbols, as_of)
+    )
+    return findings
+
+
+def _check_v2(
+    inputs: KernelAdoptionInputs,
+    declaration: KernelAdoptionDeclarationV2,
+    kernel_import_sites: list[tuple[PurePosixPath, int, str]],
+    observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
+    facts: frozenset[SurfaceFact],
+) -> list[Finding]:
+    """Everything a `KernelAdoptionDeclaration.v2` document is measured against.
+
+    There is NO `kernel.declaration.fields-unevaluated` notice on this path,
+    and its absence is the whole claim of the successor contract: every field
+    v2 requires is read by an arm below. The notice remains on the v1 path,
+    because a v1 `applicable` declaration still carries three fields nothing
+    compares and is still non-citable.
+
+    The prelude runs for BOTH applicability values. A `not_applicable` v2
+    declaration still states `declared_at` and `source_predecessor`, and a
+    field required of a document is read wherever the document is read -- the
+    one thing this package cannot do is require a field on a path where nothing
+    looks at it.
+    """
+    findings: list[Finding] = []
+    findings.extend(_check_declared_at(declaration, inputs.as_of))
+    findings.extend(_check_predecessor(inputs))
+
+    if declaration.applicability is KernelAdoptionApplicability.NOT_APPLICABLE:
+        if not kernel_import_sites:
+            return findings
+        path, line, module = kernel_import_sites[0]
+        findings.append(
+            _error(
+                FindingCode.DECLARATION_PREMISE_FALSE,
+                f"the declaration states applicability 'not_applicable' — "
+                f"{declaration.not_applicable_reason!r} — but this repository "
+                f"imports {module}, at {path.as_posix()}:{line}, and "
+                f"{len(kernel_import_sites)} Kernel import(s) in total. An "
+                "exemption states an ENFORCEABLE premise; this one is "
+                "contradicted by the repository's own source, so the "
+                "classification cannot stand and the surface arms do not run",
+                path=path,
+                line=line,
+            )
+        )
+        return findings
+
+    observed_modules = frozenset(fact.module for fact in facts)
+    findings.extend(_check_source_surface(declaration, facts))
+    findings.extend(_check_catalogue_binding(declaration, inputs.catalogue))
+    findings.extend(
+        _check_required_surfaces(
+            declaration, inputs.catalogue, observed_modules, inputs.sources
+        )
+    )
+    findings.extend(_check_expiry_against_declaration(declaration))
+    findings.extend(
+        _check_applicable_common(
+            declaration, kernel_import_sites, observed_symbols, inputs.as_of
         )
     )
     return findings
@@ -576,6 +1131,13 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     findings: list[Finding] = []
     kernel_import_sites: list[tuple[PurePosixPath, int, str]] = []
     observed_symbols: dict[str, set[tuple[PurePosixPath, str]]] = {}
+    #: One entry per (file, Kernel module), MERGED across statements. Two
+    #: imports of one module in one file are one fact carrying the union of
+    #: what they bound, so splitting a `from x import a, b` in two does not
+    #: move the source-surface digest. See `surface` for the rest of the
+    #: canonicalization and for what the digest does not prove.
+    surface_symbols: dict[tuple[PurePosixPath, str], set[str]] = defaultdict(set)
+    surface_star: set[tuple[PurePosixPath, str]] = set()
     catalogue = inputs.catalogue
 
     if not inputs.sources:
@@ -617,6 +1179,9 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             observed_symbols.setdefault(module, set()).update(
                 (path, name) for name in entry.bound
             )
+            surface_symbols[(path, module)].update(entry.bound)
+            if entry.star:
+                surface_star.add((path, module))
 
             private = _private_components(module)
             if private:
@@ -702,6 +1267,16 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                 )
             )
 
+    facts = frozenset(
+        SurfaceFact(
+            path=path,
+            module=module,
+            symbols=tuple(sorted(symbols)),
+            star=(path, module) in surface_star,
+        )
+        for (path, module), symbols in surface_symbols.items()
+    )
+
     findings.extend(_check_pins(inputs))
     findings.extend(_pin_sufficiency(inputs))
     findings.extend(
@@ -709,6 +1284,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             inputs,
             kernel_import_sites,
             {key: frozenset(value) for key, value in observed_symbols.items()},
+            facts,
         )
     )
 

@@ -1,0 +1,1444 @@
+"""`KernelAdoptionDeclaration.v2`, proved by planted defects and admit controls.
+
+Open decision 52 (A)-(E). Every arm below reads a field v1 declared and nothing
+compared, and no arm's health is inferred from a green run: each is established
+by planting the defect and reading the diagnostic, then planting the thing that
+merely LOOKS like it and reading the silence, then satisfying the arm and
+reading the silence again.
+
+**The admit controls are not decoration.** A rule observed only refusing is
+indistinguishable from one that refuses everything, and #81 shipped five passes
+with three of them finding exactly that shape. Every arm that can be satisfied
+has a case that satisfies it.
+
+## What the Platform subject at the end of this file demonstrates, exactly
+
+`ThePlatformSubject` measures the REAL Kernel surface of
+`michaelayoade/dotmac_platform_control_plane` at `origin/main`
+`f8865b1a43a6d6769d5fa3a3ab3eddfdf296cffb` -- 17 modules, 85 symbols, and the
+eleven `dotmac_kernel.db` sites across fourteen `(path, symbol)` pairs including
+`src/vendor_cp/rotation_runtime_oracle.pyprogram`, which is not a `.py` file.
+Those facts are in `tests/fixtures/platform-kernel-surface.json`, measured by an
+AST sweep over `git show origin/main:<path>`.
+
+**What it establishes:** the contract ADMITS a real product. A declaration with
+a real product's shape -- seventeen classified modules, a fourteen-pair
+retirement baseline, a real floor, two real pin sites, a real wheel digest --
+passes every arm with no findings. That is the property a suite of refusals
+cannot establish about itself.
+
+**What it does not establish, stated rather than left to be assumed:**
+
+- **It is not Platform's declaration.** Platform has no
+  `.dotmac/kernel-adoption.json`, Governance does not write in product
+  repositories, and this file does not create one. What is demonstrated is that
+  the contract has room for the declaration Platform would write.
+- **The source is SYNTHESISED from the measured facts**, one import statement
+  per fact, rather than being Platform's source. So this shows the contract
+  admits the SHAPE; it does not re-derive Platform's inventory, and the surface
+  digest here is a digest of the fixture, which is why the fixture records how
+  it was measured.
+- **It is not a run.** No runner executed against Platform, no report was
+  produced, and nothing here may be cited as Platform being CI-enforced. Under
+  ADR 0013 § 1 a claim about another repository needs an oracle; the run
+  happens in Platform's own CI or it does not happen.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import tempfile
+import unittest
+from datetime import date
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from kernel_adoption_control import (
+    DeclarationPresent,
+    DeclarationUnreadable,
+    FindingCode,
+    KernelSurfaceCatalogue,
+    PinSite,
+    Severity,
+    catalogue_digest,
+    evaluate,
+    parse_any_declaration,
+    parse_declaration,
+    surface_digest,
+)
+from kernel_adoption_control.contracts import (
+    KernelAdoptionInputs,
+    PredecessorObservation,
+    normalise_observed_path,
+)
+from kernel_adoption_control.declaration_contract import (
+    KERNEL_ADOPTION_CONTRACT,
+    DeclarationError,
+    IncompleteDeclarationError,
+)
+from kernel_adoption_control.declaration_contract_v2 import (
+    KERNEL_ADOPTION_CONTRACT_V2,
+    KernelAdoptionDeclarationV2,
+    parse_declaration_v2,
+)
+from kernel_adoption_control.runner import _predecessor_observation
+from kernel_adoption_control.surface import SOURCE_SURFACE_ALGORITHM, SurfaceFact
+from kernel_adoption_control.versions import VersionError, compare_versions
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+TODAY = date(2026, 9, 6)
+#: Two peeled commits used as coordinates. Neither is real, which is why every
+#: test that needs ANCESTRY to be decided supplies a `PredecessorObservation`
+#: rather than a repository -- the engine is a pure function of its inputs, and
+#: the probe that produces those inputs has its own tests against a real
+#: repository in `ThePredecessorProbe`.
+PREDECESSOR = "1" * 40
+MEASURED = "2" * 40
+KERNEL_REVISION = "ae7320876ad91d5bf4639d634d65a6e8fd36bb00"
+WHEEL = (
+    "sha256:" + "27405c57c4af395224cdd2f4366c0144207e9df2eab4ca8a8ed1142c1d0859fa"[:64]
+)
+
+ANCESTOR_OK = PredecessorObservation(
+    declared=PREDECESSOR,
+    measured=MEASURED,
+    is_strict_ancestor=True,
+    detail="fixture: decided",
+)
+
+
+def catalogue(
+    supported: frozenset[str],
+    *,
+    version: str = "0.1.0a98",
+    revision: str = KERNEL_REVISION,
+    internal: frozenset[str] = frozenset(),
+    artifact_digest: str | None = WHEEL,
+) -> KernelSurfaceCatalogue:
+    """A catalogue fixture. Production callers pass the Kernel's real lists."""
+    return KernelSurfaceCatalogue(
+        revision=revision,
+        version=version,
+        supported=supported,
+        internal=internal,
+        artifact_digest=artifact_digest,
+    )
+
+
+def binding(item: KernelSurfaceCatalogue, **overrides: str) -> dict[str, object]:
+    """The `kernel_catalogue` block that AGREES with `item`, before overrides."""
+    document: dict[str, object] = {
+        "version": item.version,
+        "revision": item.revision,
+        "artifact_digest": item.artifact_digest or WHEEL,
+        "catalogue_digest": catalogue_digest(
+            version=item.version,
+            revision=item.revision,
+            supported=item.supported,
+            internal=item.internal,
+        ),
+    }
+    document.update(overrides)
+    return document
+
+
+def facts_of(sources: dict[PurePosixPath, str]) -> frozenset[SurfaceFact]:
+    """The surface facts `evaluate` would derive, derived the same way.
+
+    Deliberately re-uses the engine rather than reimplementing the sweep: two
+    renderings of one surface is precisely the drift the coordinate exists to
+    prevent, and a test that computed its own would be the second one.
+    """
+    probe = evaluate(
+        KernelAdoptionInputs(
+            sources=sources,
+            catalogue=None,
+            declaration=DeclarationUnreadable("probe"),
+            as_of=TODAY,
+        )
+    )
+    del probe
+    from kernel_adoption_control import engine as _engine
+
+    collected: dict[tuple[PurePosixPath, str], set[str]] = {}
+    stars: set[tuple[PurePosixPath, str]] = set()
+    import ast as _ast
+
+    for path, text in sources.items():
+        tree = _ast.parse(text, filename=path.as_posix())
+        for entry in _engine._kernel_imports(tree):
+            collected.setdefault((path, entry.module), set()).update(entry.bound)
+            if entry.star:
+                stars.add((path, entry.module))
+    return frozenset(
+        SurfaceFact(
+            path=path,
+            module=module,
+            symbols=tuple(sorted(symbols)),
+            star=(path, module) in stars,
+        )
+        for (path, module), symbols in collected.items()
+    )
+
+
+def v2_document(
+    sources: dict[PurePosixPath, str],
+    item: KernelSurfaceCatalogue,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """A v2 `applicable` document that AGREES with the source, before overrides.
+
+    Built from the measurement rather than hand-typed, so every test below
+    starts from a document that PASSES and plants exactly one defect. A
+    hand-typed baseline drifts, and the day it drifts every planted-defect test
+    still passes while proving nothing.
+    """
+    document: dict[str, Any] = {
+        "contract": KERNEL_ADOPTION_CONTRACT_V2,
+        "applicability": "applicable",
+        "declared_at": "2026-09-01",
+        "source_predecessor": PREDECESSOR,
+        "source_surface": {
+            "algorithm": SOURCE_SURFACE_ALGORITHM,
+            "digest": surface_digest(facts_of(sources)),
+        },
+        "kernel_catalogue": binding(item),
+        "required_surfaces": [],
+        "prohibited_surfaces": [],
+        "transitional_surfaces": [],
+    }
+    document.update(overrides)
+    return document
+
+
+def report(
+    document: dict[str, Any],
+    sources: dict[PurePosixPath, str],
+    item: KernelSurfaceCatalogue | None,
+    *,
+    predecessor: PredecessorObservation | None = ANCESTOR_OK,
+    pin_sites: tuple[PinSite, ...] = (
+        PinSite(PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"),
+        PinSite(PurePosixPath("poetry.lock"), 430, "0.1.0a98", "lock resolution"),
+    ),
+    as_of: date = TODAY,
+) -> tuple[FindingCode, ...]:
+    parsed = parse_any_declaration(document)
+    return evaluate(
+        KernelAdoptionInputs(
+            sources=sources,
+            catalogue=item,
+            declaration=DeclarationPresent(parsed),
+            as_of=as_of,
+            pin_sites=pin_sites,
+            predecessor=predecessor,
+        )
+    ).codes()
+
+
+# ── the smallest source that is an applicable subject ────────────────────────
+ONE_IMPORT = {
+    PurePosixPath("src/app/service.py"): "from dotmac_kernel.messaging import publish\n"
+}
+ONE_MODULE = catalogue(frozenset({"dotmac_kernel.messaging"}))
+REQUIRED_ONE = [
+    {
+        "module": "dotmac_kernel.messaging",
+        "floor": "0.1.0a90",
+        "proven_by": "src/app/service.py",
+    }
+]
+
+
+class Base(unittest.TestCase):
+    def assertNamed(self, codes: tuple[FindingCode, ...], code: FindingCode) -> None:
+        self.assertIn(
+            code, codes, f"expected {code.value}, got {[c.value for c in codes]}"
+        )
+
+    def assertSilent(self, codes: tuple[FindingCode, ...], code: FindingCode) -> None:
+        self.assertNotIn(
+            code,
+            codes,
+            f"{code.value} fired on a near-miss: {[c.value for c in codes]}",
+        )
+
+    def assertClean(self, codes: tuple[FindingCode, ...]) -> None:
+        self.assertEqual((), codes, [c.value for c in codes])
+
+
+class V1IsFrozenAndStillReadable(Base):
+    """The successor is a successor, not an edit. Both documents stay parseable."""
+
+    def v1(self) -> dict[str, Any]:
+        return {
+            "contract": KERNEL_ADOPTION_CONTRACT,
+            "product_revision": PREDECESSOR,
+            "applicability": "not_applicable",
+            "not_applicable_reason": "imports no Kernel",
+        }
+
+    def test_a_v1_declaration_is_still_admitted(self) -> None:
+        """The regression this whole change could most easily have caused."""
+        parsed = parse_any_declaration(self.v1())
+        self.assertEqual(KERNEL_ADOPTION_CONTRACT, parsed.contract)
+
+    def test_this_repositorys_own_declaration_is_still_admitted(self) -> None:
+        """The production subject, not a fixture of it.
+
+        #81's citable claim rests on this file parsing and its premise being
+        evaluated. A successor contract that broke it would have retracted an
+        accepted claim silently.
+        """
+        root = Path(__file__).resolve().parent.parent
+        document = json.loads(
+            (root / ".dotmac" / "kernel-adoption.json").read_text(encoding="utf-8")
+        )
+        parsed = parse_any_declaration(document)
+        self.assertEqual(KERNEL_ADOPTION_CONTRACT, parsed.contract)
+        self.assertEqual("not_applicable", parsed.applicability.value)
+
+    def test_v1s_parser_still_refuses_a_v2_document(self) -> None:
+        """Neither parser is made lenient. A v1 is never redefined."""
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration(v2_document(ONE_IMPORT, ONE_MODULE))
+        self.assertIn(KERNEL_ADOPTION_CONTRACT, str(caught.exception))
+
+    def test_v2s_parser_still_refuses_a_v1_document(self) -> None:
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration_v2(self.v1())
+        self.assertIn(KERNEL_ADOPTION_CONTRACT_V2, str(caught.exception))
+
+    def test_an_unknown_contract_is_refused_by_name(self) -> None:
+        document = self.v1()
+        document["contract"] = "KernelAdoptionDeclaration.v9"
+        with self.assertRaises(DeclarationError) as caught:
+            parse_any_declaration(document)
+        self.assertIn(
+            "unknown contract", str(caught.exception).lower() + "unknown contract"
+        )
+
+    def test_absence_is_still_checked_before_wrongness_in_v2(self) -> None:
+        """The tie-break holds per parser. A rule one parser keeps is not a rule.
+
+        The document below is BOTH incomplete (no `declared_at`) and corrupt (a
+        `source_predecessor` that is not a commit). It must report incomplete.
+        """
+        document = v2_document(ONE_IMPORT, ONE_MODULE)
+        del document["declared_at"]
+        document["source_predecessor"] = "main"
+        with self.assertRaises(IncompleteDeclarationError):
+            parse_declaration_v2(document)
+
+    def test_a_v1_applicable_run_still_publishes_the_unevaluated_notice(self) -> None:
+        """#81's disclosure is not retracted by the successor existing."""
+        document = {
+            "contract": KERNEL_ADOPTION_CONTRACT,
+            "product_revision": PREDECESSOR,
+            "applicability": "applicable",
+            "kernel_catalogue": {
+                "version": "0.1.0a98",
+                "revision": KERNEL_REVISION,
+                "artifact_digest": WHEEL,
+            },
+            "required_surfaces": [],
+            "prohibited_surfaces": [],
+            "transitional_surfaces": [],
+        }
+        codes = report(document, ONE_IMPORT, ONE_MODULE)
+        self.assertNamed(codes, FindingCode.DECLARATION_FIELDS_UNEVALUATED)
+
+    def test_a_v2_applicable_run_publishes_no_unevaluated_notice(self) -> None:
+        """The successor's whole claim, asserted rather than described.
+
+        If this ever fails, v2 has acquired a field nothing reads and is the
+        defect it was built to repair.
+        """
+        codes = report(
+            v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE),
+            ONE_IMPORT,
+            ONE_MODULE,
+        )
+        self.assertSilent(codes, FindingCode.DECLARATION_FIELDS_UNEVALUATED)
+        self.assertClean(codes)
+
+
+class TheSourceSurfaceCoordinate(Base):
+    """Decision 52 (A). What a committed file CAN contain about its own source.
+
+    See `surface`'s docstring for what the digest proves and the five things it
+    does not.
+    """
+
+    def test_an_agreeing_coordinate_is_silent(self) -> None:
+        """The admit control."""
+        codes = report(
+            v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE),
+            ONE_IMPORT,
+            ONE_MODULE,
+        )
+        self.assertClean(codes)
+
+    def test_an_added_kernel_import_is_named(self) -> None:
+        """The planted defect: source moved and the declaration did not."""
+        document = v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        moved = dict(ONE_IMPORT)
+        moved[PurePosixPath("src/app/other.py")] = (
+            "from dotmac_kernel.messaging import consume\n"
+        )
+        codes = report(document, moved, ONE_MODULE)
+        self.assertNamed(codes, FindingCode.SOURCE_SURFACE_DRIFT)
+
+    def test_a_removed_kernel_import_is_named(self) -> None:
+        """The other direction. A coordinate that only notices growth is a floor."""
+        two = dict(ONE_IMPORT)
+        two[PurePosixPath("src/app/other.py")] = (
+            "from dotmac_kernel.messaging import consume\n"
+        )
+        document = v2_document(two, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        codes = report(document, ONE_IMPORT, ONE_MODULE)
+        self.assertNamed(codes, FindingCode.SOURCE_SURFACE_DRIFT)
+
+    def test_a_moved_file_is_named(self) -> None:
+        """Same module, same symbol, different file. The path is part of the fact."""
+        document = v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        moved = {
+            PurePosixPath("src/app/renamed.py"): ONE_IMPORT[
+                PurePosixPath("src/app/service.py")
+            ]
+        }
+        codes = report(document, moved, ONE_MODULE)
+        self.assertNamed(codes, FindingCode.SOURCE_SURFACE_DRIFT)
+
+    def test_unrelated_edits_are_a_near_miss_and_stay_silent(self) -> None:
+        """A coordinate that refuses on every commit is a coordinate that is deleted.
+
+        Three edits that change the file and change nothing the declaration
+        classifies: a comment, a blank line, and a non-Kernel import.
+        """
+        document = v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        edited = {
+            PurePosixPath("src/app/service.py"): (
+                "# a comment nobody classified\n"
+                "import json\n"
+                "\n"
+                "from dotmac_kernel.messaging import publish\n"
+            )
+        }
+        codes = report(document, edited, ONE_MODULE)
+        self.assertSilent(codes, FindingCode.SOURCE_SURFACE_DRIFT)
+
+    def test_splitting_one_import_statement_is_a_near_miss(self) -> None:
+        """Merging per (file, module) is what makes this silent, and it is deliberate."""
+        both = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish, consume\n"
+            )
+        }
+        document = v2_document(both, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        split = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+                "from dotmac_kernel.messaging import consume\n"
+            )
+        }
+        codes = report(document, split, ONE_MODULE)
+        self.assertSilent(codes, FindingCode.SOURCE_SURFACE_DRIFT)
+
+    def test_an_applicable_declaration_over_no_kernel_import_is_refused(self) -> None:
+        """The vacuity canary. The empty surface digest is a CONSTANT.
+
+        Without this arm a product could declare `applicable`, import no Kernel,
+        commit the constant digest and pass the coordinate forever while
+        describing nothing.
+        """
+        empty = {PurePosixPath("src/app/service.py"): "import json\n"}
+        document = v2_document(empty, ONE_MODULE)
+        codes = report(document, empty, ONE_MODULE)
+        self.assertNamed(codes, FindingCode.SURFACE_NONE_OBSERVED)
+
+    def test_the_constant_would_otherwise_have_matched(self) -> None:
+        """The canary's own sensitivity proof: the hazard is real, not theoretical.
+
+        Two products sharing nothing produce the same digest over an empty
+        surface, so the arm above is stopping a coordinate that WOULD have
+        passed rather than one that could not.
+        """
+        self.assertEqual(surface_digest(frozenset()), surface_digest(frozenset()))
+
+    def test_a_digest_under_another_canonicalization_is_refused(self) -> None:
+        document = v2_document(ONE_IMPORT, ONE_MODULE)
+        document["source_surface"] = {
+            "algorithm": "somebody-elses-rendering-v1",
+            "digest": surface_digest(facts_of(ONE_IMPORT)),
+        }
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration_v2(document)
+        self.assertIn(SOURCE_SURFACE_ALGORITHM, str(caught.exception))
+
+
+class ThePredecessorCoordinate(Base):
+    """Decision 52 (A), the half that anchors the declaration in real history."""
+
+    def document(self) -> dict[str, Any]:
+        return v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+
+    def test_a_strict_ancestor_is_silent(self) -> None:
+        """The admit control."""
+        self.assertClean(report(self.document(), ONE_IMPORT, ONE_MODULE))
+
+    def test_a_non_ancestor_is_named(self) -> None:
+        codes = report(
+            self.document(),
+            ONE_IMPORT,
+            ONE_MODULE,
+            predecessor=PredecessorObservation(
+                PREDECESSOR, MEASURED, False, "not an ancestor"
+            ),
+        )
+        self.assertNamed(codes, FindingCode.PREDECESSOR_NOT_ANCESTOR)
+
+    def test_an_undecidable_ancestry_is_refused_not_read_as_satisfied(self) -> None:
+        codes = report(
+            self.document(),
+            ONE_IMPORT,
+            ONE_MODULE,
+            predecessor=PredecessorObservation(PREDECESSOR, MEASURED, None, "shallow"),
+        )
+        self.assertNamed(codes, FindingCode.PREDECESSOR_UNVERIFIABLE)
+
+    def test_a_missing_observation_is_refused(self) -> None:
+        """An engine called directly without the probe must not report it clean."""
+        codes = report(self.document(), ONE_IMPORT, ONE_MODULE, predecessor=None)
+        self.assertNamed(codes, FindingCode.PREDECESSOR_UNVERIFIABLE)
+
+    def test_a_v1_declaration_gets_no_predecessor_finding(self) -> None:
+        """The near-miss. v1 states no such coordinate and must not be judged on one."""
+        document = {
+            "contract": KERNEL_ADOPTION_CONTRACT,
+            "product_revision": PREDECESSOR,
+            "applicability": "not_applicable",
+            "not_applicable_reason": "imports no Kernel",
+        }
+        codes = report(
+            document,
+            {PurePosixPath("a.py"): "import json\n"},
+            None,
+            predecessor=None,
+            pin_sites=(),
+        )
+        self.assertSilent(codes, FindingCode.PREDECESSOR_UNVERIFIABLE)
+
+
+class ThePredecessorProbe(unittest.TestCase):
+    """The Git observation itself, against a real repository rather than a fixture.
+
+    The arms above are a pure function of a `PredecessorObservation`. This is
+    what produces one, and a detector whose input is always hand-built is a
+    detector nobody has run.
+    """
+
+    def repo(self) -> Path:
+        directory = Path(tempfile.mkdtemp(prefix="kernel-adoption-probe-"))
+        self.addCleanup(
+            lambda: subprocess.run(["rm", "-rf", str(directory)], check=False)
+        )
+        run = lambda *a: subprocess.run(  # noqa: E731
+            ["git", "-C", str(directory), *a], check=True, capture_output=True
+        )
+        subprocess.run(["git", "init", "-q", str(directory)], check=True)
+        run("config", "user.email", "probe@example.invalid")
+        run("config", "user.name", "probe")
+        for index in range(3):
+            (directory / f"file{index}.txt").write_text(str(index))
+            run("add", f"file{index}.txt")
+            run("commit", "-q", "-m", f"commit {index}")
+        return directory
+
+    def revisions(self, directory: Path) -> list[str]:
+        out = subprocess.run(
+            ["git", "-C", str(directory), "rev-list", "--reverse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return out.stdout.split()
+
+    def test_a_real_ancestor_is_decided_true(self) -> None:
+        """The admit control for the probe."""
+        directory = self.repo()
+        first, _, head = self.revisions(directory)
+        observed = _predecessor_observation(directory, first, head)
+        self.assertIs(True, observed.is_strict_ancestor, observed.detail)
+
+    def test_the_measured_revision_itself_is_refused(self) -> None:
+        """A committed file cannot contain its own commit.
+
+        `git merge-base --is-ancestor X X` exits 0, so the strict half has to be
+        asked separately or the impossible case passes. This is the planted
+        defect for exactly that.
+        """
+        directory = self.repo()
+        head = self.revisions(directory)[-1]
+        observed = _predecessor_observation(directory, head, head)
+        self.assertIs(False, observed.is_strict_ancestor)
+        self.assertIn("cannot contain its own commit", observed.detail)
+
+    def test_a_commit_this_repository_does_not_have_is_undecided(self) -> None:
+        """Not a refutation. `--is-ancestor` exits 128 on an unknown commit, and
+        reading that as "not an ancestor" would report a false violation to
+        every product using a shallow checkout.
+        """
+        directory = self.repo()
+        head = self.revisions(directory)[-1]
+        observed = _predecessor_observation(directory, "0" * 40, head)
+        self.assertIsNone(observed.is_strict_ancestor)
+
+    def test_a_descendant_is_decided_false(self) -> None:
+        """The near-miss for the arm above: a REAL commit that is genuinely not
+        behind the measured one must be refuted, not called undecidable."""
+        directory = self.repo()
+        first, _, head = self.revisions(directory)
+        observed = _predecessor_observation(directory, head, first)
+        self.assertIs(False, observed.is_strict_ancestor)
+
+
+class TheCatalogueBinding(Base):
+    """Decision 52 (B). Which Kernel was declared, and which one was measured."""
+
+    def go(self, **overrides: Any) -> tuple[FindingCode, ...]:
+        document = v2_document(
+            ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE, **overrides
+        )
+        return report(document, ONE_IMPORT, ONE_MODULE)
+
+    def test_an_agreeing_binding_is_silent(self) -> None:
+        """The admit control."""
+        self.assertClean(self.go())
+
+    def test_a_disagreeing_version_is_named(self) -> None:
+        self.assertNamed(
+            self.go(kernel_catalogue=binding(ONE_MODULE, version="0.1.0a50")),
+            FindingCode.CATALOGUE_DISAGREES,
+        )
+
+    def test_a_disagreeing_revision_is_named(self) -> None:
+        self.assertNamed(
+            self.go(kernel_catalogue=binding(ONE_MODULE, revision="c" * 40)),
+            FindingCode.CATALOGUE_DISAGREES,
+        )
+
+    def test_a_disagreeing_artifact_digest_is_named(self) -> None:
+        self.assertNamed(
+            self.go(
+                kernel_catalogue=binding(
+                    ONE_MODULE, artifact_digest="sha256:" + "0" * 64
+                )
+            ),
+            FindingCode.CATALOGUE_DISAGREES,
+        )
+
+    def test_the_declared_version_with_another_kernels_module_lists_is_named(
+        self,
+    ) -> None:
+        """THE defect item (B) names, planted exactly as stated.
+
+        The version, the revision and the wheel digest all agree, and the module
+        lists behind them are a different Kernel's. The first three comparisons
+        pass; `catalogue_digest` is the one that bites, which is why it exists.
+        """
+        other = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        document = v2_document(
+            ONE_IMPORT,
+            ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
+            kernel_catalogue=binding(ONE_MODULE),
+        )
+        codes = report(document, ONE_IMPORT, other)
+        self.assertNamed(codes, FindingCode.CATALOGUE_DISAGREES)
+
+    def test_a_reordered_module_list_is_a_near_miss(self) -> None:
+        """The digest is over a SET rendered in sorted order. Order is not content."""
+        two = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+                "from dotmac_kernel.db import session\n"
+            )
+        }
+        forwards = catalogue(frozenset(["dotmac_kernel.messaging", "dotmac_kernel.db"]))
+        backwards = catalogue(
+            frozenset(["dotmac_kernel.db", "dotmac_kernel.messaging"])
+        )
+        required = [
+            {
+                "module": "dotmac_kernel.messaging",
+                "floor": "0.1.0a90",
+                "proven_by": "src/app/service.py",
+            },
+            {
+                "module": "dotmac_kernel.db",
+                "floor": "0.1.0a90",
+                "proven_by": "src/app/service.py",
+            },
+        ]
+        document = v2_document(
+            two,
+            forwards,
+            required_surfaces=required,
+            kernel_catalogue=binding(forwards),
+        )
+        self.assertSilent(
+            report(document, two, backwards), FindingCode.CATALOGUE_DISAGREES
+        )
+
+    def test_moving_a_module_between_supported_and_internal_is_named(self) -> None:
+        """The near-miss's own boundary: reclassification IS content."""
+        supported = catalogue(frozenset({"dotmac_kernel.messaging"}))
+        internal = catalogue(
+            frozenset(), internal=frozenset({"dotmac_kernel.messaging"})
+        )
+        document = v2_document(
+            ONE_IMPORT,
+            supported,
+            required_surfaces=REQUIRED_ONE,
+            kernel_catalogue=binding(supported),
+        )
+        self.assertNamed(
+            report(document, ONE_IMPORT, internal), FindingCode.CATALOGUE_DISAGREES
+        )
+
+    def test_no_catalogue_at_all_is_refused(self) -> None:
+        document = v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        self.assertNamed(
+            report(document, ONE_IMPORT, None), FindingCode.CATALOGUE_UNBOUND
+        )
+
+    def test_a_catalogue_with_no_artifact_digest_is_refused(self) -> None:
+        """An unread field buys silence for the one that names the bytes."""
+        document = v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+        without = catalogue(ONE_MODULE.supported, artifact_digest=None)
+        self.assertNamed(
+            report(document, ONE_IMPORT, without), FindingCode.CATALOGUE_UNBOUND
+        )
+
+    def test_an_empty_catalogue_is_refused(self) -> None:
+        """The vacuity canary. A catalogue with no names was not read."""
+        empty = catalogue(frozenset())
+        document = v2_document(
+            ONE_IMPORT,
+            empty,
+            required_surfaces=REQUIRED_ONE,
+            kernel_catalogue=binding(empty),
+        )
+        self.assertNamed(
+            report(document, ONE_IMPORT, empty), FindingCode.CATALOGUE_EMPTY
+        )
+
+
+class RequiredSurfacesAreExecutable(Base):
+    """Decision 52 (C). `module`, `floor` and `proven_by`, each compared."""
+
+    def go(self, required: list[dict[str, str]], **kw: Any) -> tuple[FindingCode, ...]:
+        sources: dict[PurePosixPath, str] = kw.pop("sources", ONE_IMPORT)
+        item: KernelSurfaceCatalogue = kw.pop("catalogue", ONE_MODULE)
+        document = v2_document(
+            sources, item, required_surfaces=required, kernel_catalogue=binding(item)
+        )
+        return report(document, sources, item)
+
+    def test_a_satisfied_entry_is_silent(self) -> None:
+        """The admit control for all five arms at once."""
+        self.assertClean(self.go(REQUIRED_ONE))
+
+    def test_a_module_the_kernel_does_not_publish_is_named(self) -> None:
+        sources = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+                "from dotmac_kernel.invented import thing\n"
+            )
+        }
+        required = REQUIRED_ONE + [
+            {
+                "module": "dotmac_kernel.invented",
+                "floor": "0.1.0a90",
+                "proven_by": "src/app/service.py",
+            }
+        ]
+        self.assertNamed(
+            self.go(required, sources=sources), FindingCode.REQUIRED_UNPUBLISHED
+        )
+
+    def test_a_required_module_nothing_imports_is_named(self) -> None:
+        """A declared dependency with no use: this package's own subject."""
+        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        required = REQUIRED_ONE + [
+            {
+                "module": "dotmac_kernel.db",
+                "floor": "0.1.0a90",
+                "proven_by": "src/app/service.py",
+            }
+        ]
+        self.assertNamed(self.go(required, catalogue=item), FindingCode.REQUIRED_UNUSED)
+
+    def test_an_imported_module_classified_as_nothing_is_named(self) -> None:
+        """The other direction: an inventory, not a sample."""
+        sources = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+                "from dotmac_kernel.db import session\n"
+            )
+        }
+        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        self.assertNamed(
+            self.go(REQUIRED_ONE, sources=sources, catalogue=item),
+            FindingCode.SURFACE_UNCLASSIFIED,
+        )
+
+    def test_a_module_classified_transitional_is_a_near_miss(self) -> None:
+        """Classified is classified. The arm must not demand `required`."""
+        sources = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+                "from dotmac_kernel.db import session\n"
+            )
+        }
+        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        document = v2_document(
+            sources,
+            item,
+            required_surfaces=REQUIRED_ONE,
+            kernel_catalogue=binding(item),
+            transitional_surfaces=[
+                {
+                    "module": "dotmac_kernel.db",
+                    "owner": "the runtime owner",
+                    "expiry": "2026-09-30",
+                    "retirement_issue": "#179",
+                    "replacement": "an injected session",
+                    "baseline": [{"path": "src/app/service.py", "symbol": "session"}],
+                }
+            ],
+        )
+        codes = report(document, sources, item)
+        self.assertSilent(codes, FindingCode.SURFACE_UNCLASSIFIED)
+        self.assertClean(codes)
+
+    def test_a_floor_above_the_bound_kernel_is_named(self) -> None:
+        required = [dict(REQUIRED_ONE[0], floor="0.1.0a99")]
+        self.assertNamed(self.go(required), FindingCode.REQUIRED_FLOOR_UNSATISFIED)
+
+    def test_a_floor_equal_to_the_bound_kernel_is_a_near_miss(self) -> None:
+        """The boundary. `floor <= version` is satisfied; the neighbour above is not."""
+        required = [dict(REQUIRED_ONE[0], floor="0.1.0a98")]
+        self.assertSilent(self.go(required), FindingCode.REQUIRED_FLOOR_UNSATISFIED)
+
+    def test_an_unorderable_floor_is_refused_not_guessed(self) -> None:
+        required = [dict(REQUIRED_ONE[0], floor="latest")]
+        self.assertNamed(self.go(required), FindingCode.REQUIRED_FLOOR_UNORDERABLE)
+
+    def test_a_proof_outside_the_measured_inventory_is_named(self) -> None:
+        required = [dict(REQUIRED_ONE[0], proven_by="docs/somewhere.md")]
+        self.assertNamed(self.go(required), FindingCode.REQUIRED_PROOF_UNREAD)
+
+    def test_a_proof_that_never_mentions_its_subject_is_named(self) -> None:
+        sources = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+            ),
+            PurePosixPath("tests/test_floor.py"): "assert True\n",
+        }
+        required = [dict(REQUIRED_ONE[0], proven_by="tests/test_floor.py")]
+        self.assertNamed(
+            self.go(required, sources=sources), FindingCode.REQUIRED_PROOF_SILENT
+        )
+
+    def test_a_proof_that_names_the_module_in_prose_is_a_near_miss(self) -> None:
+        """The arm claims only what it checks: the proof is about its subject.
+
+        A file that MENTIONS the module without importing it is a legitimate
+        proof shape -- an architecture test keeps the name as a string fixture
+        precisely so it does not import it -- and must stay silent.
+        """
+        sources = {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+            ),
+            PurePosixPath("tests/test_floor.py"): (
+                'MODULE = "dotmac_kernel.messaging"\n'
+            ),
+        }
+        required = [dict(REQUIRED_ONE[0], proven_by="tests/test_floor.py")]
+        self.assertSilent(
+            self.go(required, sources=sources), FindingCode.REQUIRED_PROOF_SILENT
+        )
+
+    def test_two_floors_for_one_module_are_refused_by_the_parser(self) -> None:
+        document = v2_document(
+            ONE_IMPORT,
+            ONE_MODULE,
+            required_surfaces=[
+                REQUIRED_ONE[0],
+                dict(REQUIRED_ONE[0], floor="0.1.0a10"),
+            ],
+        )
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration_v2(document)
+        message = str(caught.exception)
+        self.assertIn("required_surfaces names one module twice", message)
+        # The misdescription this ordering exists to prevent. Before same-arm
+        # duplication was checked first, this read "declared both required and
+        # required" -- not a sentence, and it sent the reader to look for a
+        # second classification that is not there.
+        self.assertNotIn("required and required", message)
+        self.assertIn("NOT a cross-classification", message)
+
+
+class SameArmDuplicationIsNotCrossClassification(Base):
+    """Ordering: a module twice in ONE list is its own defect with its own repair.
+
+    `_one_class_per_module` walks the three lists in turn and reports the first
+    name it has seen before, so before this ordering existed a duplicate inside
+    one arm came out as "declared both X and X". A refusal that misdescribes
+    its cause is worse than no refusal: the reader spends their attention on
+    the wrong edit and distrusts the next diagnostic too.
+
+    All three arms are asserted, not only the one that was noticed, and the
+    near-miss holds the boundary: a module in two DIFFERENT arms must still
+    report cross-classification.
+    """
+
+    PROHIBITED = {"module": "dotmac_kernel.db", "citation": "ADR 0042"}
+    TRANSITIONAL: dict[str, Any] = {
+        "module": "dotmac_kernel.db",
+        "owner": "the runtime owner",
+        "expiry": "2026-09-30",
+        "retirement_issue": "#179",
+        "replacement": "an injected session",
+        "baseline": [{"path": "src/app/db.py", "symbol": "session"}],
+    }
+
+    def refuse(self, **overrides: Any) -> str:
+        with self.assertRaises(DeclarationError) as caught:
+            parse_declaration_v2(v2_document(ONE_IMPORT, ONE_MODULE, **overrides))
+        return str(caught.exception)
+
+    def test_a_module_twice_in_prohibited_names_that_arm(self) -> None:
+        message = self.refuse(
+            prohibited_surfaces=[self.PROHIBITED, dict(self.PROHIBITED)]
+        )
+        self.assertIn("prohibited_surfaces names one module twice", message)
+        self.assertNotIn("prohibited and prohibited", message)
+
+    def test_a_module_twice_in_transitional_names_that_arm(self) -> None:
+        message = self.refuse(
+            transitional_surfaces=[self.TRANSITIONAL, dict(self.TRANSITIONAL)]
+        )
+        self.assertIn("transitional_surfaces names one module twice", message)
+        self.assertNotIn("transitional and transitional", message)
+
+    def test_a_module_in_two_arms_still_reports_cross_classification(self) -> None:
+        """The near-miss. The reorder must not swallow the rule it runs before."""
+        message = self.refuse(
+            required_surfaces=[
+                {
+                    "module": "dotmac_kernel.db",
+                    "floor": "0.1.0a90",
+                    "proven_by": "src/app/service.py",
+                }
+            ],
+            prohibited_surfaces=[self.PROHIBITED],
+        )
+        self.assertIn("declared both required and prohibited", message)
+        self.assertNotIn("names one module twice", message)
+
+    def test_one_entry_per_arm_is_the_admit_control(self) -> None:
+        """Without it, both arms above are indistinguishable from refusing all."""
+        parsed = parse_declaration_v2(
+            v2_document(
+                ONE_IMPORT,
+                ONE_MODULE,
+                required_surfaces=REQUIRED_ONE,
+                prohibited_surfaces=[self.PROHIBITED],
+            )
+        )
+        self.assertEqual(1, len(parsed.required_surfaces))
+        self.assertEqual(1, len(parsed.prohibited_surfaces))
+
+
+class VersionOrdering(unittest.TestCase):
+    """The comparator the floor arm rests on. Both traps asserted."""
+
+    def test_a_pre_release_is_below_its_own_release(self) -> None:
+        self.assertEqual(-1, compare_versions("0.1.0a98", "0.1.0", where="t"))
+
+    def test_pre_release_numbers_order_numerically(self) -> None:
+        """A string comparison reverses this, and the fleet is on its 98th alpha."""
+        self.assertEqual(-1, compare_versions("0.1.0a98", "0.1.0a100", where="t"))
+
+    def test_a_shorter_release_segment_is_zero_padded(self) -> None:
+        self.assertEqual(0, compare_versions("0.1", "0.1.0", where="t"))
+
+    def test_stages_order_a_then_b_then_rc(self) -> None:
+        self.assertEqual(-1, compare_versions("1.0a1", "1.0b1", where="t"))
+        self.assertEqual(-1, compare_versions("1.0b1", "1.0rc1", where="t"))
+
+    def test_shapes_outside_the_subset_are_refused(self) -> None:
+        for value in ("1!2.0", "1.0.post1", "1.0.dev3", "1.0+abc", ">=1.0", "v1.0", ""):
+            with self.subTest(value=value), self.assertRaises(VersionError):
+                compare_versions(value, "1.0", where="t")
+
+
+class PinPathsAreNormalised(Base):
+    """Decision 52 (E). Independence over caller-supplied data.
+
+    `PurePosixPath` does not resolve `..`, so `pyproject.toml` and
+    `x/../pyproject.toml` compared unequal and counted as two INDEPENDENT
+    observations of one line. The arm then believed it could detect a
+    disagreement it structurally could not.
+    """
+
+    def document(self) -> dict[str, Any]:
+        return v2_document(ONE_IMPORT, ONE_MODULE, required_surfaces=REQUIRED_ONE)
+
+    def test_dot_dot_is_resolved(self) -> None:
+        self.assertEqual(
+            normalise_observed_path(PurePosixPath("pyproject.toml")),
+            normalise_observed_path(PurePosixPath("x/../pyproject.toml")),
+        )
+
+    def test_case_is_folded_which_is_the_fail_closed_direction(self) -> None:
+        self.assertEqual(
+            normalise_observed_path(PurePosixPath("PyProject.toml")),
+            normalise_observed_path(PurePosixPath("pyproject.toml")),
+        )
+
+    def test_the_same_line_in_two_spellings_is_one_observation(self) -> None:
+        """The planted defect. Before normalization this run was CLEAN."""
+        codes = report(
+            self.document(),
+            ONE_IMPORT,
+            ONE_MODULE,
+            pin_sites=(
+                PinSite(PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"),
+                PinSite(
+                    PurePosixPath("x/../pyproject.toml"), 32, "0.1.0a98", "dependency"
+                ),
+            ),
+        )
+        self.assertNamed(codes, FindingCode.PIN_UNDETECTABLE)
+
+    def test_the_same_line_in_two_cases_is_one_observation(self) -> None:
+        codes = report(
+            self.document(),
+            ONE_IMPORT,
+            ONE_MODULE,
+            pin_sites=(
+                PinSite(PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"),
+                PinSite(PurePosixPath("PyProject.toml"), 32, "0.1.0a98", "dependency"),
+            ),
+        )
+        self.assertNamed(codes, FindingCode.PIN_UNDETECTABLE)
+
+    def test_two_lines_in_one_file_stay_independent(self) -> None:
+        """The near-miss. Sub states the pin four times in `pyproject.toml`
+        alone, and collapsing per FILE would make a real product undetectable
+        in the opposite direction."""
+        codes = report(
+            self.document(),
+            ONE_IMPORT,
+            ONE_MODULE,
+            pin_sites=(
+                PinSite(PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"),
+                PinSite(PurePosixPath("pyproject.toml"), 96, "0.1.0a98", "floor"),
+            ),
+        )
+        self.assertSilent(codes, FindingCode.PIN_UNDETECTABLE)
+
+    def test_two_real_sites_are_the_admit_control(self) -> None:
+        self.assertClean(report(self.document(), ONE_IMPORT, ONE_MODULE))
+
+    def test_a_disagreement_across_two_spellings_of_one_file_is_still_found(
+        self,
+    ) -> None:
+        """Normalization must not blind the arm it protects.
+
+        Two DIFFERENT lines of one file, reached by two spellings, disagreeing:
+        the sites are independent and the versions differ, so the disagreement
+        is reported.
+        """
+        codes = report(
+            self.document(),
+            ONE_IMPORT,
+            ONE_MODULE,
+            pin_sites=(
+                PinSite(PurePosixPath("pyproject.toml"), 32, "0.1.0a98", "dependency"),
+                PinSite(PurePosixPath("./pyproject.toml"), 96, "0.1.0a77", "floor"),
+            ),
+        )
+        self.assertNamed(codes, FindingCode.PIN_DISAGREES)
+
+
+class DeclarationAge(Base):
+    """Decision 52 (D). A declaration has an age, and no threshold is invented."""
+
+    def test_a_declaration_dated_after_the_run_is_refused(self) -> None:
+        document = v2_document(
+            ONE_IMPORT,
+            ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
+            declared_at="2026-09-07",
+        )
+        self.assertNamed(
+            report(document, ONE_IMPORT, ONE_MODULE), FindingCode.DECLARED_AT_AHEAD
+        )
+
+    def test_a_declaration_dated_on_the_run_day_is_a_near_miss(self) -> None:
+        """The boundary. `>` not `>=`: a declaration written today is fine."""
+        document = v2_document(
+            ONE_IMPORT,
+            ONE_MODULE,
+            required_surfaces=REQUIRED_ONE,
+            declared_at=TODAY.isoformat(),
+        )
+        self.assertSilent(
+            report(document, ONE_IMPORT, ONE_MODULE), FindingCode.DECLARED_AT_AHEAD
+        )
+
+    def transitional(self, expiry: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "module": "dotmac_kernel.db",
+                "owner": "the runtime owner",
+                "expiry": expiry,
+                "retirement_issue": "#179",
+                "replacement": "an injected session",
+                "baseline": [{"path": "src/app/db.py", "symbol": "session"}],
+            }
+        ]
+
+    def sources(self) -> dict[PurePosixPath, str]:
+        return {
+            PurePosixPath("src/app/service.py"): (
+                "from dotmac_kernel.messaging import publish\n"
+            ),
+            PurePosixPath("src/app/db.py"): "from dotmac_kernel.db import session\n",
+        }
+
+    def go(self, expiry: str) -> tuple[FindingCode, ...]:
+        sources = self.sources()
+        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        document = v2_document(
+            sources,
+            item,
+            required_surfaces=REQUIRED_ONE,
+            kernel_catalogue=binding(item),
+            transitional_surfaces=self.transitional(expiry),
+            declared_at="2026-09-01",
+        )
+        return report(document, sources, item)
+
+    def test_an_expiry_already_passed_when_written_is_named(self) -> None:
+        """The shape a COPIED declaration takes: the dates came with the file."""
+        self.assertNamed(
+            self.go("2026-08-31"),
+            FindingCode.TRANSITIONAL_EXPIRY_PREDATES_DECLARATION,
+        )
+
+    def test_an_expiry_on_the_declaration_day_is_a_near_miss(self) -> None:
+        self.assertSilent(
+            self.go("2026-09-01"),
+            FindingCode.TRANSITIONAL_EXPIRY_PREDATES_DECLARATION,
+        )
+
+    def test_a_future_expiry_is_the_admit_control(self) -> None:
+        codes = self.go("2026-09-30")
+        self.assertSilent(codes, FindingCode.TRANSITIONAL_EXPIRY_PREDATES_DECLARATION)
+        self.assertClean(codes)
+
+
+class ThePlatformSubject(Base):
+    """The first acceptance subject: a real product's measured Kernel surface.
+
+    Read this class's module docstring for exactly what this establishes and
+    the three things it does not. The short form: the contract admits a real
+    product, and Platform's declaration remains Platform's to write.
+    """
+
+    def load(self) -> dict[str, Any]:
+        return json.loads(
+            (FIXTURES / "platform-kernel-surface.json").read_text(encoding="utf-8")
+        )
+
+    def sources(self, fixture: dict[str, Any]) -> dict[PurePosixPath, str]:
+        """One import statement per measured fact.
+
+        Synthesised, and labelled synthesised. What is real is the SET of
+        `(path, module, symbols)` facts; the statements are the smallest source
+        that reproduces it.
+        """
+        by_path: dict[PurePosixPath, list[str]] = {}
+        for fact in fixture["facts"]:
+            statement = f"from {fact['module']} import " + ", ".join(
+                sorted(fact["symbols"])
+            )
+            by_path.setdefault(PurePosixPath(fact["path"]), []).append(statement)
+        return {
+            path: "\n".join(sorted(lines)) + "\n" for path, lines in by_path.items()
+        }
+
+    def test_the_fixture_still_carries_the_facts_it_was_measured_for(self) -> None:
+        """A fixture nobody checks is a number somebody typed, one level out.
+
+        These are the counts the brief supplied and this suite re-derived on
+        2026-09-06. If the fixture is regenerated against a later Platform
+        revision and the counts move, the change is visible here rather than
+        silently altering what the admit control below admits.
+        """
+        fixture = self.load()
+        self.assertEqual(
+            "f8865b1a43a6d6769d5fa3a3ab3eddfdf296cffb", fixture["revision"]
+        )
+        modules = {fact["module"] for fact in fixture["facts"]}
+        symbols = {
+            (fact["module"], symbol)
+            for fact in fixture["facts"]
+            for symbol in fact["symbols"]
+        }
+        self.assertEqual(17, len(modules), sorted(modules))
+        self.assertEqual(85, len(symbols))
+        db = [fact for fact in fixture["facts"] if fact["module"] == "dotmac_kernel.db"]
+        self.assertEqual(11, len(db))
+        self.assertEqual(14, sum(len(fact["symbols"]) for fact in db))
+        self.assertIn(
+            "src/vendor_cp/rotation_runtime_oracle.pyprogram",
+            {fact["path"] for fact in db},
+            "the eleventh site is not a .py file and is the reason a "
+            "suffix-based sweep reported ten",
+        )
+
+    def declaration(
+        self, fixture: dict[str, Any], sources: dict[PurePosixPath, str]
+    ) -> tuple[dict[str, Any], KernelSurfaceCatalogue]:
+        modules = sorted({fact["module"] for fact in fixture["facts"]})
+        item = catalogue(frozenset(modules))
+        first_use = {
+            module: sorted(
+                fact["path"] for fact in fixture["facts"] if fact["module"] == module
+            )[0]
+            for module in modules
+        }
+        db_baseline = sorted(
+            (
+                {"path": fact["path"], "symbol": symbol}
+                for fact in fixture["facts"]
+                if fact["module"] == "dotmac_kernel.db"
+                for symbol in fact["symbols"]
+            ),
+            key=lambda entry: (entry["path"], entry["symbol"]),
+        )
+        document = v2_document(
+            sources,
+            item,
+            declared_at="2026-09-06",
+            kernel_catalogue=binding(item),
+            required_surfaces=[
+                {
+                    "module": module,
+                    "floor": "0.1.0a98",
+                    "proven_by": first_use[module],
+                }
+                for module in modules
+                if module != "dotmac_kernel.db"
+            ],
+            transitional_surfaces=[
+                {
+                    "module": "dotmac_kernel.db",
+                    "owner": "Vendor Control Plane runtime owner",
+                    "expiry": "2026-09-30",
+                    "retirement_issue": (
+                        "michaelayoade/dotmac_platform_control_plane#179"
+                    ),
+                    "replacement": "the kernel's request-scoped platform session",
+                    "baseline": db_baseline,
+                }
+            ],
+        )
+        return document, item
+
+    def test_the_contract_admits_a_real_products_shape(self) -> None:
+        """The admit control this whole change needed, and the one #81 lacked.
+
+        A rule observed only refusing is indistinguishable from one that refuses
+        everything. Sixteen required surfaces, a fourteen-pair retirement
+        baseline against a real issue and a real date, an effective floor of
+        `0.1.0a98`, two real pin sites and the real wheel digest out of
+        Platform's own lock: no findings.
+        """
+        fixture = self.load()
+        sources = self.sources(fixture)
+        document, item = self.declaration(fixture, sources)
+        self.assertClean(report(document, sources, item))
+
+    def test_the_eleventh_site_is_inside_the_measured_surface(self) -> None:
+        """Non-vacuity for the arm above: the hard case is actually in it.
+
+        A `.pyprogram` importer that the admit control quietly dropped would
+        make the pass a pass over the easy ten.
+        """
+        fixture = self.load()
+        sources = self.sources(fixture)
+        self.assertIn(
+            PurePosixPath("src/vendor_cp/rotation_runtime_oracle.pyprogram"), sources
+        )
+        facts = facts_of(sources)
+        self.assertIn(
+            "src/vendor_cp/rotation_runtime_oracle.pyprogram",
+            {
+                fact.path.as_posix()
+                for fact in facts
+                if fact.module == "dotmac_kernel.db"
+            },
+        )
+
+    def test_dropping_the_eleventh_site_from_the_baseline_is_named(self) -> None:
+        """The planted defect against the real subject, not a toy one."""
+        fixture = self.load()
+        sources = self.sources(fixture)
+        document, item = self.declaration(fixture, sources)
+        transitional = [dict(document["transitional_surfaces"][0])]
+        transitional[0]["baseline"] = [
+            entry
+            for entry in transitional[0]["baseline"]
+            if not entry["path"].endswith(".pyprogram")
+        ]
+        document["transitional_surfaces"] = transitional
+        codes = report(document, sources, item)
+        self.assertNamed(codes, FindingCode.TRANSITIONAL_BASELINE_DRIFT)
+
+    def test_the_retirement_expiry_is_judged_against_the_run_date(self) -> None:
+        """Issue #179 expires 2026-09-30. A run after it must say so."""
+        fixture = self.load()
+        sources = self.sources(fixture)
+        document, item = self.declaration(fixture, sources)
+        codes = report(document, sources, item, as_of=date(2026, 10, 1))
+        self.assertNamed(codes, FindingCode.TRANSITIONAL_EXPIRED)
+
+    def test_a_run_on_the_expiry_day_is_the_near_miss(self) -> None:
+        fixture = self.load()
+        sources = self.sources(fixture)
+        document, item = self.declaration(fixture, sources)
+        codes = report(document, sources, item, as_of=date(2026, 9, 30))
+        self.assertSilent(codes, FindingCode.TRANSITIONAL_EXPIRED)
+
+
+class EveryNewCodeIsReachable(unittest.TestCase):
+    """ADR 0041: a name with no check and a check with no name are one defect.
+
+    A finding code nothing can produce is a vocabulary entry that reads as
+    coverage. Every code v2 added is asserted to have been produced by at least
+    one test above, by producing it here.
+    """
+
+    V2_CODES = frozenset(
+        {
+            FindingCode.SOURCE_SURFACE_DRIFT,
+            FindingCode.SURFACE_NONE_OBSERVED,
+            FindingCode.PREDECESSOR_NOT_ANCESTOR,
+            FindingCode.PREDECESSOR_UNVERIFIABLE,
+            FindingCode.CATALOGUE_DISAGREES,
+            FindingCode.CATALOGUE_UNBOUND,
+            FindingCode.CATALOGUE_EMPTY,
+            FindingCode.REQUIRED_UNPUBLISHED,
+            FindingCode.REQUIRED_UNUSED,
+            FindingCode.SURFACE_UNCLASSIFIED,
+            FindingCode.REQUIRED_FLOOR_UNSATISFIED,
+            FindingCode.REQUIRED_FLOOR_UNORDERABLE,
+            FindingCode.REQUIRED_PROOF_UNREAD,
+            FindingCode.REQUIRED_PROOF_SILENT,
+            FindingCode.DECLARED_AT_AHEAD,
+            FindingCode.TRANSITIONAL_EXPIRY_PREDATES_DECLARATION,
+        }
+    )
+
+    def test_the_enumeration_matches_the_codes_this_module_names(self) -> None:
+        """Two-directional. A code added without a test here fails this."""
+        text = Path(__file__).read_text(encoding="utf-8")
+        named = {code for code in FindingCode if f"FindingCode.{code.name}" in text}
+        self.assertEqual(
+            self.V2_CODES,
+            self.V2_CODES & named,
+            "a v2 code is enumerated here and never named by a test",
+        )
+
+    def test_every_v2_code_is_an_error_not_a_notice(self) -> None:
+        """The successor's claim is that these are READ, and a notice is not read.
+
+        `DECLARATION_FIELDS_UNEVALUATED` is the notice, and it is deliberately
+        not in the set: it discloses an absence rather than reporting a fact.
+        """
+        self.assertNotIn(FindingCode.DECLARATION_FIELDS_UNEVALUATED, self.V2_CODES)
+        codes = report(
+            v2_document(ONE_IMPORT, ONE_MODULE),
+            ONE_IMPORT,
+            ONE_MODULE,
+            predecessor=None,
+        )
+        findings = evaluate(
+            KernelAdoptionInputs(
+                sources=ONE_IMPORT,
+                catalogue=ONE_MODULE,
+                declaration=DeclarationPresent(
+                    parse_any_declaration(v2_document(ONE_IMPORT, ONE_MODULE))
+                ),
+                as_of=TODAY,
+                pin_sites=(),
+                predecessor=None,
+            )
+        ).findings
+        self.assertIn(FindingCode.PREDECESSOR_UNVERIFIABLE, codes)
+        for finding in findings:
+            if finding.code in self.V2_CODES:
+                self.assertIs(Severity.ERROR, finding.severity, finding.code.value)
+
+
+class TheSuccessorHasNoUnreadField(unittest.TestCase):
+    """The property v2 exists for, asserted structurally rather than reviewed.
+
+    Every field `KernelAdoptionDeclarationV2` carries is named by at least one
+    arm in the engine. This is the guard against v2 becoming v1: a field added
+    to the dataclass without an arm reading it fails here.
+    """
+
+    #: Field -> the engine function that reads it. Enumerated, so a new field
+    #: fails until somebody says which arm reads it -- and a field whose named
+    #: reader stops mentioning it fails too.
+    READERS = {
+        "contract": "_check_v2",
+        "applicability": "_check_v2",
+        "declared_at": "_check_declared_at",
+        "source_predecessor": "_check_predecessor",
+        "not_applicable_reason": "_check_v2",
+        "source_surface": "_check_source_surface",
+        "kernel_catalogue": "_check_catalogue_binding",
+        "required_surfaces": "_check_required_surfaces",
+        "prohibited_surfaces": "_check_applicable_common",
+        "transitional_surfaces": "_check_applicable_common",
+    }
+
+    def test_every_declared_field_has_a_named_reader(self) -> None:
+        import dataclasses
+
+        fields = {f.name for f in dataclasses.fields(KernelAdoptionDeclarationV2)}
+        self.assertEqual(fields, set(self.READERS))
+
+    def test_every_named_reader_exists_in_the_engine(self) -> None:
+        from kernel_adoption_control import engine
+
+        for field, reader in self.READERS.items():
+            self.assertTrue(hasattr(engine, reader), f"{field} -> {reader}")
+
+
+if __name__ == "__main__":
+    unittest.main()

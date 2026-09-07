@@ -55,6 +55,69 @@ read. Multiple imports of one module in one file are MERGED — union of symbols
 `star` if any is a star — so splitting one `from x import a, b` into two
 statements does not move the digest either.
 
+## `surface_identity_digest` — the same surface, with the Kernel's own names
+
+`dmg-kernel-surface-v1` records the names an import BINDS LOCALLY. So
+`from dotmac_kernel import A as Y` and `from dotmac_kernel import B as Y` render
+identically and share a digest: the declaration goes on matching while the
+symbol the product actually imports from the Kernel changed underneath it. That
+is the binding half weakening, and only for aliased imports — the enforcement
+arms re-derive from `_KernelImport.names`, the Kernel-side spelling, on every
+run, so no verdict was ever taken against a local alias. It bit a fixture
+before it bit a product: Platform aliases the Kernel's
+`UndeclaredCapabilityError` to `KernelUndeclaredCapabilityError`, and the
+measured fixture recorded the alias.
+
+`dmg-kernel-surface-v2` records both halves as SEPARATE facts. Each binding is
+a `SurfaceBinding(kernel, local)` pair — the name the Kernel publishes, and the
+name this file bound it to — so `A as Y` and `B as Y` differ, while the local
+name a product actually writes stays recoverable from the rendering rather than
+being flattened away. An unaliased `from dotmac_kernel import A` renders
+`A>A`: the same name on both sides is a fact about the import, not padding.
+
+**v1 is not redefined.** It keeps its name, its input type (`SurfaceFact`), its
+rendering and its digest, and a declaration carrying a v1 value keeps verifying
+exactly as it did. The two algorithms coexist; migrating is a product's own act
+and needs a change this module does not make — see the note at the end of this
+section.
+
+**Domain separation is structural, not a check.** The algorithm name is the
+FIRST LINE of the bytes each digest is taken over. A v1 digest and a v2 digest
+over the same facts therefore have different preimages and cannot collide by
+construction; there is no comparison anyone could delete to make a v1 value
+readable as a v2 one. This is the same property `dmg-kernel-catalogue-v2`
+relies on, and it is why a later canonicalization is always a new name here.
+
+**What v2 does NOT change**, stated so nothing is read into it:
+
+- Every disclaimer above for `source_surface` still holds verbatim — not a
+  revision, not a date, not inventory completeness, not non-Kernel change, not
+  authorship.
+- The merge and exclusion rules are unchanged: no line numbers, and multiple
+  imports of one module in one file are merged into one fact. Reordering
+  imports, reformatting, or adding a comment moves neither digest.
+- **Not a new document schema.** `KernelAdoptionDeclaration.v2` is unchanged.
+  `declaration_contract_v2` admits `source_surface.algorithm` from a CLOSED set
+  of exactly two — `ACCEPTED_SOURCE_SURFACE_ALGORITHMS` — and the declared name
+  SELECTS which canonicalization `engine._check_source_surface` re-derives.
+  Compatible vocabulary widening: an existing v1 declaration parses and
+  evaluates exactly as it did, and migrating is a product's own edit.
+  `observed_surface_identity` derives the value a migrating product declares,
+  from the runner rather than from a hand-rolled second implementation.
+- **Not a defence against a relabelled digest at PARSE time, and it does not
+  need to be.** A digest is 64 opaque hex characters; nothing in it records the
+  rendering that produced it, and a document parser has no source to re-derive
+  from. So a v1 digest labelled `dmg-kernel-surface-v2` parses, and the RUN
+  refuses it: the re-derived v2 value is taken over different bytes and cannot
+  equal a v1 one. The refusal comes from the structure of the two digests, not
+  from a check that could be forgotten.
+- **Not interchangeable inputs.** `SurfaceFact` and `SurfaceIdentityFact` do
+  not share a render method name (`render` vs `render_identity`), so neither
+  renderer can walk the other's facts. A mismatched set raises instead of
+  producing a hybrid digest nobody defined. `render_surface_identity` says so
+  in a message; `render_surface` raises `AttributeError`, a worse message and a
+  deliberate one — improving it means editing v1.
+
 ## `catalogue_digest` — which Kernel the surfaces were classified against
 
 `kernel_catalogue` carries a version, a peeled revision and an artifact digest,
@@ -109,10 +172,15 @@ from typing import Final
 __all__ = [
     "CATALOGUE_DIGEST_ALGORITHM",
     "SOURCE_SURFACE_ALGORITHM",
+    "SOURCE_SURFACE_IDENTITY_ALGORITHM",
+    "SurfaceBinding",
     "SurfaceFact",
+    "SurfaceIdentityFact",
     "catalogue_digest",
     "render_surface",
+    "render_surface_identity",
     "surface_digest",
+    "surface_identity_digest",
 ]
 
 #: The canonicalization's own name and version, prefixed to the bytes digested.
@@ -120,6 +188,11 @@ __all__ = [
 #: would make one declared digest describe two different renderings, and a
 #: reader could not tell which one a stored value was taken under.
 SOURCE_SURFACE_ALGORITHM: Final = "dmg-kernel-surface-v1"
+#: The successor canonicalization, which records the Kernel's own name for a
+#: symbol separately from the local name an import bound it to. A SEPARATE
+#: name rather than a redefinition of the line above: v1 is frozen, and both
+#: are prefixed to their own bytes, so no v1 value can be read as a v2 one.
+SOURCE_SURFACE_IDENTITY_ALGORITHM: Final = "dmg-kernel-surface-v2"
 CATALOGUE_DIGEST_ALGORITHM: Final = "dmg-kernel-catalogue-v2"
 
 #: Field and record separators chosen because neither can occur in any field.
@@ -128,6 +201,12 @@ CATALOGUE_DIGEST_ALGORITHM: Final = "dmg-kernel-catalogue-v2"
 #: render to the same bytes.
 _FIELD = "\t"
 _RECORD = "\n"
+#: Separates the two halves of one binding, INSIDE the tab-delimited bindings
+#: field. Chosen because that field holds only Python identifiers and dotted
+#: module paths, neither of which can contain `>`; the repository path, which
+#: could, is a different field. So no half can impersonate the separator and
+#: `A>Y` and `B>Y` cannot render to the same bytes.
+_BINDING = ">"
 
 
 @dataclass(frozen=True, order=True)
@@ -171,6 +250,114 @@ def surface_digest(facts: frozenset[SurfaceFact]) -> str:
     ever being the value that passed.
     """
     rendered = render_surface(facts)
+    return "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, order=True)
+class SurfaceBinding:
+    """One imported symbol, as the Kernel spells it and as this file bound it.
+
+    `kernel` is the name on the FAR side of `as` -- the one the Kernel
+    publishes, and the only one a verdict about the Kernel may be taken
+    against. `local` is the name the importing module can now use and
+    re-export. For an unaliased import they are equal, and that equality is
+    recorded rather than collapsed: a rendering that dropped one half when they
+    matched would have to be told apart from one that had only ever seen the
+    other half.
+
+    For a plain `import dotmac_kernel.db as k` there is no imported SYMBOL, so
+    `kernel` is the dotted module path -- the Kernel identity that statement
+    names -- and `local` is `k`. Such a statement cannot collide with a `from`
+    import of the same names, because the two render under different `module`
+    fields.
+    """
+
+    kernel: str
+    local: str
+
+    def render(self) -> str:
+        return self.kernel + _BINDING + self.local
+
+
+@dataclass(frozen=True, order=True)
+class SurfaceIdentityFact:
+    """One file's use of one Kernel module, with canonical identity preserved.
+
+    `SurfaceFact`'s successor, and a SEPARATE type rather than a widened one.
+    Giving `SurfaceFact` an optional bindings field would let a caller that has
+    bindings omit them and still get a v2 digest -- a value that silently
+    describes less than the algorithm claims, reported later as "the source
+    moved" for a call that forgot an argument. That hazard is named for
+    `catalogue_digest`'s `root_exports` in this same module; the repair here is
+    that v1's input cannot be handed to v2 at all.
+
+    Carries NO line number, for the reason v1 does not -- see this module's
+    docstring.
+    """
+
+    path: PurePosixPath
+    module: str
+    bindings: tuple[SurfaceBinding, ...]
+    star: bool
+
+    def render_identity(self) -> str:
+        """NOT called `render`, and the difference is the refusal.
+
+        `SurfaceFact.render` and this method would otherwise be one duck-typed
+        name over two canonicalizations, and `render_surface_identity` would
+        happily walk a set of v1 facts: v1 lines under a v2 header, a hybrid
+        digest nobody defined, produced silently. Distinct method names make
+        each renderer reach for something the other shape does not have, so a
+        mismatched set raises instead of coercing. There is no check here to
+        delete -- the absence of the method IS the refusal.
+        """
+        star = "*" if self.star else "-"
+        return _FIELD.join(
+            (
+                self.path.as_posix(),
+                self.module,
+                ",".join(sorted(binding.render() for binding in self.bindings)),
+                star,
+            )
+        )
+
+
+def render_surface_identity(facts: frozenset[SurfaceIdentityFact]) -> str:
+    """The canonical rendering `surface_identity_digest` is taken over.
+
+    Public for the reason `render_surface` is: a digest mismatch is unreadable
+    on its own, and a reader needs to see which line moved.
+
+    The first line is `SOURCE_SURFACE_IDENTITY_ALGORITHM`, exactly as
+    `render_surface`'s first line is `SOURCE_SURFACE_ALGORITHM`. That placement
+    is what makes the two domains separate by construction rather than by a
+    check: no fact set renders to the same bytes under both.
+    """
+    wrong = sorted(
+        type(fact).__name__
+        for fact in facts
+        if not isinstance(fact, SurfaceIdentityFact)
+    )
+    if wrong:
+        raise TypeError(
+            f"{SOURCE_SURFACE_IDENTITY_ALGORITHM} renders SurfaceIdentityFact "
+            f"and was handed {', '.join(wrong)}. A v1 fact carries no "
+            "canonical Kernel name, so rendering one here would produce a "
+            "digest labelled v2 over a surface that never recorded the "
+            "identity v2 exists to bind. Refusing rather than coercing"
+        )
+    lines = sorted(fact.render_identity() for fact in facts)
+    return SOURCE_SURFACE_IDENTITY_ALGORITHM + _RECORD + _RECORD.join(lines) + _RECORD
+
+
+def surface_identity_digest(facts: frozenset[SurfaceIdentityFact]) -> str:
+    """`sha256:<hex>` over `render_surface_identity`.
+
+    The empty fact set has a constant digest here too, and it is the same
+    vacuity hazard `surface_digest` documents, held by the same engine arm
+    (`kernel.surface.none-observed`) rather than by this function.
+    """
+    rendered = render_surface_identity(facts)
     return "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 

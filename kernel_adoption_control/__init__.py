@@ -66,9 +66,13 @@ from .runner import (
 from .surface import (
     CATALOGUE_DIGEST_ALGORITHM,
     SOURCE_SURFACE_ALGORITHM,
+    SOURCE_SURFACE_IDENTITY_ALGORITHM,
+    SurfaceBinding,
     SurfaceFact,
+    SurfaceIdentityFact,
     catalogue_digest,
     surface_digest,
+    surface_identity_digest,
 )
 from .versions import VersionError, compare_versions
 
@@ -80,6 +84,7 @@ __all__ = [
     "KERNEL_ROOT",
     "RUN_CONTRACT",
     "SOURCE_SURFACE_ALGORITHM",
+    "SOURCE_SURFACE_IDENTITY_ALGORITHM",
     "AdoptionReport",
     "AnyKernelAdoptionDeclaration",
     "Citability",
@@ -109,7 +114,9 @@ __all__ = [
     "RunReport",
     "RunnerError",
     "SourceSurfaceCoordinate",
+    "SurfaceBinding",
     "SurfaceFact",
+    "SurfaceIdentityFact",
     "SurfaceSite",
     "TransitionalSurface",
     "VersionError",
@@ -125,4 +132,5 @@ __all__ = [
     "resolve_observer",
     "run",
     "surface_digest",
+    "surface_identity_digest",
 ]

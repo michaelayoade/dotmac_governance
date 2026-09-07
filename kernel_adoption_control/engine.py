@@ -57,7 +57,18 @@ from .contracts import (
     Severity,
     TransitionalSurface,
 )
-from .surface import SurfaceFact, catalogue_digest, render_surface, surface_digest
+from .surface import (
+    SOURCE_SURFACE_ALGORITHM,
+    SOURCE_SURFACE_IDENTITY_ALGORITHM,
+    SurfaceBinding,
+    SurfaceFact,
+    SurfaceIdentityFact,
+    catalogue_digest,
+    render_surface,
+    render_surface_identity,
+    surface_digest,
+    surface_identity_digest,
+)
 from .versions import VersionError, compare_versions
 
 __all__ = ["KERNEL_ROOT", "REFUSAL_CODES", "evaluate", "observed_surface"]
@@ -124,9 +135,16 @@ class _KernelImport:
     `names` is EMPTY for a plain `import dotmac_kernel`, and that emptiness is
     a fact rather than a gap: such a statement imports the package and names no
     export, so there is no symbol to admit or refuse.
+
+    `bindings` is the fourth, and it is what `names` and `bound` cannot be
+    recovered into once they are separate sets. `from dotmac_kernel import A as
+    Y, B as Z` puts `{A, B}` in `names` and `{Y, Z}` in `bound`, and nothing in
+    either says which went with which. The PAIRING is the fact the v2
+    source-surface canonicalization records, so it is carried from the one
+    place that still has it: the alias node itself.
     """
 
-    __slots__ = ("bound", "line", "module", "names", "star")
+    __slots__ = ("bindings", "bound", "line", "module", "names", "star")
 
     def __init__(
         self,
@@ -135,12 +153,14 @@ class _KernelImport:
         bound: frozenset[str],
         star: bool,
         names: frozenset[str] = frozenset(),
+        bindings: frozenset[SurfaceBinding] = frozenset(),
     ):
         self.module = module
         self.line = line
         self.bound = bound
         self.star = star
         self.names = names
+        self.bindings = bindings
 
 
 def _kernel_imports(tree: ast.Module) -> list[_KernelImport]:
@@ -160,7 +180,13 @@ def _kernel_imports(tree: ast.Module) -> list[_KernelImport]:
                     local = alias.asname or alias.name.split(".")[0]
                     found.append(
                         _KernelImport(
-                            alias.name, node.lineno, frozenset({local}), False
+                            alias.name,
+                            node.lineno,
+                            frozenset({local}),
+                            False,
+                            bindings=frozenset(
+                                {SurfaceBinding(kernel=alias.name, local=local)}
+                            ),
                         )
                     )
         elif isinstance(node, ast.ImportFrom):
@@ -176,7 +202,16 @@ def _kernel_imports(tree: ast.Module) -> list[_KernelImport]:
             # The names as the KERNEL spells them, before any `as`. See
             # `_KernelImport.names` for why this is not `bound`.
             names = frozenset(alias.name for alias in node.names if alias.name != "*")
-            found.append(_KernelImport(module, node.lineno, bound, star, names))
+            # The pairing, kept before the two sets above throw it away. See
+            # `_KernelImport.bindings`.
+            bindings = frozenset(
+                SurfaceBinding(kernel=alias.name, local=alias.asname or alias.name)
+                for alias in node.names
+                if alias.name != "*"
+            )
+            found.append(
+                _KernelImport(module, node.lineno, bound, star, names, bindings)
+            )
     return found
 
 
@@ -684,12 +719,28 @@ def _check_predecessor(inputs: KernelAdoptionInputs) -> list[Finding]:
 
 
 def _check_source_surface(
-    declaration: KernelAdoptionDeclarationV2, facts: frozenset[SurfaceFact]
+    declaration: KernelAdoptionDeclarationV2,
+    facts: frozenset[SurfaceFact],
+    identity_facts: frozenset[SurfaceIdentityFact],
 ) -> list[Finding]:
     """Decision 52 (A), the half that is re-derived rather than named.
 
     See `surface.surface_digest` for exactly what the digest is taken over,
     what it proves and the five things it does not.
+
+    The declared `algorithm` SELECTS which canonicalization is re-derived.
+    Both fact sets come from the same sweep over the same measured source
+    (`_SurfaceAccumulator`), so the two are always consistent with each other
+    and the label chooses between two derivations rather than being trusted
+    about one. A label this engine has no derivation for REFUSES: the parser
+    admits exactly `ACCEPTED_SOURCE_SURFACE_ALGORITHMS`, so the branch is
+    unreachable through a parsed document, and a caller building the dataclass
+    directly must not get a silently skipped arm.
+
+    A digest RELABELLED from one algorithm to the other parses -- a parser
+    cannot tell two 64-hex strings apart -- and is refused HERE, because the
+    two algorithms digest different bytes and the re-derived value will not
+    match. That is the refusal domain separation buys, and it needs no oracle.
     """
     coordinate = declaration.source_surface
     if coordinate is None:
@@ -719,7 +770,24 @@ def _check_source_surface(
                 "source",
             )
         ]
-    derived = surface_digest(facts)
+    if coordinate.algorithm == SOURCE_SURFACE_ALGORITHM:
+        derived = surface_digest(facts)
+    elif coordinate.algorithm == SOURCE_SURFACE_IDENTITY_ALGORITHM:
+        derived = surface_identity_digest(identity_facts)
+    else:
+        return [
+            _error(
+                FindingCode.SOURCE_SURFACE_DRIFT,
+                f"the declaration states source_surface algorithm "
+                f"{coordinate.algorithm!r}, which this engine has no "
+                "derivation for, so the coordinate cannot be re-derived and "
+                "cannot be compared. Refusing rather than falling back to "
+                "another canonicalization: a digest compared under a rendering "
+                "rule nobody declared is a comparison whose result means "
+                "nothing. Unreachable through the document contract, which "
+                "admits only the algorithms this arm implements",
+            )
+        ]
     if derived == coordinate.digest:
         return []
     return [
@@ -1045,6 +1113,115 @@ def _check_expiry_against_declaration(
     return findings
 
 
+class _SurfaceAccumulator:
+    """The merge rule, in ONE place, for both source-surface algorithms.
+
+    One entry per (file, Kernel module), MERGED across statements: two imports
+    of one module in one file are one fact carrying the union of what they
+    bound, so splitting a `from x import a, b` in two moves neither digest.
+    Line numbers are not accumulated at all.
+
+    Both algorithms merge the SAME way over the SAME statements and differ only
+    in what each fact records, so the rule lives here rather than once per
+    algorithm. Two implementations of one merge is the drift the source-surface
+    coordinate exists to prevent, and a second copy of it inside the coordinate
+    would be that drift.
+    """
+
+    __slots__ = ("bindings", "stars", "symbols")
+
+    def __init__(self) -> None:
+        self.symbols: dict[tuple[PurePosixPath, str], set[str]] = defaultdict(set)
+        self.bindings: dict[tuple[PurePosixPath, str], set[SurfaceBinding]] = (
+            defaultdict(set)
+        )
+        self.stars: set[tuple[PurePosixPath, str]] = set()
+
+    def add(self, path: PurePosixPath, entry: _KernelImport) -> None:
+        key = (path, entry.module)
+        # Both are `defaultdict` accesses, so a star-only import -- which binds
+        # and names nothing -- still CREATES its key. A star that produced no
+        # fact would be a wholesale re-export invisible to the digest.
+        self.symbols[key].update(entry.bound)
+        self.bindings[key].update(entry.bindings)
+        if entry.star:
+            self.stars.add(key)
+
+    def facts(self) -> frozenset[SurfaceFact]:
+        """v1's facts: LOCAL bound names. Frozen, and unchanged by v2's arrival."""
+        return frozenset(
+            SurfaceFact(
+                path=path,
+                module=module,
+                symbols=tuple(sorted(symbols)),
+                star=(path, module) in self.stars,
+            )
+            for (path, module), symbols in self.symbols.items()
+        )
+
+    def identity_facts(self) -> frozenset[SurfaceIdentityFact]:
+        """v2's facts: the Kernel's name and the local one, kept apart."""
+        return frozenset(
+            SurfaceIdentityFact(
+                path=path,
+                module=module,
+                bindings=tuple(sorted(bindings)),
+                star=(path, module) in self.stars,
+            )
+            for (path, module), bindings in self.bindings.items()
+        )
+
+
+def surface_identity_facts(
+    sources: dict[PurePosixPath, str],
+) -> frozenset[SurfaceIdentityFact]:
+    """Every v2 surface fact over the supplied source. Reads only `sources`.
+
+    Uses the same parser (`_kernel_imports`) and the same merge rule
+    (`_SurfaceAccumulator`) `evaluate` uses, so there is no second sweep to
+    drift from the first.
+
+    A source that will not parse is SKIPPED here rather than reported. This is
+    a derivation helper, not an arm: `evaluate` already refuses an unparsed
+    file as an unmeasured one (`kernel.source.unreadable`), and a product that
+    reached this function without running that has a measurement problem this
+    function cannot repair and must not paper over by raising a different one.
+    """
+    accumulated = _SurfaceAccumulator()
+    for path in sorted(sources, key=lambda item: item.as_posix()):
+        try:
+            tree = ast.parse(sources[path], filename=path.as_posix())
+        except (SyntaxError, ValueError):
+            continue
+        for entry in _kernel_imports(tree):
+            accumulated.add(path, entry)
+    return accumulated.identity_facts()
+
+
+def observed_surface_identity(
+    facts: frozenset[SurfaceIdentityFact],
+) -> tuple[str, str]:
+    """`observed_surface`'s v2 counterpart: the digest and its rendering.
+
+    Same purpose and same reason for existing. A product migrating from
+    `dmg-kernel-surface-v1` to `dmg-kernel-surface-v2` needs the value the
+    runner would derive, and it must come from the runner rather than from a
+    second implementation.
+
+    A v2 digest IS compared. `declaration_contract_v2` admits
+    `ACCEPTED_SOURCE_SURFACE_ALGORITHMS` -- exactly `{dmg-kernel-surface-v1,
+    dmg-kernel-surface-v2}` -- and `_check_source_surface` dispatches on the
+    declared name, so a product that declares the value this function returns
+    is measured against it and refused when its source moves.
+
+    (This paragraph previously said the opposite. It was true when written and
+    the same change that made it false is the change that admitted v2, which is
+    exactly the shape a stale docstring takes: nothing fails when a comment
+    stops being true.)
+    """
+    return surface_identity_digest(facts), render_surface_identity(facts)
+
+
 def observed_surface(
     facts: frozenset[SurfaceFact],
 ) -> tuple[str, str]:
@@ -1063,6 +1240,7 @@ def _check_declaration(
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
     observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
     facts: frozenset[SurfaceFact],
+    identity_facts: frozenset[SurfaceIdentityFact],
 ) -> list[Finding]:
     """Arms 4, 6 and 7, and the five states the declaration can be in.
 
@@ -1106,7 +1284,12 @@ def _check_declaration(
     declaration: AnyKernelAdoptionDeclaration = outcome.declaration
     if isinstance(declaration, KernelAdoptionDeclarationV2):
         return _check_v2(
-            inputs, declaration, kernel_import_sites, observed_symbols, facts
+            inputs,
+            declaration,
+            kernel_import_sites,
+            observed_symbols,
+            facts,
+            identity_facts,
         )
 
     #: `product_revision` is REQUIRED of every declaration, `not_applicable`
@@ -1221,6 +1404,7 @@ def _check_v2(
     kernel_import_sites: list[tuple[PurePosixPath, int, str]],
     observed_symbols: dict[str, frozenset[tuple[PurePosixPath, str]]],
     facts: frozenset[SurfaceFact],
+    identity_facts: frozenset[SurfaceIdentityFact],
 ) -> list[Finding]:
     """Everything a `KernelAdoptionDeclaration.v2` document is measured against.
 
@@ -1261,7 +1445,7 @@ def _check_v2(
         return findings
 
     observed_modules = frozenset(fact.module for fact in facts)
-    findings.extend(_check_source_surface(declaration, facts))
+    findings.extend(_check_source_surface(declaration, facts, identity_facts))
     findings.extend(_check_catalogue_binding(declaration, inputs.catalogue))
     findings.extend(
         _check_required_surfaces(
@@ -1285,13 +1469,10 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     findings: list[Finding] = []
     kernel_import_sites: list[tuple[PurePosixPath, int, str]] = []
     observed_symbols: dict[str, set[tuple[PurePosixPath, str]]] = {}
-    #: One entry per (file, Kernel module), MERGED across statements. Two
-    #: imports of one module in one file are one fact carrying the union of
-    #: what they bound, so splitting a `from x import a, b` in two does not
-    #: move the source-surface digest. See `surface` for the rest of the
-    #: canonicalization and for what the digest does not prove.
-    surface_symbols: dict[tuple[PurePosixPath, str], set[str]] = defaultdict(set)
-    surface_star: set[tuple[PurePosixPath, str]] = set()
+    #: The merge rule and both algorithms' fact builders. See
+    #: `_SurfaceAccumulator`, and `surface` for the rest of the
+    #: canonicalization and for what a digest does not prove.
+    accumulated = _SurfaceAccumulator()
     catalogue = inputs.catalogue
 
     if not inputs.sources:
@@ -1333,9 +1514,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             observed_symbols.setdefault(module, set()).update(
                 (path, name) for name in entry.bound
             )
-            surface_symbols[(path, module)].update(entry.bound)
-            if entry.star:
-                surface_star.add((path, module))
+            accumulated.add(path, entry)
 
             private = _private_components(module)
             if private:
@@ -1426,15 +1605,12 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                 )
             )
 
-    facts = frozenset(
-        SurfaceFact(
-            path=path,
-            module=module,
-            symbols=tuple(sorted(symbols)),
-            star=(path, module) in surface_star,
-        )
-        for (path, module), symbols in surface_symbols.items()
-    )
+    facts = accumulated.facts()
+    # Both fact sets, from the ONE sweep above. The declaration's own
+    # `source_surface.algorithm` selects which is compared; deriving both
+    # unconditionally is what keeps the label a CHOICE between two
+    # measurements rather than an assertion about one.
+    identity_facts = accumulated.identity_facts()
 
     findings.extend(_check_pins(inputs))
     findings.extend(_pin_sufficiency(inputs))
@@ -1444,6 +1620,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
             kernel_import_sites,
             {key: frozenset(value) for key, value in observed_symbols.items()},
             facts,
+            identity_facts,
         )
     )
 

@@ -80,9 +80,10 @@ from .declaration_contract import (
 from .declaration_contract import (
     _sequence as _sequence,
 )
-from .surface import SOURCE_SURFACE_ALGORITHM
+from .surface import SOURCE_SURFACE_ALGORITHM, SOURCE_SURFACE_IDENTITY_ALGORITHM
 
 __all__ = [
+    "ACCEPTED_SOURCE_SURFACE_ALGORITHMS",
     "KERNEL_ADOPTION_CONTRACT_V2",
     "AnyKernelAdoptionDeclaration",
     "KernelAdoptionDeclarationV2",
@@ -91,6 +92,17 @@ __all__ = [
     "parse_any_declaration",
     "parse_declaration_v2",
 ]
+
+#: The source-surface canonicalizations a v2 document may declare. EXACTLY two,
+#: closed, and each one has an evaluation behind it in `engine`. `v1` is frozen
+#: and stays admitted so a product already declaring it needs no edit; `v2`
+#: records the Kernel's own name for a symbol separately from the local name it
+#: was bound to. Adding a third is a change to this set AND to the engine's
+#: dispatch, together, which is the point of stating it as a set rather than a
+#: prefix or a lookup.
+ACCEPTED_SOURCE_SURFACE_ALGORITHMS: Final[frozenset[str]] = frozenset(
+    {SOURCE_SURFACE_ALGORITHM, SOURCE_SURFACE_IDENTITY_ALGORITHM}
+)
 
 #: A NEW contract string. A v2 document handed to v1's parser is refused by
 #: name, and a v1 document handed to v2's parser likewise.
@@ -197,14 +209,40 @@ def _declared_at(value: object) -> date:
 
 
 def _source_surface(value: object) -> SourceSurfaceCoordinate:
+    """The declared coordinate, and WHICH canonicalization it was taken under.
+
+    `algorithm` is not decoration: it SELECTS the evaluation the engine runs
+    (`engine._check_source_surface`). Widening this to two names is compatible
+    VOCABULARY widening, not a document-schema change --
+    `KernelAdoptionDeclaration.v2` is unchanged, every field keeps its meaning,
+    and an existing v1 declaration parses and evaluates exactly as it did.
+
+    The accepted set is CLOSED at exactly two. Not "any name the package
+    knows", not a registry a later module could add to: a name admitted here
+    with no evaluation behind it would be a coordinate that parses and is never
+    compared, which is the defect this package exists to catch.
+
+    What this function CANNOT do, stated because a reader will otherwise assume
+    it: it cannot tell whether the DIGEST was really taken under the algorithm
+    the document names. A digest is 64 opaque hex characters; nothing in
+    `sha256:eb88...` says which rendering produced it. Relabelling a v1 digest
+    `dmg-kernel-surface-v2` therefore PARSES here and is refused by the run --
+    the engine derives the v2 digest from the measured source and reports
+    `kernel.source.surface-drift`. That is exactly what domain separation buys:
+    the two algorithms take their digests over different bytes, so a relabelled
+    value cannot match, and the refusal needs no oracle a parser does not have.
+    """
     where = "source_surface"
     data = _object(value, where)
     _keys(data, frozenset({"algorithm", "digest"}), where)
     algorithm = _text(data["algorithm"], f"{where}.algorithm")
-    if algorithm != SOURCE_SURFACE_ALGORITHM:
+    if algorithm not in ACCEPTED_SOURCE_SURFACE_ALGORITHMS:
+        accepted = ", ".join(
+            repr(name) for name in sorted(ACCEPTED_SOURCE_SURFACE_ALGORITHMS)
+        )
         raise DeclarationError(
             f"{where}.algorithm is {algorithm!r}; this contract reads "
-            f"{SOURCE_SURFACE_ALGORITHM!r} only. A digest taken under a "
+            f"{accepted} and nothing else. A digest taken under a "
             "canonicalization this run does not implement cannot be compared, "
             "and comparing it anyway would report 'the source moved' for a "
             "document whose rendering rule moved instead"

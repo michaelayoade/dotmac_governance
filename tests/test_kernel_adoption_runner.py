@@ -239,7 +239,8 @@ ALIASED_V2_SOURCES = {
 }
 
 #: The surface digest of `V2_SOURCES`, built from its one module-only fact.
-#: The empty symbol tuple is material: no member-publication claim was made.
+#: Python binds the local root name `dotmac_kernel`, which v1 records as its
+#: symbol; the import still makes no submodule-member publication claim.
 #: Constructed rather than copied from a run: a literal here would be a number
 #: nobody could re-derive, which is the defect the coordinate exists to end.
 V2_SURFACE_DIGEST = surface_digest(
@@ -248,7 +249,7 @@ V2_SURFACE_DIGEST = surface_digest(
             SurfaceFact(
                 path=PurePosixPath("app/legacy.py"),
                 module="dotmac_kernel.db",
-                symbols=(),
+                symbols=("dotmac_kernel",),
                 star=False,
             )
         }

@@ -223,7 +223,10 @@ V2_CATALOGUE = KernelSurfaceCatalogue(
     artifact_digest=KERNEL_DIGEST,
 )
 
-V2_SOURCES = {PurePosixPath("app/legacy.py"): CONSUMER}
+#: The v2 activation subject imports the published module but names no member
+#: from it.  It is intentionally clean without submodule-export evidence;
+#: named-symbol and alias behavior belongs to `ALIASED_V2_SOURCES` below.
+V2_SOURCES = {PurePosixPath("app/legacy.py"): "import dotmac_kernel.db\n"}
 
 # The source-surface identity is deliberately different from the v1 fixture:
 # the Kernel name is `session`, while the product binds it locally as
@@ -235,17 +238,17 @@ ALIASED_V2_SOURCES = {
     )
 }
 
-#: The surface digest of `V2_SOURCES`, built from the one fact that source
-#: contains. Constructed rather than copied from a run: a literal here would be
-#: a number nobody could re-derive, which is the defect the coordinate exists
-#: to end.
+#: The surface digest of `V2_SOURCES`, built from its one module-only fact.
+#: The empty symbol tuple is material: no member-publication claim was made.
+#: Constructed rather than copied from a run: a literal here would be a number
+#: nobody could re-derive, which is the defect the coordinate exists to end.
 V2_SURFACE_DIGEST = surface_digest(
     frozenset(
         {
             SurfaceFact(
                 path=PurePosixPath("app/legacy.py"),
                 module="dotmac_kernel.db",
-                symbols=("session",),
+                symbols=(),
                 star=False,
             )
         }

@@ -2620,7 +2620,7 @@ class CanonicalKernelIdentity(Base):
         CURRENT engine only, and the historical comparison it depends on is
         committed as
         `V1IsProvedAgainstItsOwnHistoricalImplementation
-        ::test_the_historical_and_current_engines_agree_on_a_v1_declaration`.
+        ::test_the_current_v2_evaluator_adds_only_the_export_observation_refusal`.
         """
         sources = {
             PurePosixPath("a.py"): "from dotmac_kernel import Y\n",
@@ -2863,9 +2863,11 @@ class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
 
     This class loads that revision's own `surface.py` and `engine.py`, runs
     them, and compares three things with the current ones over the same inputs:
-    the RENDERING, the DIGEST, and the EVALUATION RESULT. The third is the one
-    nothing else covers -- the through-the-contract test exercises the current
-    engine alone, so it can only show today's code is self-consistent.
+    the RENDERING, the DIGEST, and the EVALUATION RESULT. The first two remain
+    byte-identical. The evaluator comparison records its one intentional v2
+    delta: unobserved submodule exports now refuse named imports, while the v1
+    rendering and digest remain frozen. The through-the-contract test exercises
+    the current engine alone, so it can only show today's code is self-consistent.
 
     **It never skips.** `PRE_V2_REVISION` is an ancestor of every commit on this
     branch, so it is in HEAD's own history; the workflow pins `fetch-depth: 0`
@@ -3104,20 +3106,20 @@ class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
             contract_v2=current_contract_v2,
         )
 
-    def test_the_historical_and_current_engines_agree_on_a_v1_declaration(
+    def test_the_current_v2_evaluator_adds_only_the_export_observation_refusal(
         self,
     ) -> None:
-        """Comparison three of three, and the arm nothing else supplies.
+        """Comparison three records the intentional evaluator delta.
 
         The rendering and the digest are pure functions; the EVALUATION is the
-        whole path -- parse, dispatch, sweep, merge, compare -- and it is the
-        one the dispatch work could plausibly have moved. Two subjects, because
-        a comparison that only ever comes out "both clean" cannot distinguish
-        two agreeing implementations from two that both do nothing:
+        whole path -- parse, dispatch, sweep, merge, compare. Two subjects
+        prove that the new refusal is additive rather than a rewrite:
 
-        - a matching digest, where both must report NOTHING;
-        - a digest that does not describe the source, where both must report
-          `kernel.source.surface-drift` and only that.
+        - a matching digest was historically clean and now reports only
+          `kernel.module.exports-unobserved`;
+        - a stale digest historically reports only
+          `kernel.source.surface-drift`; the current evaluator adds the same
+          export-observation refusal without losing the drift finding.
         """
         current = self.current_modules()
         tuples = self.fact_tuples()
@@ -3139,10 +3141,16 @@ class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
         current_drift = self.evaluate_with(current, self.document(stale))
 
         self.assertEqual([], historical_clean)
-        self.assertEqual(historical_clean, current_clean)
+        self.assertEqual([FindingCode.MODULE_EXPORTS_UNOBSERVED.value], current_clean)
 
         self.assertEqual([FindingCode.SOURCE_SURFACE_DRIFT.value], historical_drift)
-        self.assertEqual(historical_drift, current_drift)
+        self.assertEqual(
+            [
+                FindingCode.MODULE_EXPORTS_UNOBSERVED.value,
+                FindingCode.SOURCE_SURFACE_DRIFT.value,
+            ],
+            current_drift,
+        )
 
 
 if __name__ == "__main__":

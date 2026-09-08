@@ -136,6 +136,7 @@ def catalogue(
     internal: frozenset[str] = frozenset(),
     artifact_digest: str | None = WHEEL,
     root_exports: frozenset[str] = frozenset(),
+    module_exports: dict[str, frozenset[str] | None] | None = None,
 ) -> KernelSurfaceCatalogue:
     """A catalogue fixture. Production callers pass the Kernel's real lists.
 
@@ -152,6 +153,7 @@ def catalogue(
         internal=internal,
         artifact_digest=artifact_digest,
         root_exports=root_exports,
+        module_exports={} if module_exports is None else module_exports,
     )
 
 
@@ -271,7 +273,10 @@ def report(
 ONE_IMPORT = {
     PurePosixPath("src/app/service.py"): "from dotmac_kernel.messaging import publish\n"
 }
-ONE_MODULE = catalogue(frozenset({"dotmac_kernel.messaging"}))
+ONE_MODULE = catalogue(
+    frozenset({"dotmac_kernel.messaging"}),
+    module_exports={"dotmac_kernel.messaging": frozenset({"publish", "emit"})},
+)
 REQUIRED_ONE = [
     {
         "module": "dotmac_kernel.messaging",
@@ -378,6 +383,26 @@ class V1IsFrozenAndStillReadable(Base):
         }
         codes = report(document, ONE_IMPORT, ONE_MODULE)
         self.assertNamed(codes, FindingCode.DECLARATION_FIELDS_UNEVALUATED)
+
+    def test_v1_named_submodule_imports_remain_outside_the_v2_export_gate(self) -> None:
+        """The new release-export authority is a v2 contract extension."""
+        document = {
+            "contract": KERNEL_ADOPTION_CONTRACT,
+            "product_revision": PREDECESSOR,
+            "applicability": "applicable",
+            "kernel_catalogue": {
+                "version": "0.1.0a98",
+                "revision": KERNEL_REVISION,
+                "artifact_digest": WHEEL,
+            },
+            "required_surfaces": [],
+            "prohibited_surfaces": [],
+            "transitional_surfaces": [],
+        }
+        unobserved = catalogue(frozenset({"dotmac_kernel.messaging"}))
+        codes = report(document, ONE_IMPORT, unobserved)
+        self.assertSilent(codes, FindingCode.MODULE_EXPORTS_UNOBSERVED)
+        self.assertSilent(codes, FindingCode.MODULE_ATTRIBUTE_UNMEASURED)
 
     def test_a_v2_applicable_run_publishes_no_unevaluated_notice(self) -> None:
         """The successor's whole claim, asserted rather than described.
@@ -801,7 +826,10 @@ class RequiredSurfacesAreExecutable(Base):
 
     def test_a_required_module_nothing_imports_is_named(self) -> None:
         """A declared dependency with no use: this package's own subject."""
-        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        item = catalogue(
+            frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}),
+            module_exports={"dotmac_kernel.messaging": frozenset({"publish"})},
+        )
         required = REQUIRED_ONE + [
             {
                 "module": "dotmac_kernel.db",
@@ -819,7 +847,13 @@ class RequiredSurfacesAreExecutable(Base):
                 "from dotmac_kernel.db import session\n"
             )
         }
-        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        item = catalogue(
+            frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}),
+            module_exports={
+                "dotmac_kernel.messaging": frozenset({"publish"}),
+                "dotmac_kernel.db": frozenset({"session"}),
+            },
+        )
         self.assertNamed(
             self.go(REQUIRED_ONE, sources=sources, catalogue=item),
             FindingCode.SURFACE_UNCLASSIFIED,
@@ -833,7 +867,13 @@ class RequiredSurfacesAreExecutable(Base):
                 "from dotmac_kernel.db import session\n"
             )
         }
-        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        item = catalogue(
+            frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}),
+            module_exports={
+                "dotmac_kernel.messaging": frozenset({"publish"}),
+                "dotmac_kernel.db": frozenset({"session"}),
+            },
+        )
         document = v2_document(
             sources,
             item,
@@ -1157,7 +1197,13 @@ class DeclarationAge(Base):
 
     def go(self, expiry: str) -> tuple[FindingCode, ...]:
         sources = self.sources()
-        item = catalogue(frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}))
+        item = catalogue(
+            frozenset({"dotmac_kernel.messaging", "dotmac_kernel.db"}),
+            module_exports={
+                "dotmac_kernel.messaging": frozenset({"publish"}),
+                "dotmac_kernel.db": frozenset({"session"}),
+            },
+        )
         document = v2_document(
             sources,
             item,
@@ -1194,10 +1240,11 @@ class ThePlatformSubject(Base):
     actual acceptance proof is Platform #181's runner over Platform's LIVE
     source, in Platform's own CI, against a declaration Platform wrote. What
     this class has is a fixture: 85 facts measured once, at one pinned
-    revision, replayed from a JSON file. It proves the contract does not refuse
-    a real product's shape and it catches a regression against that shape. It
-    cannot prove Platform is enrolled, cannot prove the fixture still describes
-    Platform's current source, and does not become acceptance by being green.
+    revision, replayed from a JSON file. It preserves a real product's shape,
+    but its a102 named-submodule imports are explicitly refused until
+    Governance-held export evidence exists. It cannot prove Platform is
+    enrolled, cannot prove the fixture still describes Platform's current
+    source, and does not become acceptance by being green.
 
     That distinction is stated here rather than left implied because the
     previous version of this class read as acceptance and one of its arms
@@ -1206,8 +1253,9 @@ class ThePlatformSubject(Base):
     that cost.
 
     Read the module docstring for what the subject establishes generally and
-    the three things it does not. The short form: the contract admits a real
-    product's shape, and Platform's declaration remains Platform's to write.
+    the three things it does not. The short form: the fixture preserves a real
+    product's shape, but a102's unobserved submodule exports are non-citable.
+    Platform's declaration remains Platform's to write.
     """
 
     def load(self) -> dict[str, Any]:
@@ -1378,8 +1426,10 @@ class ThePlatformSubject(Base):
         )
         return document, item
 
-    def test_the_contract_admits_a_real_products_shape(self) -> None:
-        """The admit control this whole change needed, and the one #81 lacked.
+    def test_the_a102_fixture_is_explicitly_refused_without_export_evidence(
+        self,
+    ) -> None:
+        """A real legacy shape is not historical export evidence.
 
         A rule observed only refusing is indistinguishable from one that
         refuses everything. Seventeen classified surfaces, a fourteen-pair
@@ -1388,22 +1438,26 @@ class ThePlatformSubject(Base):
         of Platform's own lock -- measured against the REAL a102 catalogue
         rather than one derived from Platform's own imports.
 
-        NO findings: all 85 measured symbol facts, all 16 submodules and all 28
-        root symbols are admitted by the real a102 catalogue.
+        The a102 catalogue deliberately carries no per-submodule ``__all__``
+        evidence. A clean result would let absence mean publication, so every
+        named submodule import is non-citable and reports
+        ``MODULE_EXPORTS_UNOBSERVED``.
 
         Two separate things had to be true before this could be clean, and
         neither was reached by adjusting anything to get here. The catalogue
         stopped being `frozenset(observed_modules)` -- which published whatever
         Platform imported, including the bare `dotmac_kernel`, and is why this
-        was green while Platform's real enrolment was red. And the fixture
-        stopped recording LOCAL bound names, which had made Platform's alias
-        for `UndeclaredCapabilityError` look like a name the Kernel does not
-        publish.
+        was green while Platform's real enrolment was red. The fixture still
+        records canonical aliases, but that fixes import identity only; it
+        cannot fabricate the release-bound submodule export lists a102 never
+        published.
         """
         fixture = self.load()
         sources = self.sources(fixture)
         document, item = self.declaration(fixture, sources)
-        self.assertClean(report(document, sources, item))
+        self.assertNamed(
+            report(document, sources, item), FindingCode.MODULE_EXPORTS_UNOBSERVED
+        )
 
     def test_submodules_reached_through_the_root_are_admitted(self) -> None:
         """`from dotmac_kernel import audit` binds a SUPPORTED module.
@@ -1943,6 +1997,7 @@ class EveryNewCodeIsReachable(unittest.TestCase):
             FindingCode.REQUIRED_UNPUBLISHED,
             FindingCode.ROOT_EXPORTS_UNOBSERVED,
             FindingCode.ROOT_SYMBOL_UNEXPORTED,
+            FindingCode.MODULE_EXPORTS_UNOBSERVED,
             FindingCode.REQUIRED_UNUSED,
             FindingCode.SURFACE_UNCLASSIFIED,
             FindingCode.REQUIRED_FLOOR_UNSATISFIED,
@@ -2565,7 +2620,7 @@ class CanonicalKernelIdentity(Base):
         CURRENT engine only, and the historical comparison it depends on is
         committed as
         `V1IsProvedAgainstItsOwnHistoricalImplementation
-        ::test_the_historical_and_current_engines_agree_on_a_v1_declaration`.
+        ::test_the_current_v2_evaluator_adds_only_the_export_observation_refusal`.
         """
         sources = {
             PurePosixPath("a.py"): "from dotmac_kernel import Y\n",
@@ -2576,7 +2631,11 @@ class CanonicalKernelIdentity(Base):
         # Non-vacuity: these sources really do measure to the golden fact set.
         self.assertEqual(V1_GOLDEN_FACTS, facts_of(sources))
 
-        item = catalogue(frozenset({"dotmac_kernel.db"}), root_exports=frozenset({"Y"}))
+        item = catalogue(
+            frozenset({"dotmac_kernel.db"}),
+            root_exports=frozenset({"Y"}),
+            module_exports={"dotmac_kernel.db": frozenset({"Session", "get_session"})},
+        )
         # An `applicable` declaration classifies EVERY module its source
         # imports -- `required_surfaces` is an inventory, not a sample -- and
         # an unclassified import is a finding about the DECLARATION, nothing to
@@ -2804,9 +2863,11 @@ class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
 
     This class loads that revision's own `surface.py` and `engine.py`, runs
     them, and compares three things with the current ones over the same inputs:
-    the RENDERING, the DIGEST, and the EVALUATION RESULT. The third is the one
-    nothing else covers -- the through-the-contract test exercises the current
-    engine alone, so it can only show today's code is self-consistent.
+    the RENDERING, the DIGEST, and the EVALUATION RESULT. The first two remain
+    byte-identical. The evaluator comparison records its one intentional v2
+    delta: unobserved submodule exports now refuse named imports, while the v1
+    rendering and digest remain frozen. The through-the-contract test exercises
+    the current engine alone, so it can only show today's code is self-consistent.
 
     **It never skips.** `PRE_V2_REVISION` is an ancestor of every commit on this
     branch, so it is in HEAD's own history; the workflow pins `fetch-depth: 0`
@@ -3045,20 +3106,20 @@ class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
             contract_v2=current_contract_v2,
         )
 
-    def test_the_historical_and_current_engines_agree_on_a_v1_declaration(
+    def test_the_current_v2_evaluator_adds_only_the_export_observation_refusal(
         self,
     ) -> None:
-        """Comparison three of three, and the arm nothing else supplies.
+        """Comparison three records the intentional evaluator delta.
 
         The rendering and the digest are pure functions; the EVALUATION is the
-        whole path -- parse, dispatch, sweep, merge, compare -- and it is the
-        one the dispatch work could plausibly have moved. Two subjects, because
-        a comparison that only ever comes out "both clean" cannot distinguish
-        two agreeing implementations from two that both do nothing:
+        whole path -- parse, dispatch, sweep, merge, compare. Two subjects
+        prove that the new refusal is additive rather than a rewrite:
 
-        - a matching digest, where both must report NOTHING;
-        - a digest that does not describe the source, where both must report
-          `kernel.source.surface-drift` and only that.
+        - a matching digest was historically clean and now reports only
+          `kernel.module.exports-unobserved`;
+        - a stale digest historically reports only
+          `kernel.source.surface-drift`; the current evaluator adds the same
+          export-observation refusal without losing the drift finding.
         """
         current = self.current_modules()
         tuples = self.fact_tuples()
@@ -3080,10 +3141,16 @@ class V1IsProvedAgainstItsOwnHistoricalImplementation(Base):
         current_drift = self.evaluate_with(current, self.document(stale))
 
         self.assertEqual([], historical_clean)
-        self.assertEqual(historical_clean, current_clean)
+        self.assertEqual([FindingCode.MODULE_EXPORTS_UNOBSERVED.value], current_clean)
 
         self.assertEqual([FindingCode.SOURCE_SURFACE_DRIFT.value], historical_drift)
-        self.assertEqual(historical_drift, current_drift)
+        self.assertEqual(
+            [
+                FindingCode.MODULE_EXPORTS_UNOBSERVED.value,
+                FindingCode.SOURCE_SURFACE_DRIFT.value,
+            ],
+            current_drift,
+        )
 
 
 if __name__ == "__main__":

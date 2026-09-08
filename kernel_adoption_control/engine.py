@@ -226,7 +226,10 @@ def _module_all(tree: ast.Module) -> frozenset[str] | None:
     is a translation layer, which is the correct shape, and a detector that
     fired on "imports Kernel names and is not a test" would condemn it.
     """
-    for node in tree.body:
+    # The normal import census is AST-wide.  Keep this inventory AST-wide too:
+    # a Kernel import inside a function or branch cannot disappear merely
+    # because a separate export check looked only at ``tree.body``.
+    for node in ast.walk(tree):
         targets: list[ast.expr] = []
         if isinstance(node, ast.Assign):
             targets = list(node.targets)
@@ -378,6 +381,193 @@ def _check_root_facade(
                 line=entry.line,
             )
         )
+    return findings
+
+
+def _check_module_exports(
+    path: PurePosixPath,
+    entry: _KernelImport,
+    catalogue: KernelSurfaceCatalogue,
+) -> list[Finding]:
+    """Check direct submodule names against successor release evidence."""
+    if not entry.names:
+        return []
+    exports = catalogue.module_exports.get(entry.module)
+    if exports is None:
+        return [
+            _error(
+                FindingCode.MODULE_EXPORTS_UNOBSERVED,
+                f"imports named symbols from {entry.module}, but its trusted "
+                "release catalogue carries no declared module exports. Python "
+                "attribute reachability is not a published contract",
+                path=path,
+                line=entry.line,
+            )
+        ]
+    return [
+        _error(
+            FindingCode.MODULE_SYMBOL_UNEXPORTED,
+            f"imports {name} from {entry.module}, but {KERNEL_ROOT} "
+            f"{catalogue.version} does not export that name in the trusted "
+            "release catalogue",
+            path=path,
+            line=entry.line,
+        )
+        for name in sorted(entry.names - exports)
+    ]
+
+
+def _check_module_alias_attributes(
+    path: PurePosixPath,
+    tree: ast.Module,
+    catalogue: KernelSurfaceCatalogue | None,
+) -> list[Finding]:
+    """Resolve attribute paths to Kernel module/name coordinates.
+
+    Python's local aliases are not the publication subject.  This understands
+    all three ordinary spellings of a submodule path: ``from root import db as
+    d``, ``import root as k; k.db.Name`` and ``import root.db; root.db.Name``.
+    Only the outermost attribute of a chain is evaluated, so the intermediate
+    ``root.db`` in the last spelling is not falsely read as an exported name.
+    """
+    if catalogue is None:
+        return []
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                if item.name == KERNEL_ROOT:
+                    aliases[item.asname or KERNEL_ROOT] = KERNEL_ROOT
+                elif item.name.startswith(_KERNEL_PREFIX):
+                    # Without ``as``, Python binds the root. With it, it
+                    # binds the full module path.
+                    aliases[item.asname or KERNEL_ROOT] = (
+                        item.name if item.asname else KERNEL_ROOT
+                    )
+        elif isinstance(node, ast.ImportFrom) and node.module == KERNEL_ROOT:
+            for item in node.names:
+                candidate = f"{KERNEL_ROOT}.{item.name}"
+                if candidate in catalogue.known:
+                    aliases[item.asname or item.name] = candidate
+
+    children = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+    }
+    parents = {
+        id(child): parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    findings: list[Finding] = []
+    for walk_node in ast.walk(tree):
+        if not isinstance(walk_node, ast.Attribute) or id(walk_node) in children:
+            continue
+        names: list[str] = []
+        cursor: ast.expr = walk_node
+        while isinstance(cursor, ast.Attribute):
+            names.append(cursor.attr)
+            cursor = cursor.value
+        if not isinstance(cursor, ast.Name):
+            continue
+        module = aliases.get(cursor.id)
+        if module is None:
+            continue
+        # Binding resolution below function/class/branch scope needs a real
+        # control-flow and lexical-scope analysis.  Do not silently treat a
+        # same-spelled local as the module import: top-level paths are the
+        # supported syntax; nested paths are deliberately unmeasured.
+        ancestor: ast.AST | None = parents.get(id(walk_node))
+        nested = False
+        while ancestor is not None and not isinstance(ancestor, ast.Module):
+            if isinstance(
+                ancestor,
+                (
+                    ast.FunctionDef,
+                    ast.AsyncFunctionDef,
+                    ast.Lambda,
+                    ast.ClassDef,
+                    ast.If,
+                    ast.For,
+                    ast.AsyncFor,
+                    ast.While,
+                    ast.Try,
+                    ast.With,
+                    ast.AsyncWith,
+                    ast.Match,
+                ),
+            ):
+                nested = True
+                break
+            ancestor = parents.get(id(ancestor))
+        if nested:
+            findings.append(
+                _error(
+                    FindingCode.MODULE_ATTRIBUTE_UNMEASURED,
+                    f"reads {cursor.id}.{'.'.join(reversed(names))} below a "
+                    "nested lexical/control-flow scope. The export checker "
+                    "does not yet resolve nested bindings, so it refuses "
+                    "rather than admitting a same-spelled local name",
+                    path=path,
+                    line=walk_node.lineno,
+                )
+            )
+            continue
+        for index, name in enumerate(reversed(names)):
+            candidate = f"{module}.{name}"
+            if candidate in catalogue.known:
+                module = candidate
+                continue
+            remaining = index != len(names) - 1
+            if module == KERNEL_ROOT:
+                if name in catalogue.root_exports and not remaining:
+                    break
+                findings.append(
+                    _error(
+                        FindingCode.MODULE_ATTRIBUTE_UNMEASURED,
+                        f"reads {cursor.id}.{'.'.join(reversed(names))}, which "
+                        "does not resolve to a trusted Kernel module/name "
+                        "coordinate",
+                        path=path,
+                        line=walk_node.lineno,
+                    )
+                )
+                break
+            exports = catalogue.module_exports.get(module)
+            if exports is None:
+                findings.append(
+                    _error(
+                        FindingCode.MODULE_ATTRIBUTE_UNMEASURED,
+                        f"reads {cursor.id}.{'.'.join(reversed(names))} through "
+                        f"{module}, whose trusted release catalogue carries no "
+                        "declared exports",
+                        path=path,
+                        line=walk_node.lineno,
+                    )
+                )
+            elif name not in exports:
+                findings.append(
+                    _error(
+                        FindingCode.MODULE_SYMBOL_UNEXPORTED,
+                        f"reads {cursor.id}.{'.'.join(reversed(names))} through "
+                        f"{module}, but {KERNEL_ROOT} {catalogue.version} does "
+                        f"not export {name} in the trusted release catalogue",
+                        path=path,
+                        line=walk_node.lineno,
+                    )
+                )
+            elif remaining:
+                findings.append(
+                    _error(
+                        FindingCode.MODULE_ATTRIBUTE_UNMEASURED,
+                        f"reads through exported {module}.{name}; the remaining "
+                        "attribute path has no Kernel module/export coordinate",
+                        path=path,
+                        line=walk_node.lineno,
+                    )
+                )
+            break
     return findings
 
 
@@ -1490,6 +1680,9 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     #: canonicalization and for what a digest does not prove.
     accumulated = _SurfaceAccumulator()
     catalogue = inputs.catalogue
+    module_exports_required = isinstance(
+        inputs.declaration, DeclarationPresent
+    ) and isinstance(inputs.declaration.declaration, KernelAdoptionDeclarationV2)
 
     if not inputs.sources:
         findings.append(
@@ -1523,6 +1716,8 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
         if not imports:
             continue
         exported = _module_all(tree)
+        if module_exports_required:
+            findings.extend(_check_module_alias_attributes(path, tree, catalogue))
 
         for entry in imports:
             module = entry.module
@@ -1586,6 +1781,8 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                             line=entry.line,
                         )
                     )
+                elif module_exports_required:
+                    findings.extend(_check_module_exports(path, entry, catalogue))
 
             if entry.star:
                 findings.append(

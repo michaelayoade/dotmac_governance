@@ -106,6 +106,11 @@ from .declaration_contract import KERNEL_ADOPTION_CONTRACT
 from .declaration_contract_v2 import KERNEL_ADOPTION_CONTRACT_V2
 from .engine import evaluate
 from .surface import CATALOGUE_DIGEST_ALGORITHM
+from .trusted_catalogue import (
+    DEFAULT_TRUSTED_CATALOGUES,
+    TrustedCatalogueError,
+    trusted_surface_catalogue,
+)
 
 __all__ = [
     "CANONICAL_GOVERNANCE",
@@ -832,6 +837,13 @@ def run(
     outcome = read_declaration(root, location)
     _check_bound_contract(binding, outcome)
 
+    # Capture the actual Governance-owned evidence BYTES before importing
+    # product code. An observer may rebind globals after it returns, but it
+    # cannot choose this pathless snapshot. This is not a Python sandbox:
+    # arbitrary same-process code can still attack interpreter state, so CI's
+    # trusted-checkout boundary remains load-bearing.
+    trusted_catalogues = DEFAULT_TRUSTED_CATALOGUES.snapshot()
+
     with _import_root(root):
         observer = resolve_observer(observer_reference)
         try:
@@ -848,6 +860,14 @@ def run(
             f"the observer {observer_reference} returned "
             f"{type(observation).__name__}, not a ProductObservation"
         )
+    try:
+        catalogue = trusted_surface_catalogue(observation.catalogue, trusted_catalogues)
+    except TrustedCatalogueError as error:
+        raise RunnerError(
+            f"Kernel catalogue trust resolution refused: {error}. A product "
+            "observer may report coordinates but cannot supply the publication "
+            "authority used to classify a successor Kernel"
+        ) from error
 
     predecessor: PredecessorObservation | None = None
     if isinstance(outcome, DeclarationPresent) and isinstance(
@@ -860,7 +880,7 @@ def run(
     report = evaluate(
         KernelAdoptionInputs(
             sources=observation.sources,
-            catalogue=observation.catalogue,
+            catalogue=catalogue,
             declaration=outcome,
             as_of=as_of,
             pin_sites=observation.pin_sites,
@@ -882,7 +902,7 @@ def run(
         observer=observer_reference,
         source_count=len(observation.sources),
         pin_site_count=len(observation.pin_sites),
-        catalogue=observation.catalogue,
+        catalogue=catalogue,
         report=report,
     )
     # The one place a report becomes citable-in-principle. Registered AFTER

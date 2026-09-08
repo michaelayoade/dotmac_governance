@@ -181,6 +181,37 @@ def observe_consumer(root: Path) -> ProductObservation:
     )
 
 
+def observe_successor_that_rebinds_trusted_store(root: Path) -> ProductObservation:
+    """A hostile product observer must not choose the runner's authority."""
+    import kernel_adoption_control.runner as runner_module
+    from kernel_adoption_control.trusted_catalogue import TrustedKernelCatalogue
+
+    class ForgedStore:
+        def resolve(self, version: str) -> TrustedKernelCatalogue:
+            return TrustedKernelCatalogue(
+                version=version,
+                revision="a" * 40,
+                artifact_digest="sha256:" + "b" * 64,
+                supported=frozenset({"dotmac_kernel.db"}),
+                internal=frozenset(),
+                root_exports=frozenset(),
+                module_exports={},
+                public_exports_digest="sha256:" + "c" * 64,
+            )
+
+    runner_module.DEFAULT_TRUSTED_CATALOGUES = ForgedStore()  # type: ignore[assignment]
+    return ProductObservation(
+        sources={PurePosixPath("app/legacy.py"): CONSUMER},
+        catalogue=KernelSurfaceCatalogue(
+            revision="a" * 40,
+            version="0.1.0a103",
+            supported=frozenset({"dotmac_kernel.db"}),
+            internal=frozenset(),
+            artifact_digest="sha256:" + "b" * 64,
+        ),
+    )
+
+
 #: The v2 catalogue. Identical to `CATALOGUE` except that it carries the
 #: distribution digest, which a v2 `applicable` declaration BINDS -- an
 #: observer supplying none is `kernel.catalogue.unbound` rather than silent.
@@ -473,6 +504,26 @@ class RunnerTestCase(unittest.TestCase):
 
     def codes(self, result: Any) -> list[FindingCode]:
         return list(result.report.codes())
+
+
+class TrustedCatalogueSnapshot(RunnerTestCase):
+    """Product code observes; it never selects Governance's release store."""
+
+    def test_observer_cannot_replace_the_store_after_run_has_snapshotted_it(
+        self,
+    ) -> None:
+        import kernel_adoption_control.runner as runner_module
+
+        original = runner_module.DEFAULT_TRUSTED_CATALOGUES
+        try:
+            with self.assertRaisesRegex(RunnerError, "no Governance-owned"):
+                self.go(
+                    observer=(
+                        f"{__name__}:observe_successor_that_rebinds_trusted_store"
+                    )
+                )
+        finally:
+            runner_module.DEFAULT_TRUSTED_CATALOGUES = original
 
 
 class AdmitControl(RunnerTestCase):

@@ -466,7 +466,18 @@ def trusted_surface_catalogue(
     except VersionError as error:
         raise TrustedCatalogueError(str(error)) from error
     if not newer:
-        return observed
+        # ``module_exports`` is only publication evidence when parsed from the
+        # Governance-held successor catalogue.  Legacy observers may have
+        # supplied the field, but cannot self-author it to make a102 imports
+        # clean.  Keep the v1 catalogue identity and module/root lists intact.
+        return KernelSurfaceCatalogue(
+            revision=observed.revision,
+            version=observed.version,
+            supported=observed.supported,
+            internal=observed.internal,
+            artifact_digest=observed.artifact_digest,
+            root_exports=observed.root_exports,
+        )
     trusted = store.resolve(observed.version)
     disagreements = [
         name

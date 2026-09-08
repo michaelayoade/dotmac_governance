@@ -220,6 +220,11 @@ class FindingCode(str, Enum):
     #: A direct import from a published submodule names something that its
     #: release-bound ``__all__`` does not export.
     MODULE_SYMBOL_UNEXPORTED = "kernel.module.unexported"
+    #: A direct submodule import named symbols, but no Governance-trusted
+    #: release export mapping exists for that module.  Named imports are a
+    #: publication claim just like attribute paths; an absent mapping refuses
+    #: instead of treating Python reachability as a contract.
+    MODULE_EXPORTS_UNOBSERVED = "kernel.module.exports-unobserved"
     #: Attribute access through a module alias could not be classified against
     #: a release-bound export list, so it is refused as unmeasured.
     MODULE_ATTRIBUTE_UNMEASURED = "kernel.module.attribute-unmeasured"
@@ -425,7 +430,8 @@ class KernelSurfaceCatalogue:
     root_exports: frozenset[str] = frozenset()
     #: Per-submodule ``__all__`` read from release-bound package data. This is
     #: outside the frozen ``dmg-kernel-catalogue-v2`` subject; release evidence
-    #: binds these bytes separately. An empty mapping preserves a102 behaviour.
+    #: binds these bytes separately. An empty mapping is an explicit absence
+    #: and refuses named submodule imports and aliased attribute access.
     module_exports: Mapping[str, frozenset[str] | None] = field(default_factory=dict)
 
     @property

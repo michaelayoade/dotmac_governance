@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import json
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
-
-import pytest
+import re
+import tempfile
+import unittest
 
 from kernel_adoption_control import KernelSurfaceCatalogue, catalogue_digest, evaluate
 from kernel_adoption_control.contracts import (
@@ -29,6 +32,20 @@ from kernel_adoption_control.trusted_catalogue import (
     load_trusted_catalogue,
     trusted_surface_catalogue,
 )
+
+
+@contextlib.contextmanager
+def raises(error_type: type[Exception], pattern: str) -> Iterator[None]:
+    """Assert an exception without depending on pytest's context manager."""
+    try:
+        yield
+    except error_type as error:
+        if not re.search(pattern, str(error)):
+            raise AssertionError(
+                f"{error_type.__name__} did not match {pattern!r}: {error}"
+            ) from error
+    else:
+        raise AssertionError(f"did not raise {error_type.__name__}")
 
 
 def canonical(value: object, *, indent: int | None = None) -> bytes:
@@ -147,17 +164,17 @@ def test_successor_uses_governance_lists_not_a_coordinated_product_forgery() -> 
         internal=forged.internal,
         root_exports=forged.root_exports,
     ).startswith("sha256:")
-    with pytest.raises(TrustedCatalogueError, match="supported_modules"):
+    with raises(TrustedCatalogueError, "supported_modules"):
         trusted_surface_catalogue(forged, trusted_store())
 
 
 def test_successor_without_governance_evidence_refuses() -> None:
-    with pytest.raises(TrustedCatalogueError, match="no Governance-owned"):
+    with raises(TrustedCatalogueError, "no Governance-owned"):
         trusted_surface_catalogue(observed(), TrustedCatalogueStore())
 
 
 def test_wrong_wheel_hash_refuses() -> None:
-    with pytest.raises(TrustedCatalogueError, match="artifact_digest"):
+    with raises(TrustedCatalogueError, "artifact_digest"):
         trusted_surface_catalogue(
             observed(artifact_digest="sha256:" + "0" * 64), trusted_store()
         )
@@ -256,33 +273,98 @@ def test_nested_kernel_import_paths_are_explicitly_unmeasured() -> None:
         ] == [FindingCode.MODULE_ATTRIBUTE_UNMEASURED]
 
 
-def test_a102_legacy_near_miss_keeps_existing_catalogue_path() -> None:
+def test_a102_legacy_catalogue_strips_untrusted_module_exports() -> None:
+    legacy = KernelSurfaceCatalogue(
+        "a" * 40,
+        "0.1.0a102",
+        frozenset({"dotmac_kernel.db"}),
+        frozenset(),
+        module_exports={"dotmac_kernel.db": frozenset({"SessionLocal"})},
+    )
+    catalogue = trusted_surface_catalogue(legacy, TrustedCatalogueStore())
+    assert catalogue is not legacy
+    assert catalogue is not None
+    assert catalogue.module_exports == {}
+
+
+def test_a102_named_import_refuses_without_trusted_module_exports() -> None:
+    legacy = KernelSurfaceCatalogue(
+        "a" * 40,
+        "0.1.0a102",
+        frozenset({"dotmac_kernel.db"}),
+        frozenset(),
+        # A legacy product observer cannot self-author the missing release
+        # evidence to make this direct import clean.
+        module_exports={"dotmac_kernel.db": frozenset({"SessionLocal"})},
+    )
+    report = evaluate(
+        KernelAdoptionInputs(
+            sources={
+                PurePosixPath("x.py"): "from dotmac_kernel.db import SessionLocal\n"
+            },
+            catalogue=trusted_surface_catalogue(legacy, TrustedCatalogueStore()),
+            declaration=DeclarationPresent(
+                parse_declaration_v2(
+                    {
+                        "contract": "KernelAdoptionDeclaration.v2",
+                        "applicability": "not_applicable",
+                        "declared_at": "2026-09-01",
+                        "source_predecessor": "c" * 40,
+                        "not_applicable_reason": (
+                            "isolated export-observation sensitivity test"
+                        ),
+                    }
+                )
+            ),
+            as_of=__import__("datetime").date(2026, 9, 2),
+            pin_sites=(),
+            predecessor=None,
+        )
+    )
+    assert FindingCode.MODULE_EXPORTS_UNOBSERVED in {
+        item.code for item in report.findings
+    }
+
+
+def test_a102_alias_attribute_refuses_without_trusted_module_exports() -> None:
     legacy = KernelSurfaceCatalogue(
         "a" * 40, "0.1.0a102", frozenset({"dotmac_kernel.db"}), frozenset()
     )
-    assert trusted_surface_catalogue(legacy, TrustedCatalogueStore()) is legacy
-
-
-def test_store_reads_only_governance_owned_pair_paths(tmp_path: Path) -> None:
-    record, exports = pair()
-    root = tmp_path / "inventories"
-    (root / "kernel-release-verifications").mkdir(parents=True)
-    (root / "kernel-public-exports").mkdir()
-    (root / "kernel-release-verifications" / "0.1.0a103.json").write_bytes(record)
-    (root / "kernel-public-exports" / "0.1.0a103.json").write_bytes(exports)
-    assert (
-        TrustedCatalogueStore(evidence_root=root).resolve("0.1.0a103").revision
-        == "a" * 40
+    catalogue = trusted_surface_catalogue(legacy, TrustedCatalogueStore())
+    assert catalogue is not None
+    findings = _check_module_alias_attributes(
+        PurePosixPath("x.py"),
+        ast.parse("import dotmac_kernel.db as d\nd.SessionLocal\n"),
+        catalogue,
     )
+    assert [item.code for item in findings] == [
+        FindingCode.MODULE_ATTRIBUTE_UNMEASURED
+    ]
+
+
+def test_store_reads_only_governance_owned_pair_paths() -> None:
+    record, exports = pair()
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory) / "inventories"
+        (root / "kernel-release-verifications").mkdir(parents=True)
+        (root / "kernel-public-exports").mkdir()
+        (root / "kernel-release-verifications" / "0.1.0a103.json").write_bytes(
+            record
+        )
+        (root / "kernel-public-exports" / "0.1.0a103.json").write_bytes(exports)
+        assert (
+            TrustedCatalogueStore(evidence_root=root).resolve("0.1.0a103").revision
+            == "a" * 40
+        )
 
 
 def test_release_resource_hash_and_duplicate_keys_refuse() -> None:
     record, exports = pair()
-    with pytest.raises(TrustedCatalogueError, match="size|digest"):
+    with raises(TrustedCatalogueError, "size|digest"):
         load_trusted_catalogue(
             record, exports.replace(b"DatabaseRuntime", b"SessionLocal____")
         )
-    with pytest.raises(TrustedCatalogueError, match="duplicate"):
+    with raises(TrustedCatalogueError, "duplicate"):
         load_trusted_catalogue(record, b'{"schema":"x","schema":"x"}\n')
 
 
@@ -310,5 +392,19 @@ def test_empty_and_non_kernel_catalogues_refuse_with_matching_digest() -> None:
         altered = canonical(document, indent=2)
         evidence["public_exports"]["size"] = len(altered)
         evidence["public_exports"]["sha256"] = hashlib.sha256(altered).hexdigest()
-        with pytest.raises(TrustedCatalogueError, match=expected):
+        with raises(TrustedCatalogueError, expected):
             load_trusted_catalogue(canonical(evidence), altered)
+
+
+def load_tests(
+    loader: unittest.TestLoader,
+    tests: unittest.TestSuite,
+    pattern: str | None,
+) -> unittest.TestSuite:
+    """Expose these function-shaped regression tests to unittest discovery."""
+    del loader, tests, pattern
+    return unittest.TestSuite(
+        unittest.FunctionTestCase(value)
+        for name, value in sorted(globals().items())
+        if name.startswith("test_") and callable(value)
+    )

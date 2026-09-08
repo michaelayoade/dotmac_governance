@@ -390,13 +390,13 @@ def _check_module_exports(
     catalogue: KernelSurfaceCatalogue,
 ) -> list[Finding]:
     """Check direct submodule names against successor release evidence."""
-    if not catalogue.module_exports or not entry.names:
+    if not entry.names:
         return []
     exports = catalogue.module_exports.get(entry.module)
     if exports is None:
         return [
             _error(
-                FindingCode.MODULE_ATTRIBUTE_UNMEASURED,
+                FindingCode.MODULE_EXPORTS_UNOBSERVED,
                 f"imports named symbols from {entry.module}, but its trusted "
                 "release catalogue carries no declared module exports. Python "
                 "attribute reachability is not a published contract",
@@ -430,7 +430,7 @@ def _check_module_alias_attributes(
     Only the outermost attribute of a chain is evaluated, so the intermediate
     ``root.db`` in the last spelling is not falsely read as an exported name.
     """
-    if catalogue is None or not catalogue.module_exports:
+    if catalogue is None:
         return []
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -1680,6 +1680,9 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
     #: canonicalization and for what a digest does not prove.
     accumulated = _SurfaceAccumulator()
     catalogue = inputs.catalogue
+    module_exports_required = isinstance(
+        inputs.declaration, DeclarationPresent
+    ) and isinstance(inputs.declaration.declaration, KernelAdoptionDeclarationV2)
 
     if not inputs.sources:
         findings.append(
@@ -1713,7 +1716,8 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
         if not imports:
             continue
         exported = _module_all(tree)
-        findings.extend(_check_module_alias_attributes(path, tree, catalogue))
+        if module_exports_required:
+            findings.extend(_check_module_alias_attributes(path, tree, catalogue))
 
         for entry in imports:
             module = entry.module
@@ -1777,7 +1781,7 @@ def evaluate(inputs: KernelAdoptionInputs) -> AdoptionReport:
                             line=entry.line,
                         )
                     )
-                else:
+                elif module_exports_required:
                     findings.extend(_check_module_exports(path, entry, catalogue))
 
             if entry.star:

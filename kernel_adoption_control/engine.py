@@ -1453,9 +1453,25 @@ def _check_v2(
         )
     )
     findings.extend(_check_expiry_against_declaration(declaration))
+    # Transitional baselines describe the Kernel surface, not the importing
+    # module's local spelling.  Reuse the v2 identity facts already derived by
+    # the one source sweep; rebuilding an alias-aware parser here would create
+    # a second canonicalizer.  v1 deliberately keeps its historical local-name
+    # behaviour below.
+    kernel_symbols: defaultdict[str, set[tuple[PurePosixPath, str]]] = defaultdict(set)
+    for fact in identity_facts:
+        kernel_symbols[fact.module].update(
+            (fact.path, binding.kernel) for binding in fact.bindings
+        )
+    observed_kernel_symbols = {
+        module: frozenset(sites) for module, sites in kernel_symbols.items()
+    }
     findings.extend(
         _check_applicable_common(
-            declaration, kernel_import_sites, observed_symbols, inputs.as_of
+            declaration,
+            kernel_import_sites,
+            observed_kernel_symbols,
+            inputs.as_of,
         )
     )
     return findings

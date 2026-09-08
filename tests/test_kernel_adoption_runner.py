@@ -194,6 +194,16 @@ V2_CATALOGUE = KernelSurfaceCatalogue(
 
 V2_SOURCES = {PurePosixPath("app/legacy.py"): CONSUMER}
 
+# The source-surface identity is deliberately different from the v1 fixture:
+# the Kernel name is `session`, while the product binds it locally as
+# `local_session`.  Transitional baselines in a v2 declaration must use the
+# former, or a local rename can make a retiring Kernel use appear unchanged.
+ALIASED_V2_SOURCES = {
+    PurePosixPath("app/legacy.py"): (
+        "from dotmac_kernel.db import session as local_session\n"
+    )
+}
+
 #: The surface digest of `V2_SOURCES`, built from the one fact that source
 #: contains. Constructed rather than copied from a run: a literal here would be
 #: a number nobody could re-derive, which is the defect the coordinate exists
@@ -247,6 +257,17 @@ def observe_v2_consumer(root: Path) -> ProductObservation:
     """The product-side surface an enrolling v2 product writes. Nothing more."""
     return ProductObservation(
         sources=dict(V2_SOURCES),
+        catalogue=V2_CATALOGUE,
+        pin_sites=(
+            PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "dependency"),
+            PinSite(PurePosixPath("poetry.lock"), 9, "0.1.0a98", "lock"),
+        ),
+    )
+
+
+def observe_aliased_v2_consumer(root: Path) -> ProductObservation:
+    return ProductObservation(
+        sources=dict(ALIASED_V2_SOURCES),
         catalogue=V2_CATALOGUE,
         pin_sites=(
             PinSite(PurePosixPath("pyproject.toml"), 3, "0.1.0a98", "dependency"),
@@ -773,6 +794,56 @@ class TheExpiryBoundary(RunnerTestCase):
         """
         source = '"""Nothing here calls date.today() or datetime.utcnow()."""\n'
         self.assertEqual([], self._clock_offenders(ast.parse(source), "prose"))
+
+
+class TransitionalBaselineUsesKernelNames(RunnerTestCase):
+    """v2 retirement baselines name the Kernel, not a local alias."""
+
+    def test_a_local_alias_cannot_satisfy_or_move_the_baseline(self) -> None:
+        """A local alias cannot satisfy a Kernel-named retirement baseline."""
+        self.product.commit()
+        predecessor = _git(self.product.root, "rev-parse", "HEAD")
+        digest = surface_identity_digest(
+            surface_identity_facts(dict(ALIASED_V2_SOURCES))
+        )
+        body = applicable_v2(
+            predecessor,
+            source_surface={
+                "algorithm": SOURCE_SURFACE_IDENTITY_ALGORITHM,
+                "digest": digest,
+            },
+            required_surfaces=[],
+            transitional_surfaces=[transitional(TOMORROW)],
+        )
+        body["transitional_surfaces"][0]["baseline"][0]["symbol"] = "local_session"
+        self.product.declare(body)
+        self.product.profile(
+            {
+                "kernel_adoption_binding": {
+                    "declaration_path": ".dotmac/kernel-adoption.json",
+                    "contract_version": KERNEL_ADOPTION_CONTRACT_V2,
+                }
+            }
+        )
+        result = self.go(observer=f"{__name__}:observe_aliased_v2_consumer")
+        drift = [
+            item
+            for item in result.report.findings
+            if item.code is FindingCode.TRANSITIONAL_BASELINE_DRIFT
+        ]
+        self.assertEqual(2, len(drift), result.to_dict())
+        messages = "\n".join(item.message for item in drift)
+        self.assertIn("uses session", messages)
+        self.assertIn("lists local_session", messages)
+
+        body["transitional_surfaces"][0]["baseline"][0]["symbol"] = "session"
+        self.product.declare(body)
+        result = self.go(observer=f"{__name__}:observe_aliased_v2_consumer")
+        self.assertNotIn(
+            FindingCode.TRANSITIONAL_BASELINE_DRIFT,
+            self.codes(result),
+            result.to_dict(),
+        )
 
 
 class ImpossibleDates(unittest.TestCase):

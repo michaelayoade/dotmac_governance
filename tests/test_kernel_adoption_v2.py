@@ -1426,7 +1426,9 @@ class ThePlatformSubject(Base):
         )
         return document, item
 
-    def test_the_a102_fixture_is_explicitly_refused_without_export_evidence(self) -> None:
+    def test_the_a102_fixture_is_explicitly_refused_without_export_evidence(
+        self,
+    ) -> None:
         """A real legacy shape is not historical export evidence.
 
         A rule observed only refusing is indistinguishable from one that

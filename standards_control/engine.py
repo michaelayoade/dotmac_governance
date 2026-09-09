@@ -5303,18 +5303,17 @@ DOTTED_PACKAGE_PREFIX = re.compile(
 #: genuine dynamic dependency; the same literal sitting in a dict, a list, a
 #: baseline file, or a characterization/subprocess-probe argument is a
 #: MENTION of the name, not a request to import it. Matched on the final
-#: attribute/name component, so `importlib.import_module(...)`, a bare
-#: `import_module(...)` call after `from importlib import import_module`, and
-#: the bare `__import__(...)` builtin are all recognised. An import bound
-#: under a different local alias (`from importlib import import_module as
-#: _im`) is NOT resolved — that is a genuinely undecidable rename for a
-#: syntactic-only reader without full alias tracking, and it stays a mention
-#: rather than being guessed into an edge on a call name that doesn't
-#: textually match. A call through an arbitrary local wrapper
-#: (`my_loader(name)`) is likewise not recognised for the same reason.
-#: `find_spec`/`spec_from_file_location` join this set for the same reason
-#: as `import_module`: they are the unambiguous, documented entry points of
-#: the manual-import protocol (`importlib.util.find_spec(name)` /
+#: attribute/name component (after alias resolution — see
+#: `_local_import_aliases`), so `importlib.import_module(...)`, a bare
+#: `import_module(...)` call after `from importlib import import_module`,
+#: and the bare `__import__(...)` builtin are all recognised. A call through
+#: an arbitrary local wrapper (`my_loader(name)`) is NOT recognised — a local
+#: name this module never binds via `import`/`from ... import` carries no
+#: decidable origin for a syntactic reader, and guessing past that would be
+#: measuring a wrapper's INTERNALS rather than its call. `find_spec`/
+#: `spec_from_file_location` join this set for the same reason as
+#: `import_module`: they are the unambiguous, documented entry points of the
+#: manual-import protocol (`importlib.util.find_spec(name)` /
 #: `importlib.util.spec_from_file_location(name, path)`, each followed by
 #: `module_from_spec(spec)` and `spec.loader.exec_module(module)`), and —
 #: unlike `patch`/`setattr` — not generic enough verbs to risk matching an
@@ -5322,9 +5321,17 @@ DOTTED_PACKAGE_PREFIX = re.compile(
 #: in this set: their own argument is the `spec`/`module` OBJECT, never the
 #: name literal, so recognising them harvests nothing that `find_spec`/
 #: `spec_from_file_location` didn't already capture at the step that
-#: actually names the module.
+#: actually names the module. `pytest.importorskip(name)` joins for the same
+#: reason: it is a documented importer (it calls `import_module` internally
+#: and skips the test on failure), not a generic verb.
 RUNTIME_IMPORT_CALLEES = frozenset(
-    {"import_module", "__import__", "find_spec", "spec_from_file_location"}
+    {
+        "import_module",
+        "__import__",
+        "find_spec",
+        "spec_from_file_location",
+        "importorskip",
+    }
 )
 
 #: Callee terminal names `functools.partial(...)`'s FIRST positional argument
@@ -5344,8 +5351,16 @@ PARTIAL_WRAPPED_RUNTIME_IMPORT_CALLEES = RUNTIME_IMPORT_CALLEES
 #: matching `.patch`/`.setattr` on ANY receiver would catch an HTTP client's
 #: PATCH verb or an unrelated `.setattr` — a worse false-positive class than
 #: the one this fix exists to close, so the match is scoped to the receiver's
-#: terminal name, resolved through `_name()` so both `mock.patch(...)` and a
-#: fully-qualified `unittest.mock.patch(...)` are recognised.
+#: terminal name, resolved through `_name()` (and through
+#: `_local_import_aliases` for a `import unittest.mock as mock2`-style
+#: rename) so `mock.patch(...)`, an aliased receiver, and a fully-qualified
+#: `unittest.mock.patch(...)` are all recognised. Consulted for `.setattr`/
+#: `.delattr` too, not just `.patch` — a `pytest.MonkeyPatch()` instance
+#: bound under one of these three names is the same resolver either way; an
+#: arbitrary OTHER local name (`with pytest.MonkeyPatch.context() as mp:
+#: mp.setattr(...)`) is NOT resolved, since that requires tracing a `with`
+#: target back to the constructor call, which this reader does not attempt —
+#: a named, undecided-for-now gap, not a silent one.
 DYNAMIC_PATCH_RECEIVERS = frozenset({"monkeypatch", "mocker", "mock"})
 
 
@@ -5357,20 +5372,59 @@ DYNAMIC_PATCH_RECEIVERS = frozenset({"monkeypatch", "mocker", "mock"})
 #: coincidentally named `patch` performing something unrelated is the
 #: accepted false-positive cost — clause 2 explicitly prefers measuring more
 #: over silently dropping this idiom, which a corpus differential showed is
-#: the common case, not the rare one.
+#: the common case, not the rare one. Alias resolution
+#: (`_local_import_aliases`) applies in BOTH directions here: `from
+#: unittest.mock import patch as _patch` still matches, and `from json
+#: import loads as patch` does NOT — the local name "patch" resolves to its
+#: real origin "loads" first, so a coincidentally-renamed unrelated import is
+#: correctly excluded rather than caught on the name alone.
 BARE_DYNAMIC_PATCH_CALLEES = frozenset({"patch"})
 
 
-def _is_getattr_indirected_import_call(func: ast.expr) -> bool:
+def _local_import_aliases(tree: ast.Module) -> dict[str, str]:
+    """Local bound name -> canonical terminal name, for every `import ... as
+    X` / `from ... import Y as X` binding in this module.
+
+    `from unittest.mock import patch as _patch` carries the rename on
+    `ImportFrom.names[i].asname`, in the SAME module as the call three lines
+    below it — reading it is a lookup, not a data-flow problem. There is no
+    "genuinely undecidable" renamed-LOCAL-import case for a syntactic
+    reader; only a rename happening in a DIFFERENT module (a re-export this
+    module merely imports under yet another name) is, since that needs
+    following the import across a file this reader does not have open.
+    """
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.asname and alias.name != "*":
+                    aliases[alias.asname] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    aliases[alias.asname] = alias.name.rsplit(".", 1)[-1]
+    return aliases
+
+
+def _resolve_alias(name: str | None, aliases: dict[str, str]) -> str | None:
+    """`name`'s canonical origin if this module imported it under an alias,
+    else `name` itself unchanged (including when `name` is `None`).
+    """
+    if name is None:
+        return None
+    return aliases.get(name, name)
+
+
+def _is_getattr_indirected_import_call(func: ast.expr, aliases: dict[str, str]) -> bool:
     """`getattr(importlib, "import_module")(...)` — the callee ITSELF is a
     `getattr(...)` call whose own second argument names a recognised
     runtime-import callee. The outer call's arguments are the ones that
     reach the resolved function, so this only needs to recognise the SHAPE;
-    `_call_string_arguments` on the outer call does the rest.
+    `_module_naming_arguments` on the outer call does the rest.
     """
     if not isinstance(func, ast.Call) or not isinstance(func.func, ast.Name):
         return False
-    if func.func.id != "getattr" or len(func.args) < 2:
+    if _resolve_alias(func.func.id, aliases) != "getattr" or len(func.args) < 2:
         return False
     attribute_name = func.args[1]
     return (
@@ -5380,71 +5434,128 @@ def _is_getattr_indirected_import_call(func: ast.expr) -> bool:
     )
 
 
-def _is_partial_wrapped_import_call(func: ast.expr, args: list[ast.expr]) -> bool:
+def _is_partial_wrapped_import_call(
+    func: ast.expr, args: list[ast.expr], aliases: dict[str, str]
+) -> bool:
     """`functools.partial(import_module, "x.y")` — the CONSTRUCTION call
     itself is where the literal sits, since the underlying import happens
     later, at a call site this reader cannot see. Recognised by the
     construction's callee being `partial` and its own first argument naming
-    a runtime-import callee, by `Name` or by `Attribute` terminal.
+    a runtime-import callee, by `Name` or by `Attribute` terminal, each
+    resolved through any local alias.
     """
-    if _name(func) != "partial" or not args:
+    if _resolve_alias(_name(func), aliases) != "partial" or not args:
         return False
-    return _name(args[0]) in PARTIAL_WRAPPED_RUNTIME_IMPORT_CALLEES
+    return (
+        _resolve_alias(_name(args[0]), aliases)
+        in PARTIAL_WRAPPED_RUNTIME_IMPORT_CALLEES
+    )
 
 
-def _is_runtime_import_call(node: ast.Call) -> bool:
+def _is_runtime_import_call(node: ast.Call, aliases: dict[str, str]) -> bool:
     """Does this call resolve a string into a module at runtime?
 
-    `importlib.import_module(...)`/`__import__(...)`/`find_spec(...)` do so
-    directly, including through one level of `getattr(module, "name")(...)`
-    indirection or a `functools.partial(import_module, ...)` construction
-    (see the two helpers above). `monkeypatch.setattr("dotted.path", value)`,
-    `monkeypatch.delattr("dotted.path")`, `mock.patch("dotted.path",
-    ...)`/`mocker.patch(...)`, and a bare `patch("dotted.path", ...)` (after
-    `from unittest.mock import patch`) do so INSIDE pytest's/`unittest.mock`'s
-    own machinery when given a bare dotted-string target — genuinely
-    importing the named module to resolve it, not merely naming it — so they
-    are an equivalent runtime-import call under clause 2. `setattr`/`delattr`
-    are scoped further to the 2-positional-argument, string-first-argument
-    form: a 3-argument `monkeypatch.setattr(obj, "attr", value)` patches an
-    ALREADY-IMPORTED object and performs no import at all.
+    `importlib.import_module(...)`/`__import__(...)`/`find_spec(...)`/
+    `spec_from_file_location(...)`/`pytest.importorskip(...)` do so directly,
+    including through one level of `getattr(module, "name")(...)`
+    indirection, a `functools.partial(import_module, ...)` construction, or a
+    local `as` alias — see the helpers above. `monkeypatch.setattr("dotted.
+    path", value)`, `monkeypatch.delattr("dotted.path")`, `mock.patch(
+    "dotted.path", ...)`/`mocker.patch(...)`, and a bare `patch("dotted.
+    path", ...)` (after `from unittest.mock import patch`) do so INSIDE
+    pytest's/`unittest.mock`'s own machinery when given a bare dotted-string
+    target — genuinely importing the named module to resolve it, not merely
+    naming it — so they are an equivalent runtime-import call under clause 2.
+    `setattr`/`delattr` are scoped further to the 2-positional-argument (
+    `setattr`) / 1-positional-argument (`delattr`) form: a 3-argument
+    `monkeypatch.setattr(obj, "attr", value)` / 2-argument `delattr(obj,
+    "attr")` patches an ALREADY-IMPORTED object and performs no import at
+    all — `raising=False` lands in `node.keywords`, not `node.args`, so it
+    does not shift this count.
     """
     func = node.func
-    if _is_getattr_indirected_import_call(func):
+    if _is_getattr_indirected_import_call(func, aliases):
         return True
-    if _is_partial_wrapped_import_call(func, node.args):
+    if _is_partial_wrapped_import_call(func, node.args, aliases):
         return True
     if isinstance(func, ast.Name):
+        resolved_name = _resolve_alias(func.id, aliases)
         return (
-            func.id in RUNTIME_IMPORT_CALLEES or func.id in BARE_DYNAMIC_PATCH_CALLEES
+            resolved_name in RUNTIME_IMPORT_CALLEES
+            or resolved_name in BARE_DYNAMIC_PATCH_CALLEES
         )
     if not isinstance(func, ast.Attribute):
         return False
     if func.attr in RUNTIME_IMPORT_CALLEES:
         return True
     if func.attr == "patch":
-        return _name(func.value) in DYNAMIC_PATCH_RECEIVERS
+        return _resolve_alias(_name(func.value), aliases) in DYNAMIC_PATCH_RECEIVERS
     if func.attr in ("setattr", "delattr"):
-        if _name(func.value) != "monkeypatch":
+        if _resolve_alias(_name(func.value), aliases) not in DYNAMIC_PATCH_RECEIVERS:
             return False
-        # pytest's own overload split: `setattr(target, value)` (2 args) and
-        # `delattr(target)` (1 arg) treat `target` as a dotted import path and
-        # resolve it via an import; `setattr(obj, "attr", value)` (3 args) and
-        # `delattr(obj, "attr")` (2 args) patch an ALREADY-IMPORTED object and
-        # import nothing. This is arg COUNT, not whether `target` currently
-        # happens to be a literal — a variable resolved later by the taint
-        # chain must still be recognised as reaching the call.
         return len(node.args) == (2 if func.attr == "setattr" else 1)
     return False
 
 
-def _call_string_arguments(node: ast.Call) -> list[ast.expr]:
-    """This call's positional and keyword argument expressions, in order."""
-    return [*node.args, *(keyword.value for keyword in node.keywords)]
+def _module_naming_arguments(node: ast.Call, aliases: dict[str, str]) -> list[ast.expr]:
+    """The argument expression(s) that actually NAME a module for THIS
+    recognised runtime-import call — never `return_value=`, a `patch()`
+    keyword, or a `spec_from_file_location` PATH argument. Position is bound
+    PER CALLEE SHAPE, not "every argument": `monkeypatch.setattr("app.cfg.
+    BACKEND", "dotmac_kernel.db")`'s second argument is the value being
+    ASSIGNED, not a module reference, and `spec_from_file_location("plugin",
+    "conftest.py")`'s second argument is a file PATH. Mirrors
+    `_is_runtime_import_call`'s own branch structure so the two cannot drift
+    apart; call this only on a node that function already accepted.
+    """
+    func = node.func
+    if _is_getattr_indirected_import_call(func, aliases):
+        # The resolved callee's own signature is import_module-shaped:
+        # `name` is the first positional argument.
+        return node.args[:1] or _keyword_argument(node, "name")
+    if _is_partial_wrapped_import_call(func, node.args, aliases):
+        # `partial(import_module, name, package=None)` — index 0 is the
+        # wrapped callable itself; the NAMED function's own first argument
+        # sits at index 1.
+        return node.args[1:2]
+    if isinstance(func, ast.Name):
+        resolved_name = _resolve_alias(func.id, aliases)
+        if resolved_name in RUNTIME_IMPORT_CALLEES:
+            return (
+                node.args[:1]
+                or _keyword_argument(node, "name")
+                or _keyword_argument(node, "modname")
+            )
+        if resolved_name in BARE_DYNAMIC_PATCH_CALLEES:
+            return node.args[:1] or _keyword_argument(node, "target")
+        return []
+    if not isinstance(func, ast.Attribute):
+        return []
+    if func.attr in RUNTIME_IMPORT_CALLEES:
+        return (
+            node.args[:1]
+            or _keyword_argument(node, "name")
+            or _keyword_argument(node, "modname")
+        )
+    receiver = _resolve_alias(_name(func.value), aliases)
+    if func.attr == "patch" and receiver in DYNAMIC_PATCH_RECEIVERS:
+        # patch(target, new=..., return_value=..., ...) — "target" is
+        # always the first positional, or the "target" keyword.
+        return node.args[:1] or _keyword_argument(node, "target")
+    if func.attr in ("setattr", "delattr") and receiver in DYNAMIC_PATCH_RECEIVERS:
+        # monkeypatch.setattr(target, value) / delattr(target) — "target"
+        # (index 0) is the ONLY argument that can be a dotted import path;
+        # "value"/"raising" never are.
+        return node.args[:1]
+    return []
+
+
+def _keyword_argument(node: ast.Call, name: str) -> list[ast.expr]:
+    return [keyword.value for keyword in node.keywords if keyword.arg == name]
 
 
 def _referenced_names(node: ast.expr) -> frozenset[str]:
-    """Every `Name` this expression subtree reads, however deeply nested.
+    """Every `Name` this expression subtree READS, however deeply nested.
 
     `definition.runtime.module` reduces to the single base name `definition`
     — an `Attribute` chain's own field path (`.runtime.module`) is not kept,
@@ -5461,12 +5572,15 @@ def _referenced_names(node: ast.expr) -> frozenset[str]:
     reader; this is a named limitation, not a silent one.
     """
     return frozenset(
-        child.id for child in ast.walk(node) if isinstance(child, ast.Name)
+        child.id
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
     )
 
 
 def _bound_names(target: ast.expr) -> frozenset[str]:
-    """Every plain `Name` an assignment or `for` target binds.
+    """Every plain `Name` an assignment, `for`, or comprehension target
+    binds.
 
     Named distinctly from the unrelated `_assigned_names` above (a
     credential-attribute detector, both declaration styles, `list[str]`) — a
@@ -5505,44 +5619,162 @@ def _positional_parameter_names(
     return [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
 
 
+#: A single scoped binding: `(id(scope), name)`, where `scope` is either the
+#: tracked module (`ast.Module`) itself, or the nearest enclosing
+#: `FunctionDef`/`AsyncFunctionDef`/`Lambda`.
+ScopedName = tuple[int, str]
+
+
+def _function_scopes(tree: ast.Module) -> dict[int, ast.AST]:
+    """Map `id(node)` -> the nearest enclosing scope: a `FunctionDef`/
+    `AsyncFunctionDef`/`Lambda`, or the module itself for anything at module
+    level (including inside `if`/`try`/`with`/`for`/a `class` body, none of
+    which open a new scope in real Python).
+
+    This is the fix for a name colliding ACROSS two unrelated functions —
+    `def load(module_name): import_module(module_name)` and `def describe():
+    module_name = "app.legacy.decommissioned"; return module_name` — reading
+    the SAME bare name `module_name` as one binding regardless of which
+    function it lives in is exactly the mention-as-dependency shape this PR
+    exists to close, arriving through name collision instead of string
+    matching. A comprehension's own iteration variable is deliberately
+    merged into its ENCLOSING scope rather than given Python's real implicit
+    scope: that only WIDENS what a name could resolve to, never narrows a
+    genuine dependency away, and a comprehension-local collision is a much
+    narrower residual risk than the module-wide flat one this replaces.
+    """
+    scopes: dict[int, ast.AST] = {}
+
+    def visit(node: ast.AST, current: ast.AST) -> None:
+        scopes[id(node)] = current
+        next_scope = (
+            node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+            else current
+        )
+        for child in ast.iter_child_nodes(node):
+            visit(child, next_scope)
+
+    visit(tree, tree)
+    return scopes
+
+
+def _scope_bound_names(
+    tree: ast.Module, scopes: dict[int, ast.AST]
+) -> dict[int, set[str]]:
+    """Every name a scope binds DIRECTLY: `Name` `Store`/`Del` targets
+    (assignment, `for`, comprehension, `with ... as`, `except ... as`), plus
+    a function's own parameters — which are `ast.arg`, not `Name`, nodes and
+    so need separate handling.
+    """
+    bound: dict[int, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.setdefault(id(scopes[id(node)]), set()).add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names = {
+                *_positional_parameter_names(node),
+                *(arg.arg for arg in node.args.kwonlyargs),
+            }
+            if node.args.vararg:
+                names.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                names.add(node.args.kwarg.arg)
+            bound.setdefault(id(node), set()).update(names)
+    return bound
+
+
+def _scoped_references(
+    node: ast.expr,
+    scope: ast.AST,
+    scopes: dict[int, ast.AST],
+    bound: dict[int, set[str]],
+    module: ast.Module,
+) -> frozenset[ScopedName]:
+    """Every `Name` this expression READS, resolved to the scope its OWN
+    binding actually lives in: a name bound locally in `scope` resolves
+    there; anything else falls back to MODULE scope, mirroring Python's own
+    local-then-global lookup (an intermediate ENCLOSING function scope —
+    real closure capture — is not modelled; a value reaching an import ONLY
+    through a closure over a non-module outer function is a named residual
+    gap, not a silent one).
+    """
+    references: set[ScopedName] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+            child_scope = scopes.get(id(child), module)
+            if child.id in bound.get(id(child_scope), ()):
+                references.add((id(child_scope), child.id))
+            else:
+                references.add((id(module), child.id))
+    return frozenset(references)
+
+
+def _scoped_bound_names(target: ast.expr, scope: ast.AST) -> frozenset[ScopedName]:
+    return frozenset((id(scope), name) for name in _bound_names(target))
+
+
 def _taint_edges(
     tree: ast.Module,
-) -> list[tuple[frozenset[str], frozenset[str], ast.expr]]:
-    """Every (bound names, referenced names, value expression) step a value
-    can flow through in this module: a simple assignment, a `for` loop's own
-    binding, or an argument passed BY POSITION to a function DEFINED in this
-    same module. Each triple says: if any of the bound names is provably
-    import-fed, the referenced names are pulled in too, and the value
-    expression itself is a place to harvest a literal from directly.
+    scopes: dict[int, ast.AST],
+    bound: dict[int, set[str]],
+) -> list[tuple[frozenset[ScopedName], frozenset[ScopedName], ast.expr]]:
+    """Every (bound scoped names, referenced scoped names, value expression)
+    step a value can flow through in this module: a simple assignment, a
+    `for`/comprehension binding, or an argument passed BY POSITION to a
+    function DEFINED in this same module. Each triple says: if any of the
+    bound names is provably import-fed, the referenced names are pulled in
+    too, and the value expression itself is a place to harvest a literal
+    from directly.
 
-    The function-call step is what lets a value survive one hop through a
-    named helper — `_apply_router_spec(app, spec)` calling
+    Every binding and reference is SCOPED (`_function_scopes`) — `load`'s
+    parameter `module_name` and `describe`'s unrelated local `module_name`
+    are different `ScopedName`s, so import-feeding one never taints the
+    other. The function-call step is what lets a value survive one hop
+    through a named helper — `_apply_router_spec(app, spec)` calling
     `_load_router_object(module_name, attr_name)` which calls
-    `import_module(module_name)` — without becoming a general interprocedural
-    data-flow engine: only a direct call to a function this module itself
-    defines, matched by simple positional position, is followed. A value
-    passed BY KEYWORD (`_load(module_name=x)`) is NOT traced — matching a
-    keyword to its parameter needs the callee's defaults and `**kwargs`
-    shape resolved too, which this reader does not attempt; a keyword-only
-    caller stops the chain there rather than guessing.
+    `import_module(module_name)` — without becoming a general
+    interprocedural data-flow engine: only a direct call to a function this
+    module itself defines (a MODULE-LEVEL `def`, matched by `ast.Name`, so a
+    class method or a closure is NOT followed — `self._load(name)` and
+    `Registry().load(name)` are both untraced), matched by simple positional
+    position, is followed; the call's OWN scope supplies its argument
+    references, the callee's OWN scope receives its parameter binding. A
+    value passed BY KEYWORD (`_load(module_name=x)`) is NOT traced —
+    matching a keyword to its parameter needs the callee's defaults and
+    `**kwargs` shape resolved too, which this reader does not attempt; a
+    keyword-only caller stops the chain there rather than guessing.
     """
-    edges: list[tuple[frozenset[str], frozenset[str], ast.expr]] = []
+    edges: list[tuple[frozenset[ScopedName], frozenset[ScopedName], ast.expr]] = []
     for node in ast.walk(tree):
+        node_scope = scopes.get(id(node), tree)
         if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
             targets = frozenset().union(
                 *(
-                    _bound_names(target)
+                    _scoped_bound_names(target, node_scope)
                     for target in (
                         node.targets if isinstance(node, ast.Assign) else [node.target]
                     )
                 )
             )
             if targets:
-                edges.append((targets, _referenced_names(node.value), node.value))
-        elif isinstance(node, (ast.For, ast.AsyncFor)):
-            targets = _bound_names(node.target)
+                edges.append(
+                    (
+                        targets,
+                        _scoped_references(node.value, node_scope, scopes, bound, tree),
+                        node.value,
+                    )
+                )
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            targets = _scoped_bound_names(node.target, node_scope)
             if targets:
-                edges.append((targets, _referenced_names(node.iter), node.iter))
+                edges.append(
+                    (
+                        targets,
+                        _scoped_references(node.iter, node_scope, scopes, bound, tree),
+                        node.iter,
+                    )
+                )
 
     functions = _module_level_functions(tree)
     for node in ast.walk(tree):
@@ -5551,41 +5783,55 @@ def _taint_edges(
         function = functions.get(node.func.id)
         if function is None:
             continue
+        call_scope = scopes.get(id(node), tree)
         parameters = _positional_parameter_names(function)
         for parameter, argument in zip(parameters, node.args):
             edges.append(
-                (frozenset({parameter}), _referenced_names(argument), argument)
+                (
+                    frozenset({(id(function), parameter)}),
+                    _scoped_references(argument, call_scope, scopes, bound, tree),
+                    argument,
+                )
             )
     return edges
 
 
-def _import_fed_names(tree: ast.Module) -> frozenset[str]:
-    """Every `Name` whose value can reach a runtime-import call in this
+def _import_fed_names(
+    tree: ast.Module, aliases: dict[str, str]
+) -> frozenset[ScopedName]:
+    """Every SCOPED name whose value can reach a runtime-import call in this
     module, traced backward through `_taint_edges` to a fixed point.
 
-    `importlib.import_module(module_name)` seeds `module_name`; if
-    `module_name, _, _ = REGISTRY[key].partition(":")` assigns it, `REGISTRY`
-    is pulled in too — one hop of backward taint — because REGISTRY's own
-    string values are what actually reach the import call. This is what lets
-    an ordinarily-shaped plugin registry still register as a dependency when
-    the resolved name passes through a lookup and a `partition` before
-    reaching `import_module`, or through a `for` loop and a same-module
-    helper function before reaching it, without treating every dict or list
-    of dotted-looking strings in the module as reaching it: a name earns its
-    way into this set only by provably feeding a real runtime-import call.
+    `importlib.import_module(module_name)` seeds `module_name` IN ITS OWN
+    SCOPE; if `module_name, _, _ = REGISTRY[key].partition(":")` assigns it,
+    `REGISTRY` (resolved in that same scope, or module scope if `REGISTRY`
+    is not locally bound) is pulled in too — one hop of backward taint —
+    because REGISTRY's own string values are what actually reach the import
+    call. This is what lets an ordinarily-shaped plugin registry still
+    register as a dependency when the resolved name passes through a
+    lookup and a `partition` before reaching `import_module`, or through a
+    `for`/comprehension loop and a same-module helper function before
+    reaching it, without treating every dict or list of dotted-looking
+    strings in the module as reaching it: a name earns its way into this set
+    only by provably feeding a real runtime-import call, IN THE SCOPE it is
+    actually bound in.
 
-    This is a syntactic reader, not a data-flow engine: an assignment through
-    an `Attribute`/`Subscript` target, a call to a function this module does
-    not itself define, or any expression shape it does not recognise breaks
-    the chain there rather than guessing past it.
+    This is a syntactic reader, not a data-flow engine: an assignment
+    through an `Attribute`/`Subscript` target, a call to a function this
+    module does not itself define (including a class method or a closure),
+    or any expression shape it does not recognise breaks the chain there
+    rather than guessing past it.
     """
-    tainted: set[str] = set()
+    scopes = _function_scopes(tree)
+    bound = _scope_bound_names(tree, scopes)
+    tainted: set[ScopedName] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _is_runtime_import_call(node):
-            for argument in _call_string_arguments(node):
-                tainted |= _referenced_names(argument)
+        if isinstance(node, ast.Call) and _is_runtime_import_call(node, aliases):
+            call_scope = scopes.get(id(node), tree)
+            for argument in _module_naming_arguments(node, aliases):
+                tainted |= _scoped_references(argument, call_scope, scopes, bound, tree)
 
-    edges = _taint_edges(tree)
+    edges = _taint_edges(tree, scopes, bound)
     changed = True
     while changed:
         changed = False
@@ -5596,24 +5842,125 @@ def _import_fed_names(tree: ast.Module) -> frozenset[str]:
     return frozenset(tainted)
 
 
-def _dynamic_import_expressions(tree: ast.Module) -> list[ast.expr]:
+def _dynamic_import_expressions(
+    tree: ast.Module, aliases: dict[str, str]
+) -> list[ast.expr]:
     """Every expression this module puts within reach of a runtime import: a
-    runtime-import call's own arguments, plus the value/iterable/argument
-    side of any `_taint_edges` step whose bound names the call's arguments
-    can be traced back to.
+    runtime-import call's OWN module-naming argument(s) (`_module_naming_
+    arguments` — never `return_value=`, a `patch()` keyword, or a
+    `spec_from_file_location` PATH argument), plus the value/iterable/
+    argument side of any `_taint_edges` step whose SCOPED bound names the
+    call's arguments can be traced back to.
     """
+    scopes = _function_scopes(tree)
+    bound = _scope_bound_names(tree, scopes)
     expressions: list[ast.expr] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _is_runtime_import_call(node):
-            expressions.extend(_call_string_arguments(node))
-    tainted = _import_fed_names(tree)
-    for targets, _, value in _taint_edges(tree):
+        if isinstance(node, ast.Call) and _is_runtime_import_call(node, aliases):
+            expressions.extend(_module_naming_arguments(node, aliases))
+    tainted = _import_fed_names(tree, aliases)
+    for targets, _, value in _taint_edges(tree, scopes, bound):
         if targets & tainted:
             expressions.append(value)
     return expressions
 
 
-def _named_modules(tree: ast.Module) -> frozenset[str]:
+def _resolve_relative_dotted_head(head: str, relative: PurePosixPath) -> str | None:
+    """Resolve a dynamic-import literal that begins with one or more dots
+    against the FILE's OWN package.
+
+    `importlib.import_module()`'s dot convention is identical to `from .
+    import x`'s `node.level`: one leading dot means "this package itself",
+    two means "one level up" — exactly the arithmetic `_imported_names`
+    already applies to a real relative `ImportFrom`. Returns `None` for a
+    non-relative literal (no leading dot) or one that climbs above the
+    tracked root.
+    """
+    if not head.startswith("."):
+        return None
+    level = len(head) - len(head.lstrip("."))
+    tail = head[level:]
+    package = _package_parts(relative)
+    if level - 1 > len(package):
+        return None
+    base = package[: len(package) - (level - 1)]
+    return ".".join((*base, tail)) if tail else ".".join(base)
+
+
+#: Dunder names whose runtime value a relative dynamic import commonly
+#: interpolates instead of writing the package out —
+#: `f"{__name__}.{x}"` / `f"{__package__}.{x}"`. Resolved against the FILE's
+#: own identity, the same information `_package_parts` already derives from
+#: its repository path.
+DUNDER_MODULE_NAMES = frozenset({"__name__", "__package__"})
+
+
+def _resolve_dunder_head(name: str, relative: PurePosixPath) -> str:
+    """`__package__`'s value is always the file's own package.
+    `__name__`'s value is the SAME for a package's own `__init__.py` (Python
+    never includes the literal `__init__` component), but is the module's
+    own full dotted name — package plus leaf — for any other file.
+    """
+    package = ".".join(_package_parts(relative))
+    if name == "__package__" or relative.name == "__init__.py":
+        return package
+    leaf = PurePosixPath(relative.name).stem
+    return f"{package}.{leaf}" if package else leaf
+
+
+def _relative_head_prefix(
+    values: list[ast.expr], relative: PurePosixPath
+) -> str | None:
+    """The resolved ABSOLUTE package prefix for a `JoinedStr` whose first
+    fragment is a dot-leading literal (`f".{x}"`) or a dunder-name
+    interpolation (`f"{__name__}.{x}"`/`f"{__package__}.{x}"`) — the two
+    shapes `import_module(f".{x}", __package__)` and `__import__(
+    f"{__name__}.{module_name}")` actually use. Anything else returns
+    `None`, leaving the ordinary per-fragment scan in `_named_packages` to
+    run.
+    """
+    if not values:
+        return None
+    head = values[0]
+    resolved: str | None = None
+    if isinstance(head, ast.Constant) and isinstance(head.value, str):
+        if head.value.startswith("."):
+            resolved = _resolve_relative_dotted_head(head.value, relative)
+    elif isinstance(head, ast.FormattedValue) and isinstance(head.value, ast.Name):
+        if head.value.id in DUNDER_MODULE_NAMES:
+            resolved = _resolve_dunder_head(head.value.id, relative)
+    if resolved is None:
+        return None
+    for value in values[1:]:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            resolved += value.value
+        elif isinstance(value, ast.FormattedValue):
+            continue
+        else:
+            return None
+    return resolved if resolved.endswith(".") else resolved + "."
+
+
+def _joinedstr_fragment_ids(expression: ast.expr) -> frozenset[int]:
+    """`id()` of every `Constant` that is a DIRECT fragment of a `JoinedStr`
+    within this expression — these are handled by `_named_packages`'s own
+    f-string logic (including the relative-import head above), not by
+    `_named_modules`'s plain-literal / relative-import resolution, which
+    would otherwise double-count a bare `"."` fragment as both a package
+    prefix AND (wrongly) a complete relative module name.
+    """
+    ids: set[int] = set()
+    for node in ast.walk(expression):
+        if isinstance(node, ast.JoinedStr):
+            for value in node.values:
+                if isinstance(value, ast.Constant):
+                    ids.add(id(value))
+    return frozenset(ids)
+
+
+def _named_modules(
+    tree: ast.Module, relative: PurePosixPath, aliases: dict[str, str]
+) -> frozenset[str]:
     """Module names this source DYNAMICALLY IMPORTS as a string literal.
 
     A dotted name is a dependency edge only when it is provably CONSUMED by a
@@ -5627,13 +5974,26 @@ def _named_modules(tree: ast.Module) -> frozenset[str]:
     reading that naming as reaching them turns every characterization module
     into a false dependency on everything it characterizes.
 
+    A leading-dot literal (`import_module(".sub", __name__)`) is resolved
+    against THIS FILE's own package (`_resolve_relative_dotted_head`) rather
+    than matched against the anchored absolute-path regex, which a relative
+    literal can never satisfy on its own.
+
     The `module:attribute` entry-point form is split, so both halves of
     `"product.integrations.mailgun:build"` are read as naming the module.
     """
     names: set[str] = set()
-    for expression in _dynamic_import_expressions(tree):
+    for expression in _dynamic_import_expressions(tree, aliases):
+        fragment_ids = _joinedstr_fragment_ids(expression)
         for node in ast.walk(expression):
             if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            if id(node) in fragment_ids:
+                continue
+            if node.value.startswith("."):
+                resolved = _resolve_relative_dotted_head(node.value, relative)
+                if resolved:
+                    names |= _prefixes(resolved)
                 continue
             candidate = node.value.split(":", 1)[0].strip()
             if DOTTED_MODULE_NAME.match(candidate):
@@ -5665,7 +6025,9 @@ def _leading_constant_concat(node: ast.expr) -> str | None:
     return None
 
 
-def _named_packages(tree: ast.Module) -> frozenset[str]:
+def _named_packages(
+    tree: ast.Module, relative: PurePosixPath, aliases: dict[str, str]
+) -> frozenset[str]:
     """Package prefixes a runtime-import call ASSEMBLES a module name under.
 
     `importlib.import_module(f"product.integrations.{name}")` reaches a
@@ -5677,11 +6039,19 @@ def _named_packages(tree: ast.Module) -> frozenset[str]:
     and the literal head must be a dotted package path: an interpolated URL
     is not a module reference. `"product.integrations." + name` reaches the
     identical package the f-string form does (`_leading_constant_concat`).
+    `f".{x}"`/`f"{__name__}.{x}"`/`f"{__package__}.{x}"` — a RELATIVE dynamic
+    import — resolve through `_relative_head_prefix` against this file's own
+    package instead of the absolute-path regex a relative fragment can never
+    match.
     """
     prefixes: set[str] = set()
-    for expression in _dynamic_import_expressions(tree):
+    for expression in _dynamic_import_expressions(tree, aliases):
         for node in ast.walk(expression):
             if isinstance(node, ast.JoinedStr):
+                relative_prefix = _relative_head_prefix(node.values, relative)
+                if relative_prefix is not None:
+                    prefixes.add(relative_prefix)
+                    continue
                 for value in node.values:
                     if not isinstance(value, ast.Constant) or not isinstance(
                         value.value, str
@@ -5693,6 +6063,13 @@ def _named_packages(tree: ast.Module) -> frozenset[str]:
             elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
                 concatenated = _leading_constant_concat(node)
                 if concatenated is None:
+                    continue
+                if concatenated.startswith("."):
+                    resolved = _resolve_relative_dotted_head(concatenated, relative)
+                    if resolved:
+                        prefixes.add(
+                            resolved if resolved.endswith(".") else resolved + "."
+                        )
                     continue
                 head = concatenated.split(":", 1)[0]
                 if DOTTED_PACKAGE_PREFIX.match(head):
@@ -5706,7 +6083,7 @@ def _importers(
     """Reverse reachability graph over the tracked universe.
 
     An edge is a real `Import`/`ImportFrom` node, OR a string literal that is
-    itself the argument to a genuine runtime-import call
+    itself the module-naming argument of a genuine runtime-import call
     (`importlib.import_module(...)`, `__import__(...)`, or an equivalently
     named call — see `_is_runtime_import_call`). Both genuinely reach the
     module. A dotted-looking string that is merely NAMED — sitting in a dict,
@@ -5726,11 +6103,14 @@ def _importers(
         relative: set() for relative in trees
     }
     for relative, tree in trees.items():
-        for name in _imported_names(tree, relative) | _named_modules(tree):
+        aliases = _local_import_aliases(tree)
+        for name in _imported_names(tree, relative) | _named_modules(
+            tree, relative, aliases
+        ):
             for target in by_module.get(name, ()):
                 if target != relative:
                     result[target].add(relative)
-        for prefix in _named_packages(tree):
+        for prefix in _named_packages(tree, relative, aliases):
             for name, targets in by_module.items():
                 if not name.startswith(prefix):
                     continue

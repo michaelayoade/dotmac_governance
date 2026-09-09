@@ -5298,49 +5298,95 @@ DOTTED_PACKAGE_PREFIX = re.compile(
 )
 
 
-def _named_modules(tree: ast.Module) -> frozenset[str]:
-    """Module names this source NAMES as a string.
+#: Callables whose entire documented purpose is resolving a name into an
+#: imported module AT RUNTIME. A literal string reaching one of these is a
+#: genuine dynamic dependency; the same literal sitting in a dict, a list, a
+#: baseline file, or a characterization/subprocess-probe argument is a
+#: MENTION of the name, not a request to import it. Matched on the final
+#: attribute/name component, so `importlib.import_module(...)`, a bare
+#: `import_module(...)` call after `from importlib import import_module`, and
+#: the bare `__import__(...)` builtin are all recognised. An import bound
+#: under a different local alias (`from importlib import import_module as
+#: _im`) is NOT resolved — that is a genuinely undecidable rename for a
+#: syntactic-only reader without full alias tracking, and it stays a mention
+#: rather than being guessed into an edge on a call name that doesn't
+#: textually match. A call through an arbitrary local wrapper
+#: (`my_loader(name)`) is likewise not recognised for the same reason.
+RUNTIME_IMPORT_CALLEES = frozenset({"import_module", "__import__"})
 
-    Dynamic wiring is how integrations are ordinarily reached: a plugin
-    registry, `importlib.import_module`, a console-script entry point, a Celery
-    autodiscover list, a Django settings string. None of those is an import
-    edge, so an import-graph-only notion of reachability concluded that a
-    public, undisguised provider client whose only static importer was its own
-    honest unit test could be removed from the universe. Writing the test was
-    what bought the exemption and deleting it was what turned the build red,
-    which is the incentive precisely inverted.
+
+def _is_runtime_import_call(node: ast.Call) -> bool:
+    """Does this call resolve a string into a module at runtime?"""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id in RUNTIME_IMPORT_CALLEES
+    if isinstance(func, ast.Attribute):
+        return func.attr in RUNTIME_IMPORT_CALLEES
+    return False
+
+
+def _call_string_arguments(node: ast.Call) -> list[ast.expr]:
+    """This call's positional and keyword argument expressions, in order."""
+    return [*node.args, *(keyword.value for keyword in node.keywords)]
+
+
+def _named_modules(tree: ast.Module) -> frozenset[str]:
+    """Module names this source DYNAMICALLY IMPORTS as a string literal.
+
+    Only a string literal that is itself an argument to a genuine
+    runtime-import call — `importlib.import_module(...)`, `__import__(...)`,
+    or an equivalently named call — is a dependency edge. The same dotted
+    name appearing anywhere else in the source (a dict value, a list
+    element, a module-level constant, a subprocess-probe argument) is a
+    MENTION: an inventory necessarily names the things it inventories, and
+    reading that naming as reaching them turns every characterization module
+    into a false dependency on everything it characterizes.
 
     The `module:attribute` entry-point form is split, so both halves of
-    `"product.integrations.mailgun:build"` are read as naming the module.
+    `"product.integrations.mailgun:build"` are read as naming the module
+    when passed to a runtime-import call.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        if not isinstance(node, ast.Call) or not _is_runtime_import_call(node):
             continue
-        candidate = node.value.split(":", 1)[0].strip()
-        if DOTTED_MODULE_NAME.match(candidate):
-            names |= _prefixes(candidate)
+        for argument in _call_string_arguments(node):
+            if not isinstance(argument, ast.Constant) or not isinstance(
+                argument.value, str
+            ):
+                continue
+            candidate = argument.value.split(":", 1)[0].strip()
+            if DOTTED_MODULE_NAME.match(candidate):
+                names |= _prefixes(candidate)
     return frozenset(names)
 
 
 def _named_packages(tree: ast.Module) -> frozenset[str]:
-    """Package prefixes this source assembles a module name under.
+    """Package prefixes a runtime-import call ASSEMBLES a module name under.
 
-    `importlib.import_module(f"product.integrations.{name}")` reaches a module
-    the engine cannot individually identify, so it may not conclude that ANY
-    module under that package is unreachable. The literal head must be a dotted
-    package path: an interpolated URL is not a module reference.
+    `importlib.import_module(f"product.integrations.{name}")` reaches a
+    module the engine cannot individually identify, so it may not conclude
+    that ANY module under that package is unreachable — but only when the
+    assembled string is itself the argument to a genuine runtime-import call.
+    An f-string built for a log line, a file path, or a characterization
+    fixture is not a request to import anything, and the literal head must be
+    a dotted package path: an interpolated URL is not a module reference.
     """
     prefixes: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.JoinedStr):
+        if not isinstance(node, ast.Call) or not _is_runtime_import_call(node):
             continue
-        for value in node.values:
-            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+        for argument in _call_string_arguments(node):
+            if not isinstance(argument, ast.JoinedStr):
                 continue
-            head = value.value.split(":", 1)[0]
-            if DOTTED_PACKAGE_PREFIX.match(head):
-                prefixes.add(head)
+            for value in argument.values:
+                if not isinstance(value, ast.Constant) or not isinstance(
+                    value.value, str
+                ):
+                    continue
+                head = value.value.split(":", 1)[0]
+                if DOTTED_PACKAGE_PREFIX.match(head):
+                    prefixes.add(head)
     return frozenset(prefixes)
 
 
@@ -5349,10 +5395,18 @@ def _importers(
 ) -> dict[PurePosixPath, frozenset[PurePosixPath]]:
     """Reverse reachability graph over the tracked universe.
 
-    An edge is an import OR a dotted name held as a string, because both reach
-    the module. Naming a module is deliberately treated as reaching it even
-    when the string is incidental: the error lands on the side of measuring
-    more, and only ever costs an exclusion nobody was owed.
+    An edge is a real `Import`/`ImportFrom` node, OR a string literal that is
+    itself the argument to a genuine runtime-import call
+    (`importlib.import_module(...)`, `__import__(...)`, or an equivalently
+    named call — see `_is_runtime_import_call`). Both genuinely reach the
+    module. A dotted-looking string that is merely NAMED — sitting in a dict,
+    a list, a baseline file, or a characterization/subprocess-probe argument
+    — is not an edge: an inventory necessarily names the things it
+    inventories, and reading that naming as reaching them turned a
+    readiness ratchet's own `FAMILY_ENTRY_MODULE` map and a decommission
+    scanner's own exclusion list into false dependencies on everything they
+    described. The distinction is how the literal is CONSUMED, not whether it
+    looks like a module path.
     """
     by_module: dict[str, set[PurePosixPath]] = {}
     for relative in trees:

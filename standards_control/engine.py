@@ -5385,7 +5385,22 @@ def _call_string_arguments(node: ast.Call) -> list[ast.expr]:
 
 
 def _referenced_names(node: ast.expr) -> frozenset[str]:
-    """Every `Name` this expression subtree reads, however deeply nested."""
+    """Every `Name` this expression subtree reads, however deeply nested.
+
+    `definition.runtime.module` reduces to the single base name `definition`
+    — an `Attribute` chain's own field path (`.runtime.module`) is not kept,
+    so taint through it stops at whatever bound `definition`, never reaching
+    a specific keyword argument on a distant `ConnectorManifest(runtime=
+    RuntimeSpec(module="dotted.path"), ...)` construction. This is the same
+    documented boundary as `_bound_names` refusing an `Attribute`/`Subscript`
+    TARGET, applied to a `Attribute` SOURCE: an object's field is not traced
+    back to the literal that built it. `find_spec(_module_file_size_of(
+    definition.runtime.module))`-shaped code in a real corpus hits exactly
+    this — the CALL is recognised, but the specific field value is not
+    resolved — and the literal stays a mention rather than an edge. A
+    general object/field data-flow engine is out of scope for a syntactic
+    reader; this is a named limitation, not a silent one.
+    """
     return frozenset(
         child.id for child in ast.walk(node) if isinstance(child, ast.Name)
     )
@@ -5396,15 +5411,27 @@ def _bound_names(target: ast.expr) -> frozenset[str]:
 
     Named distinctly from the unrelated `_assigned_names` above (a
     credential-attribute detector, both declaration styles, `list[str]`) — a
-    coincidental same name would silently shadow it. An `Attribute`/
-    `Subscript` target (`self.x = ...`, `d[k] = ...`) is not a new local
-    binding this syntactic tracer can resolve back to a source, so it
-    contributes nothing here — the taint chain simply stops there rather
-    than guessing.
+    coincidental same name would silently shadow it. A `Name` target binds
+    itself; `Tuple`/`List`/`Starred` unpack recursively (`a, (b, c) = ...`).
+    An `Attribute`/`Subscript` target (`self.x = ...`, `d[k] = ...`) is not a
+    new local binding this syntactic tracer can resolve back to a source, so
+    it contributes NOTHING — deliberately not even the `Name` its own
+    receiver reads (`self` in `self.x = ...`), which would otherwise taint
+    `self` module-wide the first time any OTHER attribute on it fed an
+    import call, sweeping every unrelated `self.<anything> = "dotted.looking"`
+    assignment in the class into the traced set. The chain stops at the
+    attribute/subscript boundary rather than climbing back through it.
     """
-    return frozenset(
-        child.id for child in ast.walk(target) if isinstance(child, ast.Name)
-    )
+    if isinstance(target, ast.Name):
+        return frozenset({target.id})
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: set[str] = set()
+        for element in target.elts:
+            names |= _bound_names(element)
+        return frozenset(names)
+    if isinstance(target, ast.Starred):
+        return _bound_names(target.value)
+    return frozenset()
 
 
 def _positional_parameter_names(

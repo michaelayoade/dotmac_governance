@@ -6246,8 +6246,7 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "loader = functools.partial(import_module, 'app.kernel_runtime')\n"
     ),
     "app/consumer_find_spec.py": (
-        "import importlib.util\n\n"
-        "importlib.util.find_spec('app.kernel_runtime')\n"
+        "import importlib.util\n\nimportlib.util.find_spec('app.kernel_runtime')\n"
     ),
     "app/consumer_binop_concat.py": (
         "import importlib\n\n"
@@ -6502,9 +6501,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         a `Call`, which a naive `isinstance(func, ast.Attribute)` check
         falls straight through on.
         """
-        call = (
-            ast.parse("getattr(importlib, 'import_module')('x.y')").body[0].value
-        )
+        call = ast.parse("getattr(importlib, 'import_module')('x.y')").body[0].value
         self.assertTrue(_is_runtime_import_call(call))
         tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_getattr_indirection.py"])
         self.assertIn("app.kernel_runtime", _named_modules(tree))
@@ -6515,9 +6512,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         engine can see — the construction itself is the point of
         consumption.
         """
-        call = (
-            ast.parse("functools.partial(import_module, 'x.y')").body[0].value
-        )
+        call = ast.parse("functools.partial(import_module, 'x.y')").body[0].value
         self.assertTrue(_is_runtime_import_call(call))
         tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_functools_partial.py"])
         self.assertIn("app.kernel_runtime", _named_modules(tree))
@@ -6571,9 +6566,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         `_bound_names` in isolation is not enough if `_named_modules` still
         found a path to leak the two together.
         """
-        tree = ast.parse(
-            IMPORT_EDGE_CORPUS["app/consumer_unrelated_self_attribute.py"]
-        )
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_unrelated_self_attribute.py"])
         self.assertEqual(_named_modules(tree), frozenset())
 
 

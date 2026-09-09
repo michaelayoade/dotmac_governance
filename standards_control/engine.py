@@ -5314,14 +5314,53 @@ DOTTED_PACKAGE_PREFIX = re.compile(
 #: (`my_loader(name)`) is likewise not recognised for the same reason.
 RUNTIME_IMPORT_CALLEES = frozenset({"import_module", "__import__"})
 
+#: Receiver names, by CONVENTION rather than static guarantee, under which a
+#: `.patch(...)`/`.setattr(...)`/`.delattr(...)` call's string target is
+#: resolved by an import INSIDE the library's own machinery — the pytest
+#: `monkeypatch`/`mocker` fixture parameters and `unittest.mock`/`mock`. Not
+#: a proof (a local variable could coincidentally share the name), but
+#: matching `.patch`/`.setattr` on ANY receiver would catch an HTTP client's
+#: PATCH verb or an unrelated `.setattr` — a worse false-positive class than
+#: the one this fix exists to close, so the match is scoped to the receiver's
+#: terminal name, resolved through `_name()` so both `mock.patch(...)` and a
+#: fully-qualified `unittest.mock.patch(...)` are recognised.
+DYNAMIC_PATCH_RECEIVERS = frozenset({"monkeypatch", "mocker", "mock"})
+
 
 def _is_runtime_import_call(node: ast.Call) -> bool:
-    """Does this call resolve a string into a module at runtime?"""
+    """Does this call resolve a string into a module at runtime?
+
+    `importlib.import_module(...)`/`__import__(...)` do so directly.
+    `monkeypatch.setattr("dotted.path", value)`,
+    `monkeypatch.delattr("dotted.path")`, and `mock.patch("dotted.path",
+    ...)`/`mocker.patch(...)` do so INSIDE pytest's/`unittest.mock`'s own
+    machinery when given a bare dotted-string target — genuinely importing
+    the named module to resolve it, not merely naming it — so they are an
+    equivalent runtime-import call under clause 2. `setattr`/`delattr` are
+    scoped further to the 2-positional-argument, string-first-argument form:
+    a 3-argument `monkeypatch.setattr(obj, "attr", value)` patches an
+    ALREADY-IMPORTED object and performs no import at all.
+    """
     func = node.func
     if isinstance(func, ast.Name):
         return func.id in RUNTIME_IMPORT_CALLEES
-    if isinstance(func, ast.Attribute):
-        return func.attr in RUNTIME_IMPORT_CALLEES
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr in RUNTIME_IMPORT_CALLEES:
+        return True
+    if func.attr == "patch":
+        return _name(func.value) in DYNAMIC_PATCH_RECEIVERS
+    if func.attr in ("setattr", "delattr"):
+        if _name(func.value) != "monkeypatch":
+            return False
+        # pytest's own overload split: `setattr(target, value)` (2 args) and
+        # `delattr(target)` (1 arg) treat `target` as a dotted import path and
+        # resolve it via an import; `setattr(obj, "attr", value)` (3 args) and
+        # `delattr(obj, "attr")` (2 args) patch an ALREADY-IMPORTED object and
+        # import nothing. This is arg COUNT, not whether `target` currently
+        # happens to be a literal — a variable resolved later by the taint
+        # chain must still be recognised as reaching the call.
+        return len(node.args) == (2 if func.attr == "setattr" else 1)
     return False
 
 
@@ -5337,8 +5376,8 @@ def _referenced_names(node: ast.expr) -> frozenset[str]:
     )
 
 
-def _assign_bound_names(node: ast.Assign | ast.AnnAssign) -> frozenset[str]:
-    """Every plain `Name` a simple assignment binds.
+def _bound_names(target: ast.expr) -> frozenset[str]:
+    """Every plain `Name` an assignment or `for` target binds.
 
     Named distinctly from the unrelated `_assigned_names` above (a
     credential-attribute detector, both declaration styles, `list[str]`) — a
@@ -5348,21 +5387,76 @@ def _assign_bound_names(node: ast.Assign | ast.AnnAssign) -> frozenset[str]:
     contributes nothing here — the taint chain simply stops there rather
     than guessing.
     """
-    targets: list[ast.expr] = (
-        list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+    return frozenset(
+        child.id for child in ast.walk(target) if isinstance(child, ast.Name)
     )
-    names: set[str] = set()
-    for target in targets:
-        names |= frozenset(
-            child.id for child in ast.walk(target) if isinstance(child, ast.Name)
-        )
-    return frozenset(names)
+
+
+def _positional_parameter_names(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[str]:
+    """This function's positional parameters, in call order.
+
+    `*args`/`**kwargs`/keyword-only parameters are excluded: a value reaching
+    the function through one of those is not resolvable to a single call-site
+    argument by position, so it is left untraced rather than guessed at.
+    """
+    return [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
+
+
+def _taint_edges(
+    tree: ast.Module,
+) -> list[tuple[frozenset[str], frozenset[str], ast.expr]]:
+    """Every (bound names, referenced names, value expression) step a value
+    can flow through in this module: a simple assignment, a `for` loop's own
+    binding, or an argument passed BY POSITION to a function DEFINED in this
+    same module. Each triple says: if any of the bound names is provably
+    import-fed, the referenced names are pulled in too, and the value
+    expression itself is a place to harvest a literal from directly.
+
+    The function-call step is what lets a value survive one hop through a
+    named helper — `_apply_router_spec(app, spec)` calling
+    `_load_router_object(module_name, attr_name)` which calls
+    `import_module(module_name)` — without becoming a general interprocedural
+    data-flow engine: only a direct call to a function this module itself
+    defines, matched by simple positional position, is followed.
+    """
+    edges: list[tuple[frozenset[str], frozenset[str], ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = frozenset().union(
+                *(
+                    _bound_names(target)
+                    for target in (
+                        node.targets if isinstance(node, ast.Assign) else [node.target]
+                    )
+                )
+            )
+            if targets:
+                edges.append((targets, _referenced_names(node.value), node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = _bound_names(node.target)
+            if targets:
+                edges.append((targets, _referenced_names(node.iter), node.iter))
+
+    functions = _module_level_functions(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        function = functions.get(node.func.id)
+        if function is None:
+            continue
+        parameters = _positional_parameter_names(function)
+        for parameter, argument in zip(parameters, node.args):
+            edges.append(
+                (frozenset({parameter}), _referenced_names(argument), argument)
+            )
+    return edges
 
 
 def _import_fed_names(tree: ast.Module) -> frozenset[str]:
     """Every `Name` whose value can reach a runtime-import call in this
-    module, traced backward through simple assignment chains to a fixed
-    point.
+    module, traced backward through `_taint_edges` to a fixed point.
 
     `importlib.import_module(module_name)` seeds `module_name`; if
     `module_name, _, _ = REGISTRY[key].partition(":")` assigns it, `REGISTRY`
@@ -5370,14 +5464,15 @@ def _import_fed_names(tree: ast.Module) -> frozenset[str]:
     string values are what actually reach the import call. This is what lets
     an ordinarily-shaped plugin registry still register as a dependency when
     the resolved name passes through a lookup and a `partition` before
-    reaching `import_module`, without treating every dict or list of
-    dotted-looking strings in the module as reaching it: a name earns its way
-    into this set only by provably feeding a real runtime-import call.
+    reaching `import_module`, or through a `for` loop and a same-module
+    helper function before reaching it, without treating every dict or list
+    of dotted-looking strings in the module as reaching it: a name earns its
+    way into this set only by provably feeding a real runtime-import call.
 
     This is a syntactic reader, not a data-flow engine: an assignment through
-    an `Attribute`/`Subscript` target, a function boundary, or any expression
-    shape it does not recognise breaks the chain there rather than guessing
-    past it.
+    an `Attribute`/`Subscript` target, a call to a function this module does
+    not itself define, or any expression shape it does not recognise breaks
+    the chain there rather than guessing past it.
     """
     tainted: set[str] = set()
     for node in ast.walk(tree):
@@ -5385,17 +5480,11 @@ def _import_fed_names(tree: ast.Module) -> frozenset[str]:
             for argument in _call_string_arguments(node):
                 tainted |= _referenced_names(argument)
 
-    edges: list[tuple[frozenset[str], frozenset[str]]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-            targets = _assign_bound_names(node)
-            if targets:
-                edges.append((targets, _referenced_names(node.value)))
-
+    edges = _taint_edges(tree)
     changed = True
     while changed:
         changed = False
-        for targets, sources in edges:
+        for targets, sources, _ in edges:
             if targets & tainted and not sources <= tainted:
                 tainted |= sources
                 changed = True
@@ -5403,19 +5492,19 @@ def _import_fed_names(tree: ast.Module) -> frozenset[str]:
 
 
 def _dynamic_import_expressions(tree: ast.Module) -> list[ast.expr]:
-    """Every expression this module puts within reach of a runtime import:
-    a runtime-import call's own arguments, plus the right-hand side of any
-    assignment whose target the call's arguments can be traced back to.
+    """Every expression this module puts within reach of a runtime import: a
+    runtime-import call's own arguments, plus the value/iterable/argument
+    side of any `_taint_edges` step whose bound names the call's arguments
+    can be traced back to.
     """
     expressions: list[ast.expr] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and _is_runtime_import_call(node):
             expressions.extend(_call_string_arguments(node))
     tainted = _import_fed_names(tree)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-            if _assign_bound_names(node) & tainted:
-                expressions.append(node.value)
+    for targets, _, value in _taint_edges(tree):
+        if targets & tainted:
+            expressions.append(value)
     return expressions
 
 

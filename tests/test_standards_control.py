@@ -24,8 +24,15 @@ from standards_control.contracts import (
 from standards_control.engine import (
     _CREDENTIAL_FILENAMES,
     _CREDENTIAL_SUFFIXES,
+    _bound_names,
     _credential_filenames,
     _fingerprint,
+    _importers,
+    _is_runtime_import_call,
+    _local_import_aliases,
+    _module_naming_arguments,
+    _named_modules,
+    _named_packages,
     _opens_an_smtp_connection,
     _sends_mail,
     _uses_an_smtp_transport,
@@ -6128,6 +6135,1088 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
     def test_the_checked_in_authority_names_one_host_and_one_source(self) -> None:
         actual = json.loads((ROOT / self.AUTHORITY_PATH).read_text(encoding="utf-8"))
         self.assertEqual(actual, self.authority())
+
+
+# -- Import-edge classification: consumption, not string-matching -----------
+#
+# `_importers()` measured a false edge from any file that merely NAMED a
+# dotted path — an inventory dict, an exclusion list, a subprocess-probe
+# argument — as if it had imported the module. Two independent false
+# positives were reported this way: Academy's readiness ratchet
+# (`FAMILY_ENTRY_MODULE`, a dict of entry-module names feeding a subprocess
+# probe) and Sub's CRM freeze classifier (a scanner that names decommissioned
+# script paths IN ORDER TO EXCLUDE them). A dependency edge is now the
+# genuine consumption of a literal: a real `Import`/`ImportFrom` node, or a
+# literal reaching a runtime-import call — `importlib.import_module(...)`,
+# `__import__(...)`, `find_spec(...)`, `spec_from_file_location(...)`,
+# `pytest.importorskip(...)`, `getattr(module, "name")(...)` indirection,
+# `functools.partial(import_module, ...)`, `monkeypatch.setattr`/`delattr`'s
+# string-target overload, `mock.patch`/`mocker.patch`, or a bare `patch(...)`
+# — possibly renamed under a local `import ... as` alias, traced through
+# simple assignment chains, `for`/comprehension loops, and same-module
+# helper calls (SCOPED per function, so a name colliding across two
+# unrelated functions does not launder one into the other) to a fixed
+# point, with the actual module-naming ARGUMENT bound per callee shape
+# (never a `patch()` keyword or a `spec_from_file_location` PATH argument).
+# A relative dynamic import (`import_module(".sub", __name__)`,
+# `f"{__package__}.{x}"`) resolves against the FILE's own package.
+#
+# This is a DIFFERENTIAL fixture in the sense Michael asked for: it is not
+# "some edges appear/disappear", it is the FULL edge set `_importers()`
+# computes over a fixed, embedded, reproducible corpus, asserted by exact
+# equality on EVERY key — through `_importers` itself, the real function CI
+# runs, not a reimplementation of the rule. A future change that silently
+# drops a genuine edge, or silently starts counting a mention again, fails
+# this test rather than requiring someone to notice in review. Two rounds of
+# corpus differential against independent real repositories (dotmac_
+# academy_app, dotmac_sub; analysis only, not part of any test suite here)
+# and one independent review are what surfaced every shape represented
+# below.
+IMPORT_EDGE_CORPUS: dict[str, str] = {
+    # -- Targets: the modules every edge below points at or past -----------
+    "app/kernel_runtime.py": "def boot() -> None:\n    return None\n",
+    "app/main_module.py": "def main() -> None:\n    return None\n",
+    "example/mailgun_client.py": (
+        "def build_client(api_key: str):\n    return api_key\n"
+    ),
+    "example/plugins/__init__.py": "",
+    "example/plugins/mailgun_client.py": (
+        "def build_client(api_key: str):\n    return api_key\n"
+    ),
+    "app/services/job_heartbeat.py": (
+        "def record_success() -> None:\n    return None\n"
+    ),
+    "crm/scripts/legacy_sync.py": "def run() -> None:\n    return None\n",
+    "app/services/finance/gl/sibling.py": "VALUE = 1\n",
+    "conftest.py": "FIXTURE = 1\n",
+    "app/legacy/decommissioned.py": "def run() -> None:\n    return None\n",
+    "app/tasks/__init__.py": "",
+    "app/tasks/tasks.py": "def run_invoice_cycle() -> None:\n    return None\n",
+    # -- Real static imports: `Import`/`ImportFrom` nodes ------------------
+    "app/consumer_static_import.py": "import app.kernel_runtime\n",
+    "app/consumer_from_import.py": "from app.main_module import main\n",
+    # -- Genuine dynamic imports: must all still bite -----------------------
+    "app/consumer_direct_import_module.py": (
+        "import importlib\n\nimportlib.import_module('app.kernel_runtime')\n"
+    ),
+    "app/consumer_dunder_import.py": "__import__('app.kernel_runtime')\n",
+    "app/consumer_registry_wiring.py": (
+        "import importlib\n\n"
+        "PROVIDERS = {'mailgun': 'example.mailgun_client:build_client'}\n\n"
+        "def resolve(name: str) -> object:\n"
+        "    module_name, _, attribute = PROVIDERS[name].partition(':')\n"
+        "    return getattr(importlib.import_module(module_name), attribute)\n"
+    ),
+    "app/consumer_assembled_name.py": (
+        "import importlib\n\n"
+        "DEFAULT_PROVIDERS = ('mailgun_client',)\n\n"
+        "def load() -> dict:\n"
+        "    return {\n"
+        "        name: importlib.import_module(f'example.plugins.{name}')\n"
+        "        for name in DEFAULT_PROVIDERS\n"
+        "    }\n"
+    ),
+    "app/consumer_router_spec_list.py": (
+        "from importlib import import_module\n\n"
+        "_CORE_ROUTER_SPECS = [\n"
+        "    ('app.kernel_runtime', 'boot'),\n"
+        "    ('app.main_module', 'main'),\n"
+        "]\n\n"
+        "def _load(module_name: str, attr_name: str):\n"
+        "    module = import_module(module_name)\n"
+        "    return getattr(module, attr_name)\n\n"
+        "def _apply(spec: tuple) -> None:\n"
+        "    module_name, attr_name = spec\n"
+        "    _load(module_name, attr_name)\n\n"
+        "def include_core_routers() -> None:\n"
+        "    for spec in _CORE_ROUTER_SPECS:\n"
+        "        _apply(spec)\n"
+    ),
+    "app/consumer_monkeypatch_setattr.py": (
+        "def test_boots(monkeypatch) -> None:\n"
+        "    monkeypatch.setattr('app.kernel_runtime.boot', lambda: None)\n"
+    ),
+    "app/consumer_bare_mock_patch.py": (
+        "from unittest.mock import patch\n\n"
+        "def test_boots() -> None:\n"
+        "    with patch('app.services.job_heartbeat.record_success'):\n"
+        "        pass\n"
+    ),
+    "app/consumer_qualified_mock_patch.py": (
+        "from unittest import mock\n\n"
+        "def test_boots() -> None:\n"
+        "    with mock.patch('app.kernel_runtime.boot'):\n"
+        "        pass\n"
+    ),
+    "app/consumer_getattr_indirection.py": (
+        "import importlib\n\n"
+        "getattr(importlib, 'import_module')('app.kernel_runtime')\n"
+    ),
+    "app/consumer_functools_partial.py": (
+        "import functools\n"
+        "from importlib import import_module\n\n"
+        "loader = functools.partial(import_module, 'app.kernel_runtime')\n"
+    ),
+    "app/consumer_find_spec.py": (
+        "import importlib.util\n\nimportlib.util.find_spec('app.kernel_runtime')\n"
+    ),
+    "app/consumer_spec_from_file_location.py": (
+        "import importlib.util\n\n"
+        "importlib.util.spec_from_file_location('app.kernel_runtime', SOME_PATH)\n"
+    ),
+    "app/consumer_binop_concat.py": (
+        "import importlib\n\n"
+        "def load(name: str) -> object:\n"
+        "    return importlib.import_module('example.plugins.' + name)\n"
+    ),
+    "app/consumer_aliased_import_module.py": (
+        "from importlib import import_module as _im\n\n_im('app.kernel_runtime')\n"
+    ),
+    "app/consumer_aliased_patch.py": (
+        "from unittest.mock import patch as _patch\n\n"
+        "def test_boots() -> None:\n"
+        "    with _patch('app.kernel_runtime.boot'):\n"
+        "        pass\n"
+    ),
+    "app/consumer_importorskip.py": (
+        "import pytest\n\npytest.importorskip('app.kernel_runtime')\n"
+    ),
+    "app/services/finance/gl/__init__.py": (
+        "from importlib import import_module\n\n"
+        "def __getattr__(name: str) -> object:\n"
+        "    return import_module(f'.{name}', __name__)\n"
+    ),
+    "app/consumer_comprehension_import.py": (
+        "import importlib\n\n"
+        "MODULES = ('app.kernel_runtime',)\n\n"
+        "def load_all() -> list:\n"
+        "    return [importlib.import_module(m) for m in MODULES]\n"
+    ),
+    "app/consumer_scope_collision.py": (
+        "import importlib\n\n"
+        "def load(module_name: str) -> object:\n"
+        "    return importlib.import_module(module_name)\n\n"
+        "def describe() -> str:\n"
+        "    module_name = 'app.legacy.decommissioned'\n"
+        "    return module_name\n\n"
+        "def trigger() -> object:\n"
+        "    return load('app.kernel_runtime')\n"
+    ),
+    # A function reference passed AS DATA to a higher-order caller reaches
+    # its own module-level function's parameter scope the same way a direct
+    # call does — the `app/main.py` deferred-router shape a real corpus
+    # confirmed was otherwise lost.
+    "app/consumer_forwarded_to_thread.py": (
+        "import asyncio\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "async def trigger() -> object:\n"
+        "    return await asyncio.to_thread(_load, 'app.kernel_runtime')\n"
+    ),
+    "app/consumer_forwarded_thread_target.py": (
+        "import threading\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def trigger() -> None:\n"
+        "    threading.Thread(target=_load, args=('app.kernel_runtime',)).start()\n"
+    ),
+    "app/consumer_forwarded_process_target.py": (
+        "import multiprocessing\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def trigger() -> None:\n"
+        "    multiprocessing.Process(\n"
+        "        target=_load, args=('app.kernel_runtime',)\n"
+        "    ).start()\n"
+    ),
+    "app/consumer_forwarded_submit.py": (
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def trigger(executor) -> object:\n"
+        "    return executor.submit(_load, 'app.kernel_runtime')\n"
+    ),
+    "app/consumer_forwarded_run_in_executor.py": (
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "async def trigger(loop, executor) -> object:\n"
+        "    return await loop.run_in_executor(executor, _load, 'app.kernel_runtime')\n"
+    ),
+    # Near-miss, LOAD-BEARING: this file's OWN `_load` genuinely reaches
+    # `import_module` (`tainted` is non-empty from this file alone, unlike a
+    # prior version of this fixture that had NO runtime-import call
+    # anywhere and so proved nothing — `frozenset()` held whether or not
+    # `_forwarded_call` existed at all). The forwarded call names
+    # `_other_helper`, a DIFFERENT function, so the shape is recognised but
+    # no edge is manufactured — the forwarding target discrimination is what
+    # this asserts, not merely "some file with no imports produces none".
+    "app/consumer_forwarded_unrelated_function.py": (
+        "import asyncio\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def _other_helper(value: str) -> str:\n"
+        "    return value.upper()\n\n"
+        "async def trigger() -> object:\n"
+        "    return await asyncio.to_thread(_other_helper, 'app.kernel_runtime')\n"
+    ),
+    # Permanent regression plant: the relative-import "starts with a dot"
+    # check must resolve ONLY the harvested expression itself, never a
+    # Constant merely reachable inside it — a real corpus caught
+    # `str.removesuffix(".py")`'s own argument being misread as a relative
+    # import fragment and manufacturing a false edge to `conftest`/the
+    # importer's own package. `"conftest.py"` is a DOTTED_MODULE_NAME match
+    # on its own (each segment is identifier-shaped), so this is also a
+    # second, independent proof that `spec_from_file_location`'s harvesting
+    # stays bound to the NAME position, not "every reachable literal".
+    "app/consumer_removesuffix_not_a_relative_import.py": (
+        "import importlib.util\n\n"
+        "def _load_migration(filename: str):\n"
+        "    stem = filename.removesuffix('.py')\n"
+        "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
+        "    return spec\n"
+    ),
+    # The HOISTED variant of the same false-positive shape: `SUFFIX` is a
+    # module-level constant, not an inline literal, so the Constant `.py`
+    # reaches `_named_modules` only by being traced back to through TWO
+    # assignment hops (`stem`, then `SUFFIX`) rather than sitting directly
+    # in the call. `node is expression` alone does not catch this — the
+    # harvested expression IS `Constant('.py')` after tracing, satisfying
+    # identity — only PROVENANCE (never a runtime-import call's own
+    # argument) does. This is the exact reproduction a second review used
+    # to demonstrate the identity-only guard was one variable away from the
+    # same regression.
+    "app/consumer_hoisted_removesuffix_not_a_relative_import.py": (
+        "import importlib.util\n\n"
+        "SUFFIX = '.py'\n\n"
+        "def _load_migration(filename: str):\n"
+        "    stem = filename.removesuffix(SUFFIX)\n"
+        "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
+        "    return spec\n"
+    ),
+    # A-2 regression plant: `_function_scopes` opens a scope for `ast.
+    # Lambda`, but if `_scope_bound_names` ever again collected parameters
+    # for `FunctionDef`/`AsyncFunctionDef` only, the lambda's OWN parameter
+    # `module_name` would fall back to MODULE scope — the SAME scope the
+    # unrelated module-level `module_name` below lives in — and this file's
+    # `import_module(module_name)` (a real, non-vacuous runtime-import call,
+    # seeded directly from inside the lambda body) would sweep
+    # `app.legacy.decommissioned` in as a false edge, reproducing the exact
+    # finding-5 name-coincidence class one scope-kind over. A `FunctionDef`
+    # fixture cannot catch this: the asymmetry WAS `Lambda` behaving
+    # differently from `FunctionDef`.
+    "app/consumer_lambda_parameter_scope.py": (
+        "import importlib\n\n"
+        "module_name = 'app.legacy.decommissioned'\n\n"
+        "load = lambda module_name: importlib.import_module(module_name)\n"
+    ),
+    # B-1 regression plant: if the forwarded-call branch in `_taint_edges`
+    # ever again resolved `reference.id` through `aliases` BEFORE the local
+    # `functions` lookup, `loader` (aliased from a DIFFERENT module's
+    # `_load`) would incorrectly resolve to THIS file's own local `def
+    # _load`, which genuinely reaches `import_module` — a real,
+    # non-vacuous seed — and the forwarded `'app.kernel_runtime'` argument
+    # would be wrongly connected to it. This is the ONLY exercise alias
+    # resolution has anywhere: the independent audit found zero real-corpus
+    # edges attributable to it, so if this regresses, nothing else in this
+    # repository notices.
+    "app/consumer_forwarded_alias_shadow.py": (
+        "import asyncio\n"
+        "from vendor.helpers import _load as loader\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "async def trigger() -> object:\n"
+        "    return await asyncio.to_thread(loader, 'app.kernel_runtime')\n"
+    ),
+    # `celery_app.autodiscover_tasks([...])` is a genuine, documented Celery
+    # dynamic importer reaching `<package>.tasks` (Celery's own
+    # `related_name="tasks"` default), not the bare package name.
+    "app/consumer_autodiscover_tasks.py": (
+        "celery_app.autodiscover_tasks(['app.tasks'])\n"
+    ),
+    # Near-miss: a COMPUTED package list — not a list/tuple/set literal at
+    # all — is not resolvable, so nothing is harvested rather than guessed
+    # at.
+    "app/consumer_autodiscover_tasks_computed.py": (
+        "celery_app.autodiscover_tasks(discover_package_names())\n"
+    ),
+    # -- Characterization / inventory mentions: must NOT bite ---------------
+    # Academy's shape: a dict of dotted names feeding a SUBPROCESS PROBE, not
+    # an import.
+    "readiness/ratchet.py": (
+        "import subprocess, sys\n\n"
+        "FAMILY_ENTRY_MODULE = {'boot': 'app.kernel_runtime', 'main': 'app.main_module'}\n\n"
+        "def probe(family: str) -> None:\n"
+        "    subprocess.run([sys.executable, '-m', FAMILY_ENTRY_MODULE[family]], check=True)\n"
+    ),
+    # Sub's shape: an EXCLUSION list naming a decommissioned surface so it can
+    # be excluded, not imported.
+    "governance/freeze_classifier.py": (
+        "DECOMMISSIONED = ['crm.scripts.legacy_sync']\n\n"
+        "def is_excluded(name: str) -> bool:\n"
+        "    return name in DECOMMISSIONED\n"
+    ),
+    # An expected-value fixture: a Celery-style task-routing assertion that
+    # COMPARES a dotted string, never imports it.
+    "tests/test_task_routing_expected.py": (
+        "TASK_NAME = 'app.kernel_runtime.boot'\n\n"
+        "def test_route() -> None:\n"
+        "    assert TASK_NAME in {'app.kernel_runtime.boot'}\n"
+    ),
+    # Near-miss: a 3-positional-argument `monkeypatch.setattr(obj, name,\n"
+    # value)` patches an ALREADY-IMPORTED object; no import happens.
+    "app/consumer_monkeypatch_object_form.py": (
+        "def test_patches_object(monkeypatch) -> None:\n"
+        "    monkeypatch.setattr('app.kernel_runtime', 'boot', lambda: None)\n"
+    ),
+    # Near-miss: a call through an arbitrary local wrapper, not a recognised
+    # runtime-import callee.
+    "app/consumer_local_wrapper.py": (
+        "def my_loader(name: str) -> None:\n"
+        "    return None\n\n"
+        "my_loader('app.kernel_runtime')\n"
+    ),
+    # Near-miss: a rename that resolves to something OTHER than a
+    # runtime-import callee. The local name "patch" is bare-recognised on
+    # its own, but resolving the alias shows it is really `json.loads` —
+    # precision, not just recall, from `_local_import_aliases`.
+    "app/consumer_coincidental_patch_alias.py": (
+        "from json import loads as patch\n\npatch('app.kernel_runtime')\n"
+    ),
+    # Near-miss: `getattr(...)` resolving to an UNRELATED attribute is not a
+    # runtime-import indirection — only a second argument naming a
+    # recognised callee (`import_module`, `find_spec`, ...) qualifies.
+    "app/consumer_getattr_unrelated.py": (
+        "getattr(some_module, 'unrelated_attr')('app.kernel_runtime')\n"
+    ),
+    # Near-miss: `functools.partial(...)` wrapping an UNRELATED function.
+    "app/consumer_partial_unrelated.py": (
+        "import functools\n\n"
+        "loader = functools.partial(some_other_function, 'app.kernel_runtime')\n"
+    ),
+    # Near-miss: a computed (non-constant) left operand breaks the BinOp
+    # concatenation chain rather than being guessed at.
+    "app/consumer_binop_computed_prefix.py": (
+        "import importlib\n\n"
+        "importlib.import_module(compute_prefix() + '.mailgun_client')\n"
+    ),
+    # Near-miss (finding 6): `spec_from_file_location`'s SECOND argument is a
+    # file PATH, not a module name — even when it happens to look
+    # dotted-shaped (`"conftest.py"` matches the anchored dotted-identifier
+    # regex), it must not be harvested. Paired against the real
+    # `app/consumer_spec_from_file_location.py` plant above, which puts the
+    # target name in the FIRST (correct) position instead.
+    "app/consumer_spec_from_file_location_path_arg.py": (
+        "import importlib.util\n\n"
+        "importlib.util.spec_from_file_location('plugin', 'conftest.py')\n"
+    ),
+    # Near-miss (finding 6): `monkeypatch.setattr`'s SECOND argument is the
+    # VALUE being assigned, not a module reference.
+    "app/consumer_setattr_value_not_harvested.py": (
+        "def test_patches(monkeypatch) -> None:\n"
+        "    monkeypatch.setattr('app.cfg.BACKEND', 'app.kernel_runtime')\n"
+    ),
+    # Near-miss (finding 6): `patch(...)`'s `return_value=` keyword is not
+    # the patch TARGET.
+    "app/consumer_patch_return_value_not_harvested.py": (
+        "from unittest.mock import patch\n\n"
+        "def test_patches() -> None:\n"
+        "    with patch('app.services.job_heartbeat.record_success',"
+        " return_value='app.kernel_runtime'):\n"
+        "        pass\n"
+    ),
+    # Near-miss: an unrelated `self.<attr> = "dotted-looking"` assignment
+    # elsewhere in the SAME class must not leak module-wide just because
+    # `self.other` feeds an import call somewhere else in the file — the
+    # `_bound_names` boundary this fix depends on.
+    "app/consumer_unrelated_self_attribute.py": (
+        "import importlib\n\n"
+        "class Loader:\n"
+        "    def configure(self) -> None:\n"
+        "        self.label = 'app.kernel_runtime'\n\n"
+        "    def load(self) -> None:\n"
+        "        importlib.import_module(self.other)\n"
+    ),
+}
+
+
+#: The full, exact edge set `_importers()` computes over `IMPORT_EDGE_CORPUS`
+#: — every key in the corpus that is a TARGET of at least one edge, mapped to
+#: every key that reaches it. A key absent here (present in the corpus but
+#: not below) has NO importers at all — this is what makes
+#: `test_the_full_edge_set_is_exactly_this` a real ratchet on EVERY corpus
+#: key (finding 7), not just the handful a hand-picked assertion happened to
+#: cover: `example/plugins/__init__.py` receiving edges via package-prefix
+#: matching is exactly the kind of entry a partial assertion would silently
+#: miss a regression on.
+IMPORT_EDGE_EXPECTED: dict[str, frozenset[str]] = {
+    "app/kernel_runtime.py": frozenset(
+        {
+            "app/consumer_static_import.py",
+            "app/consumer_direct_import_module.py",
+            "app/consumer_dunder_import.py",
+            "app/consumer_router_spec_list.py",
+            "app/consumer_monkeypatch_setattr.py",
+            "app/consumer_qualified_mock_patch.py",
+            "app/consumer_getattr_indirection.py",
+            "app/consumer_functools_partial.py",
+            "app/consumer_find_spec.py",
+            "app/consumer_spec_from_file_location.py",
+            "app/consumer_aliased_import_module.py",
+            "app/consumer_aliased_patch.py",
+            "app/consumer_importorskip.py",
+            "app/consumer_comprehension_import.py",
+            "app/consumer_scope_collision.py",
+            "app/consumer_forwarded_to_thread.py",
+            "app/consumer_forwarded_thread_target.py",
+            "app/consumer_forwarded_process_target.py",
+            "app/consumer_forwarded_submit.py",
+            "app/consumer_forwarded_run_in_executor.py",
+        }
+    ),
+    "app/main_module.py": frozenset(
+        {
+            "app/consumer_from_import.py",
+            "app/consumer_router_spec_list.py",
+        }
+    ),
+    "app/services/finance/gl/sibling.py": frozenset(
+        {"app/services/finance/gl/__init__.py"}
+    ),
+    "app/services/job_heartbeat.py": frozenset(
+        {
+            "app/consumer_bare_mock_patch.py",
+            "app/consumer_patch_return_value_not_harvested.py",
+        }
+    ),
+    "example/mailgun_client.py": frozenset({"app/consumer_registry_wiring.py"}),
+    "example/plugins/__init__.py": frozenset(
+        {"app/consumer_assembled_name.py", "app/consumer_binop_concat.py"}
+    ),
+    "example/plugins/mailgun_client.py": frozenset(
+        {"app/consumer_assembled_name.py", "app/consumer_binop_concat.py"}
+    ),
+    "app/tasks/__init__.py": frozenset({"app/consumer_autodiscover_tasks.py"}),
+    "app/tasks/tasks.py": frozenset({"app/consumer_autodiscover_tasks.py"}),
+}
+
+
+class ImportEdgeClassificationTests(unittest.TestCase):
+    """`_importers` classifies a dotted string by how it is CONSUMED, not by
+    whether it looks like a module path.
+    """
+
+    def importers(self) -> dict[str, frozenset[str]]:
+        trees = {
+            PurePosixPath(relative): ast.parse(source, filename=relative)
+            for relative, source in IMPORT_EDGE_CORPUS.items()
+        }
+        return {
+            target.as_posix(): frozenset(item.as_posix() for item in sources)
+            for target, sources in _importers(trees).items()
+        }
+
+    def named_modules(
+        self, source: str, relative: str = "app/consumer.py"
+    ) -> frozenset[str]:
+        tree = ast.parse(source)
+        return _named_modules(
+            tree, PurePosixPath(relative), _local_import_aliases(tree)
+        )
+
+    def named_packages(
+        self, source: str, relative: str = "app/consumer.py"
+    ) -> frozenset[str]:
+        tree = ast.parse(source)
+        return _named_packages(
+            tree, PurePosixPath(relative), _local_import_aliases(tree)
+        )
+
+    def is_runtime_import_call(self, expression: str, context: str = "") -> bool:
+        """Parse `expression` as a bare statement's `Call`, resolving any
+        local `import ... as` alias from `context` (a module preamble) if
+        given.
+        """
+        call = ast.parse(expression).body[0].value
+        assert isinstance(call, ast.Call)
+        aliases = _local_import_aliases(ast.parse(context)) if context else {}
+        return _is_runtime_import_call(call, aliases)
+
+    def test_the_full_edge_set_is_exactly_this(self) -> None:
+        """The DIFFERENTIAL assertion: not 'an edge exists/does not exist',
+        but the WHOLE set `_importers` returns, compared directly — not
+        filtered down to the corpus's own keys first, which would hide a
+        future change that made `_importers` return a target it was never
+        asked about. `_importers` happens to key its result exactly by its
+        input trees today (every corpus path, nothing else), so this is
+        equivalent in outcome to filtering, but it stops being a blind spot
+        if that ever changes. Any future change that adds a false edge back,
+        or silently drops a genuine one, moves `IMPORT_EDGE_EXPECTED` and
+        fails here.
+        """
+        importers = self.importers()
+        expected = {
+            relative: IMPORT_EDGE_EXPECTED.get(relative, frozenset())
+            for relative in IMPORT_EDGE_CORPUS
+        }
+        self.assertEqual(importers, expected)
+
+    def test_a_real_import_of_the_identical_name_is_an_edge(self) -> None:
+        """Paired plant, half one: a genuine `Import` node."""
+        importers = self.importers()
+        self.assertIn(
+            "app/consumer_static_import.py",
+            importers["app/kernel_runtime.py"],
+        )
+
+    def test_a_characterization_mention_of_the_identical_name_is_not_an_edge(
+        self,
+    ) -> None:
+        """Paired plant, half two: the SAME dotted name, `app.kernel_runtime`,
+        held in a subprocess-probe dict (Academy's shape) rather than
+        imported. Same string, opposite outcome, decided by consumption.
+        """
+        importers = self.importers()
+        self.assertNotIn(
+            "readiness/ratchet.py",
+            importers["app/kernel_runtime.py"],
+        )
+        self.assertNotIn(
+            "readiness/ratchet.py",
+            importers["app/main_module.py"],
+        )
+
+    def test_a_decommission_scanners_exclusion_list_is_not_an_edge(self) -> None:
+        """Sub's PR #3015 shape, paired against a real import of the SAME
+        name below.
+        """
+        importers = self.importers()
+        self.assertNotIn(
+            "governance/freeze_classifier.py",
+            importers.get("crm/scripts/legacy_sync.py", frozenset()),
+        )
+
+    def test_a_direct_dynamic_import_of_the_identical_excluded_name_is_an_edge(
+        self,
+    ) -> None:
+        """Clause 2 is not weakened: a genuine `importlib.import_module(...)`
+        naming the SAME `crm.scripts.legacy_sync` the exclusion list above
+        mentions still bites.
+        """
+        trees = {
+            PurePosixPath("crm/scripts/legacy_sync.py"): ast.parse(
+                "def run() -> None:\n    return None\n"
+            ),
+            PurePosixPath("app/loader.py"): ast.parse(
+                "import importlib\n\n"
+                "importlib.import_module('crm.scripts.legacy_sync')\n"
+            ),
+        }
+        importers = _importers(trees)
+        self.assertIn(
+            PurePosixPath("app/loader.py"),
+            importers[PurePosixPath("crm/scripts/legacy_sync.py")],
+        )
+
+    def test_dunder_import_is_a_recognised_runtime_import_call(self) -> None:
+        self.assertTrue(self.is_runtime_import_call("__import__('x.y')"))
+
+    def test_a_bare_patch_call_is_a_recognised_runtime_import_call(self) -> None:
+        self.assertTrue(self.is_runtime_import_call("patch('x.y')"))
+
+    def test_an_arbitrary_local_wrapper_is_not_a_recognised_runtime_import_call(
+        self,
+    ) -> None:
+        self.assertFalse(self.is_runtime_import_call("my_loader('x.y')"))
+
+    def test_a_three_argument_monkeypatch_setattr_is_not_recognised(self) -> None:
+        """The near-miss that distinguishes an object-patch from an import:
+        arg COUNT, not whether the first argument happens to be a literal.
+        `raising=False` landing in `node.keywords`, not `node.args`, is why
+        this stays a 3-argument call rather than shifting to 4.
+        """
+        self.assertFalse(
+            self.is_runtime_import_call(
+                "monkeypatch.setattr(some_object, 'attr', value)"
+            )
+        )
+        self.assertFalse(
+            self.is_runtime_import_call(
+                "monkeypatch.setattr(some_object, 'attr', value, raising=False)"
+            )
+        )
+
+    def test_module_naming_arguments_agrees_with_is_runtime_import_call(
+        self,
+    ) -> None:
+        """`_module_naming_arguments`'s docstring claims it "mirrors
+        `_is_runtime_import_call`'s own branch structure so the two cannot
+        drift apart" — that was an unenforced statement of intent until
+        this test: for every canonical call shape, recognised ⟹
+        `_module_naming_arguments` returns at least one expression;
+        NOT recognised ⟹ it returns none.
+        """
+        recognised = (
+            "importlib.import_module('x.y')",
+            "__import__('x.y')",
+            "importlib.util.find_spec('x.y')",
+            "importlib.util.spec_from_file_location('x.y', p)",
+            "pytest.importorskip('x.y')",
+            "getattr(importlib, 'import_module')('x.y')",
+            "functools.partial(import_module, 'x.y')",
+            "monkeypatch.setattr('x.y', value)",
+            "monkeypatch.delattr('x.y')",
+            "mock.patch('x.y')",
+            "mocker.patch('x.y')",
+            "patch('x.y')",
+        )
+        not_recognised = (
+            "my_loader('x.y')",
+            "monkeypatch.setattr(some_object, 'attr', value)",
+            "client.patch('x.y')",
+            "SomeClass.other_method('x.y')",
+        )
+        for source in recognised:
+            call = ast.parse(source).body[0].value
+            assert isinstance(call, ast.Call)
+            self.assertTrue(_is_runtime_import_call(call, {}), source)
+            self.assertTrue(_module_naming_arguments(call, {}), source)
+        for source in not_recognised:
+            call = ast.parse(source).body[0].value
+            assert isinstance(call, ast.Call)
+            self.assertFalse(_is_runtime_import_call(call, {}), source)
+            self.assertEqual(_module_naming_arguments(call, {}), [], source)
+
+    def test_a_literal_reaching_no_recognised_call_is_a_mention(self) -> None:
+        self.assertEqual(
+            self.named_modules(
+                "ENTRY = {'boot': 'app.kernel_runtime'}\n\n"
+                "def describe() -> str:\n    return ENTRY['boot']\n"
+            ),
+            frozenset(),
+        )
+
+    def test_the_same_literal_traced_through_a_registry_is_dynamic(self) -> None:
+        """The repository's own existing plugin-registry fixture
+        (`test_a_connector_named_by_a_dotted_string_is_reachable`, using
+        `DOTTED_NAME_WIRING`): a dotted name in a dict, reaching
+        `import_module` through one hop of assignment, must stay measured —
+        the classifier is narrowed to consumption, not narrowed past what the
+        suite already relies on.
+        """
+        self.assertIn(
+            "example.mailgun_client",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_registry_wiring.py"]),
+        )
+
+    def test_an_assembled_f_string_reaching_import_module_is_still_dynamic(
+        self,
+    ) -> None:
+        self.assertIn(
+            "example.plugins.",
+            self.named_packages(IMPORT_EDGE_CORPUS["app/consumer_assembled_name.py"]),
+        )
+
+    def test_a_getattr_indirected_import_module_call_is_recognised(self) -> None:
+        """`getattr(importlib, "import_module")(...)` — the callee is itself
+        a `Call`, which a naive `isinstance(func, ast.Attribute)` check
+        falls straight through on. Paired against a near-miss resolving to
+        an UNRELATED attribute.
+        """
+        self.assertTrue(
+            self.is_runtime_import_call("getattr(importlib, 'import_module')('x.y')")
+        )
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_getattr_indirection.py"]
+            ),
+        )
+        self.assertEqual(
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_getattr_unrelated.py"]),
+            frozenset(),
+        )
+
+    def test_a_functools_partial_wrapped_import_module_is_recognised(self) -> None:
+        """`functools.partial(import_module, "x.y")` constructs a callable
+        that WILL import "x.y" once invoked, with no later call site the
+        engine can see — the construction itself is the point of
+        consumption. Paired against a near-miss wrapping an UNRELATED
+        function.
+        """
+        self.assertTrue(
+            self.is_runtime_import_call("functools.partial(import_module, 'x.y')")
+        )
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_functools_partial.py"]),
+        )
+        self.assertEqual(
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_partial_unrelated.py"]),
+            frozenset(),
+        )
+
+    def test_find_spec_is_a_recognised_runtime_import_call(self) -> None:
+        """`importlib.util.find_spec(...)` is the documented entry point of
+        the manual-import protocol. DELIBERATELY no dedicated near-miss
+        here: `find_spec` is matched only on its own unambiguous `.attr`/
+        bare-name terminal (unlike `patch`/`setattr`, which need an
+        argument-count or receiver-scoped near-miss to prove they don't
+        over-match), so there is no distinct SHAPE for a negative pole to
+        exercise beyond `test_an_arbitrary_local_wrapper_is_not_a_
+        recognised_runtime_import_call`'s generic one.
+        """
+        self.assertTrue(self.is_runtime_import_call("importlib.util.find_spec('x.y')"))
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_find_spec.py"]),
+        )
+
+    def test_spec_from_file_location_is_a_recognised_runtime_import_call(
+        self,
+    ) -> None:
+        """The other manual-import entry point named in review: the NAME
+        argument only occasionally matches a real dotted module (a real
+        corpus mostly uses it with an arbitrary `sys.modules` label), but
+        when it does, it is a genuine edge the same way `find_spec` is.
+        `module_from_spec`/`exec_module` are deliberately NOT separately
+        recognised — their own argument is the `spec`/`module` object, never
+        the name literal. Paired (finding 6) against a near-miss where the
+        SAME dotted target sits in the PATH position instead of NAME.
+        """
+        self.assertTrue(
+            self.is_runtime_import_call(
+                "importlib.util.spec_from_file_location('x.y', p)"
+            )
+        )
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_spec_from_file_location.py"]
+            ),
+        )
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_spec_from_file_location_path_arg.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_a_binop_concatenated_prefix_reaching_import_module_is_dynamic(
+        self,
+    ) -> None:
+        """`"pkg." + suffix` reaches the same package `f"pkg.{suffix}"`
+        does — the `BinOp` counterpart of the f-string handling. Paired
+        against a near-miss where the left operand is COMPUTED, not
+        constant.
+        """
+        self.assertIn(
+            "example.plugins.",
+            self.named_packages(IMPORT_EDGE_CORPUS["app/consumer_binop_concat.py"]),
+        )
+        self.assertEqual(
+            self.named_packages(
+                IMPORT_EDGE_CORPUS["app/consumer_binop_computed_prefix.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_an_aliased_patch_import_is_recognised(self) -> None:
+        """Finding 1: `from unittest.mock import patch as _patch` carries
+        the rename on `ImportFrom.names[i].asname`, in the same module as
+        the call — a lookup, not a data-flow problem. Paired against a
+        near-miss where the alias resolves to something ELSE ENTIRELY
+        (`json.loads`), proving `_local_import_aliases` is PRECISE, not just
+        permissive.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_aliased_patch.py"]),
+        )
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_coincidental_patch_alias.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_pytest_importorskip_is_a_recognised_runtime_import_call(self) -> None:
+        """Finding 2: a documented importer (it calls `import_module`
+        internally and skips the test on failure), not a generic verb.
+        """
+        self.assertTrue(self.is_runtime_import_call("pytest.importorskip('x.y')"))
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_importorskip.py"]),
+        )
+
+    def test_a_relative_dynamic_import_resolves_against_its_own_package(
+        self,
+    ) -> None:
+        """Finding 3: `import_module(f".{name}", __name__)` inside an
+        `__init__.py` — the PEP 562 lazy-`__getattr__` idiom — reaches its
+        sibling module the same way a real relative `ImportFrom` would.
+        """
+        self.assertIn(
+            "app.services.finance.gl.",
+            self.named_packages(
+                IMPORT_EDGE_CORPUS["app/services/finance/gl/__init__.py"],
+                relative="app/services/finance/gl/__init__.py",
+            ),
+        )
+
+    def test_a_comprehension_for_traces_the_same_as_a_statement_for(self) -> None:
+        """Finding 4: `ast.comprehension` is a distinct node from `ast.For`
+        — `[import_module(m) for m in MODULES]` must reach `MODULES` the
+        same way the statement-`for` spelling already did.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_comprehension_import.py"]
+            ),
+        )
+
+    def test_a_same_named_local_in_an_unrelated_function_does_not_taint(
+        self,
+    ) -> None:
+        """Finding 5: `load`'s parameter `module_name` and `describe`'s own
+        unrelated local `module_name` are different SCOPED bindings — import-
+        feeding one must not taint the other, which a flat by-name taint set
+        cannot tell apart. The genuine edge from `trigger()` calling
+        `load('app.kernel_runtime')` must still be measured.
+        """
+        modules = self.named_modules(
+            IMPORT_EDGE_CORPUS["app/consumer_scope_collision.py"]
+        )
+        self.assertIn("app.kernel_runtime", modules)
+        self.assertNotIn("app.legacy.decommissioned", modules)
+
+    def test_a_lambda_parameter_does_not_fall_back_to_module_scope(self) -> None:
+        """A-2 regression proof: `_scope_bound_names` must bind an
+        `ast.Lambda`'s OWN parameters, matching `_function_scopes` already
+        opening a scope for `Lambda`. If it did not, the lambda's `module_
+        name` parameter would fall back to MODULE scope — the SAME scope as
+        the unrelated top-level `module_name = "app.legacy.decommissioned"`
+        — and the lambda's own `import_module(module_name)` (a real,
+        non-vacuous seed) would sweep it in as a false edge. Verified
+        directly to reproduce under a `_scope_bound_names` that excludes
+        `Lambda` (the exact shape of the historical bug), so this assertion
+        is not merely consistent with the fix by coincidence.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_lambda_parameter_scope.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_forwarded_alias_does_not_shadow_a_local_function(self) -> None:
+        """B-1 regression proof: the forwarded-call branch in `_taint_edges`
+        must NOT resolve `reference.id` through `aliases` before the local
+        `functions` lookup — `aliases` maps a name to something DEFINED
+        ELSEWHERE, while `functions` is keyed by LOCAL `def` names. `loader`
+        (aliased from a different module's `_load`) must not match THIS
+        file's own local `def _load`, which genuinely reaches `import_
+        module` (a real, non-vacuous seed) via `asyncio.to_thread(loader,
+        'app.kernel_runtime')`. This is the ONLY exercise alias resolution
+        has anywhere in this suite or in the measured corpora — verified
+        directly to reproduce the false edge under a `_taint_edges` that
+        resolves the alias first (the exact shape of the historical bug).
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_alias_shadow.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_a_function_forwarded_to_asyncio_to_thread_is_still_traced(self) -> None:
+        """A function reference passed AS DATA to `asyncio.to_thread(fn,
+        *args)` reaches `fn`'s own parameter scope the same way a direct
+        call does — the `app/main.py` deferred-router shape a real corpus
+        confirmed was otherwise a genuine edge lost, not a false one
+        removed. Paired against a near-miss forwarding an UNRELATED
+        function.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_to_thread.py"]
+            ),
+        )
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_unrelated_function.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_a_function_forwarded_via_thread_target_is_still_traced(self) -> None:
+        """`threading.Thread(target=fn, args=(...))` — the KEYWORD-shaped
+        forwarder, distinct from `to_thread`/`submit`'s positional one.
+        `multiprocessing.Process(target=fn, args=(...))` shares the same
+        keyword shape.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_thread_target.py"]
+            ),
+        )
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_process_target.py"]
+            ),
+        )
+
+    def test_a_function_forwarded_via_executor_submit_is_still_traced(self) -> None:
+        """`executor.submit(fn, *args)` — the SAME positional shape as
+        `to_thread`, on an arbitrary receiver.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_forwarded_submit.py"]),
+        )
+
+    def test_a_function_forwarded_via_run_in_executor_is_still_traced(self) -> None:
+        """`loop.run_in_executor(executor, fn, *args)` — the
+        POSITION-SHIFTED forwarder: the function sits at index 1, not 0,
+        because the executor is the first argument.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_run_in_executor.py"]
+            ),
+        )
+
+    def test_removesuffix_argument_is_not_a_relative_import(self) -> None:
+        """Permanent regression plant: `str.removesuffix(".py")`'s own
+        literal argument starts with a dot and is reachable by `ast.walk`
+        inside `spec_from_file_location`'s harvested expression, but it is
+        NOT the harvested expression itself — resolving it anyway
+        manufactured a false edge in a real corpus
+        (`tests/test_ticket_assignment_authorization.py` ->
+        `tests/__init__.py`). `"conftest.py"`-shaped strings independently
+        match the anchored `DOTTED_MODULE_NAME` pattern, so this also proves
+        harvesting stays bound to the NAME position.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_removesuffix_not_a_relative_import.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_hoisted_removesuffix_argument_is_not_a_relative_import(self) -> None:
+        """The HOISTED reproduction of the SAME false-positive shape: `SUFFIX
+        = ".py"` at module scope, traced back to through `stem` and reaching
+        `_named_modules` only via `_taint_edges`, not as a runtime-import
+        call's own argument. `node is expression` alone is satisfied here
+        (the harvested expression, after tracing, IS the bare `Constant`)
+        — only PROVENANCE distinguishes this from a genuine direct relative
+        import. This is the exact case a second review used to show the
+        identity-only guard was one variable away from reproducing the
+        regression the inline plant above already fixed.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS[
+                    "app/consumer_hoisted_removesuffix_not_a_relative_import.py"
+                ]
+            ),
+            frozenset(),
+        )
+
+    def test_autodiscover_tasks_reaches_the_tasks_submodule(self) -> None:
+        """`celery_app.autodiscover_tasks(["app.tasks"])` is a genuine,
+        documented Celery dynamic importer reaching `<package>.tasks`
+        (Celery's own `related_name="tasks"` default) — chosen over the bare
+        package name alone because that IS what Celery actually imports; the
+        bare package still resolves too, via `_prefixes`, matching Python's
+        own parent-package import semantics. Paired against a near-miss
+        where the argument is NOT a list/tuple/set literal at all.
+        """
+        modules = self.named_modules(
+            IMPORT_EDGE_CORPUS["app/consumer_autodiscover_tasks.py"]
+        )
+        self.assertIn("app.tasks.tasks", modules)
+        self.assertIn("app.tasks", modules)
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_autodiscover_tasks_computed.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_monkeypatch_setattrs_value_argument_is_not_harvested(self) -> None:
+        """Finding 6: `monkeypatch.setattr("app.cfg.BACKEND",
+        "app.kernel_runtime")` — the FIRST argument (the patch TARGET) is a
+        genuine edge; the SECOND (the value being ASSIGNED) is never a
+        module reference — harvesting is bound to argument POSITION per
+        callee, not "every argument".
+        """
+        modules = self.named_modules(
+            IMPORT_EDGE_CORPUS["app/consumer_setattr_value_not_harvested.py"]
+        )
+        self.assertIn("app.cfg.BACKEND", modules)
+        self.assertNotIn("app.kernel_runtime", modules)
+
+    def test_patchs_return_value_keyword_is_not_harvested(self) -> None:
+        """Finding 6: `patch("app.svc.load", return_value="app.kernel_
+        runtime")` — the TARGET (index 0) is a genuine edge; the
+        `return_value=` keyword is not.
+        """
+        modules = self.named_modules(
+            IMPORT_EDGE_CORPUS["app/consumer_patch_return_value_not_harvested.py"]
+        )
+        self.assertIn("app.services.job_heartbeat", modules)
+        self.assertNotIn("app.kernel_runtime", modules)
+
+    def test_bound_names_stops_at_an_attribute_or_subscript_target(self) -> None:
+        """The Blocking-2 regression proof: `self.x = ...`/`d[k] = ...` must
+        contribute NOTHING, not even the receiver `Name` — matching the
+        function's own docstring.
+        """
+        self.assertEqual(
+            _bound_names(ast.parse("self.x = 1").body[0].targets[0]),
+            frozenset(),
+        )
+        self.assertEqual(
+            _bound_names(ast.parse("d[k] = 1").body[0].targets[0]),
+            frozenset(),
+        )
+
+    def test_bound_names_unpacks_tuple_list_and_starred_targets(self) -> None:
+        self.assertEqual(
+            _bound_names(ast.parse("a, (b, c) = x").body[0].targets[0]),
+            frozenset({"a", "b", "c"}),
+        )
+        self.assertEqual(
+            _bound_names(ast.parse("a, self.x, *rest = x").body[0].targets[0]),
+            frozenset({"a", "rest"}),
+        )
+
+    def test_an_unrelated_self_attribute_does_not_leak_module_wide(self) -> None:
+        """The full-pipeline proof for the same regression: `self.label`
+        holds a dotted-looking literal in one method; `self.other` (a
+        DIFFERENT attribute) feeds a real import call in another. Fixing
+        `_bound_names` in isolation is not enough if `_named_modules` still
+        found a path to leak the two together.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_unrelated_self_attribute.py"]
+            ),
+            frozenset(),
+        )
 
 
 # -- Closed untracked-source rule ------------------------------------------

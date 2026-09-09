@@ -5598,10 +5598,18 @@ def _module_naming_arguments(node: ast.Call, aliases: dict[str, str]) -> list[as
         # patch(target, new=..., return_value=..., ...) — "target" is
         # always the first positional, or the "target" keyword.
         return node.args[:1] or _keyword_argument(node, "target")
-    if func.attr in ("setattr", "delattr") and receiver in DYNAMIC_PATCH_RECEIVERS:
+    if (
+        func.attr in ("setattr", "delattr")
+        and receiver in DYNAMIC_PATCH_RECEIVERS
+        and len(node.args) == (2 if func.attr == "setattr" else 1)
+    ):
         # monkeypatch.setattr(target, value) / delattr(target) — "target"
         # (index 0) is the ONLY argument that can be a dotted import path;
-        # "value"/"raising" never are.
+        # "value"/"raising" never are. The arg-count check MIRRORS
+        # `_is_runtime_import_call`'s own — without it, a 3-argument
+        # `setattr(obj, "attr", value)` (an object-patch `_is_runtime_
+        # import_call` correctly refuses) would still have this function
+        # return its first argument, a mismatch a property test caught.
         return node.args[:1]
     return []
 

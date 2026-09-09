@@ -30,6 +30,7 @@ from standards_control.engine import (
     _importers,
     _is_runtime_import_call,
     _local_import_aliases,
+    _module_naming_arguments,
     _named_modules,
     _named_packages,
     _opens_an_smtp_connection,
@@ -6319,11 +6320,43 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "def trigger() -> None:\n"
         "    threading.Thread(target=_load, args=('app.kernel_runtime',)).start()\n"
     ),
-    # Near-miss: the SAME forwarding shape, wrapping an UNRELATED function —
-    # the shape is recognised, but the edge is not manufactured because
-    # `_other_helper` never itself reaches a runtime-import call.
+    "app/consumer_forwarded_process_target.py": (
+        "import multiprocessing\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def trigger() -> None:\n"
+        "    multiprocessing.Process(\n"
+        "        target=_load, args=('app.kernel_runtime',)\n"
+        "    ).start()\n"
+    ),
+    "app/consumer_forwarded_submit.py": (
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def trigger(executor) -> object:\n"
+        "    return executor.submit(_load, 'app.kernel_runtime')\n"
+    ),
+    "app/consumer_forwarded_run_in_executor.py": (
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "async def trigger(loop, executor) -> object:\n"
+        "    return await loop.run_in_executor(executor, _load, 'app.kernel_runtime')\n"
+    ),
+    # Near-miss, LOAD-BEARING: this file's OWN `_load` genuinely reaches
+    # `import_module` (`tainted` is non-empty from this file alone, unlike a
+    # prior version of this fixture that had NO runtime-import call
+    # anywhere and so proved nothing — `frozenset()` held whether or not
+    # `_forwarded_call` existed at all). The forwarded call names
+    # `_other_helper`, a DIFFERENT function, so the shape is recognised but
+    # no edge is manufactured — the forwarding target discrimination is what
+    # this asserts, not merely "some file with no imports produces none".
     "app/consumer_forwarded_unrelated_function.py": (
-        "import asyncio\n\n"
+        "import asyncio\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
         "def _other_helper(value: str) -> str:\n"
         "    return value.upper()\n\n"
         "async def trigger() -> object:\n"
@@ -6474,6 +6507,9 @@ IMPORT_EDGE_EXPECTED: dict[str, frozenset[str]] = {
             "app/consumer_scope_collision.py",
             "app/consumer_forwarded_to_thread.py",
             "app/consumer_forwarded_thread_target.py",
+            "app/consumer_forwarded_process_target.py",
+            "app/consumer_forwarded_submit.py",
+            "app/consumer_forwarded_run_in_executor.py",
         }
     ),
     "app/main_module.py": frozenset(
@@ -6544,19 +6580,22 @@ class ImportEdgeClassificationTests(unittest.TestCase):
 
     def test_the_full_edge_set_is_exactly_this(self) -> None:
         """The DIFFERENTIAL assertion: not 'an edge exists/does not exist',
-        but the WHOLE set for EVERY corpus key, through `_importers` itself.
-        Any future change that adds a false edge back, or silently drops a
-        genuine one, moves `IMPORT_EDGE_EXPECTED` and fails here.
+        but the WHOLE set `_importers` returns, compared directly — not
+        filtered down to the corpus's own keys first, which would hide a
+        future change that made `_importers` return a target it was never
+        asked about. `_importers` happens to key its result exactly by its
+        input trees today (every corpus path, nothing else), so this is
+        equivalent in outcome to filtering, but it stops being a blind spot
+        if that ever changes. Any future change that adds a false edge back,
+        or silently drops a genuine one, moves `IMPORT_EDGE_EXPECTED` and
+        fails here.
         """
         importers = self.importers()
         expected = {
             relative: IMPORT_EDGE_EXPECTED.get(relative, frozenset())
             for relative in IMPORT_EDGE_CORPUS
         }
-        actual = {
-            relative: importers.get(relative, frozenset()) for relative in expected
-        }
-        self.assertEqual(actual, expected)
+        self.assertEqual(importers, expected)
 
     def test_a_real_import_of_the_identical_name_is_an_edge(self) -> None:
         """Paired plant, half one: a genuine `Import` node."""
@@ -6642,6 +6681,47 @@ class ImportEdgeClassificationTests(unittest.TestCase):
                 "monkeypatch.setattr(some_object, 'attr', value, raising=False)"
             )
         )
+
+    def test_module_naming_arguments_agrees_with_is_runtime_import_call(
+        self,
+    ) -> None:
+        """`_module_naming_arguments`'s docstring claims it "mirrors
+        `_is_runtime_import_call`'s own branch structure so the two cannot
+        drift apart" — that was an unenforced statement of intent until
+        this test: for every canonical call shape, recognised ⟹
+        `_module_naming_arguments` returns at least one expression;
+        NOT recognised ⟹ it returns none.
+        """
+        recognised = (
+            "importlib.import_module('x.y')",
+            "__import__('x.y')",
+            "importlib.util.find_spec('x.y')",
+            "importlib.util.spec_from_file_location('x.y', p)",
+            "pytest.importorskip('x.y')",
+            "getattr(importlib, 'import_module')('x.y')",
+            "functools.partial(import_module, 'x.y')",
+            "monkeypatch.setattr('x.y', value)",
+            "monkeypatch.delattr('x.y')",
+            "mock.patch('x.y')",
+            "mocker.patch('x.y')",
+            "patch('x.y')",
+        )
+        not_recognised = (
+            "my_loader('x.y')",
+            "monkeypatch.setattr(some_object, 'attr', value)",
+            "client.patch('x.y')",
+            "SomeClass.other_method('x.y')",
+        )
+        for source in recognised:
+            call = ast.parse(source).body[0].value
+            assert isinstance(call, ast.Call)
+            self.assertTrue(_is_runtime_import_call(call, {}), source)
+            self.assertTrue(_module_naming_arguments(call, {}), source)
+        for source in not_recognised:
+            call = ast.parse(source).body[0].value
+            assert isinstance(call, ast.Call)
+            self.assertFalse(_is_runtime_import_call(call, {}), source)
+            self.assertEqual(_module_naming_arguments(call, {}), [], source)
 
     def test_a_literal_reaching_no_recognised_call_is_a_mention(self) -> None:
         self.assertEqual(
@@ -6872,11 +6952,40 @@ class ImportEdgeClassificationTests(unittest.TestCase):
     def test_a_function_forwarded_via_thread_target_is_still_traced(self) -> None:
         """`threading.Thread(target=fn, args=(...))` — the KEYWORD-shaped
         forwarder, distinct from `to_thread`/`submit`'s positional one.
+        `multiprocessing.Process(target=fn, args=(...))` shares the same
+        keyword shape.
         """
         self.assertIn(
             "app.kernel_runtime",
             self.named_modules(
                 IMPORT_EDGE_CORPUS["app/consumer_forwarded_thread_target.py"]
+            ),
+        )
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_process_target.py"]
+            ),
+        )
+
+    def test_a_function_forwarded_via_executor_submit_is_still_traced(self) -> None:
+        """`executor.submit(fn, *args)` — the SAME positional shape as
+        `to_thread`, on an arbitrary receiver.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_forwarded_submit.py"]),
+        )
+
+    def test_a_function_forwarded_via_run_in_executor_is_still_traced(self) -> None:
+        """`loop.run_in_executor(executor, fn, *args)` — the
+        POSITION-SHIFTED forwarder: the function sits at index 1, not 0,
+        because the executor is the first argument.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_run_in_executor.py"]
             ),
         )
 

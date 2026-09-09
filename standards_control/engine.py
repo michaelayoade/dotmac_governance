@@ -5312,7 +5312,21 @@ DOTTED_PACKAGE_PREFIX = re.compile(
 #: rather than being guessed into an edge on a call name that doesn't
 #: textually match. A call through an arbitrary local wrapper
 #: (`my_loader(name)`) is likewise not recognised for the same reason.
-RUNTIME_IMPORT_CALLEES = frozenset({"import_module", "__import__"})
+#: `find_spec` joins this set for the same reason as `import_module`: it is
+#: the unambiguous, documented entry point of the manual-import protocol
+#: (`importlib.util.find_spec(name)` / `spec.loader.exec_module(...)`), and —
+#: unlike `patch`/`setattr` — not a generic enough verb to risk matching an
+#: unrelated receiver.
+RUNTIME_IMPORT_CALLEES = frozenset({"import_module", "__import__", "find_spec"})
+
+#: Callee terminal names `functools.partial(...)`'s FIRST positional argument
+#: must resolve to for the partial construction itself to count as reaching a
+#: runtime import: `functools.partial(import_module, "x.y")` does not import
+#: "x.y" at the `partial(...)` call site, but it genuinely WILL when the
+#: resulting partial is later invoked, and there is no separate call site to
+#: attribute the literal to — so the construction is treated as the point of
+#: consumption.
+PARTIAL_WRAPPED_RUNTIME_IMPORT_CALLEES = RUNTIME_IMPORT_CALLEES
 
 #: Receiver names, by CONVENTION rather than static guarantee, under which a
 #: `.patch(...)`/`.setattr(...)`/`.delattr(...)` call's string target is
@@ -5339,11 +5353,44 @@ DYNAMIC_PATCH_RECEIVERS = frozenset({"monkeypatch", "mocker", "mock"})
 BARE_DYNAMIC_PATCH_CALLEES = frozenset({"patch"})
 
 
+def _is_getattr_indirected_import_call(func: ast.expr) -> bool:
+    """`getattr(importlib, "import_module")(...)` — the callee ITSELF is a
+    `getattr(...)` call whose own second argument names a recognised
+    runtime-import callee. The outer call's arguments are the ones that
+    reach the resolved function, so this only needs to recognise the SHAPE;
+    `_call_string_arguments` on the outer call does the rest.
+    """
+    if not isinstance(func, ast.Call) or not isinstance(func.func, ast.Name):
+        return False
+    if func.func.id != "getattr" or len(func.args) < 2:
+        return False
+    attribute_name = func.args[1]
+    return (
+        isinstance(attribute_name, ast.Constant)
+        and isinstance(attribute_name.value, str)
+        and attribute_name.value in RUNTIME_IMPORT_CALLEES
+    )
+
+
+def _is_partial_wrapped_import_call(func: ast.expr, args: list[ast.expr]) -> bool:
+    """`functools.partial(import_module, "x.y")` — the CONSTRUCTION call
+    itself is where the literal sits, since the underlying import happens
+    later, at a call site this reader cannot see. Recognised by the
+    construction's callee being `partial` and its own first argument naming
+    a runtime-import callee, by `Name` or by `Attribute` terminal.
+    """
+    if _name(func) != "partial" or not args:
+        return False
+    return _name(args[0]) in PARTIAL_WRAPPED_RUNTIME_IMPORT_CALLEES
+
+
 def _is_runtime_import_call(node: ast.Call) -> bool:
     """Does this call resolve a string into a module at runtime?
 
-    `importlib.import_module(...)`/`__import__(...)` do so directly.
-    `monkeypatch.setattr("dotted.path", value)`,
+    `importlib.import_module(...)`/`__import__(...)`/`find_spec(...)` do so
+    directly, including through one level of `getattr(module, "name")(...)`
+    indirection or a `functools.partial(import_module, ...)` construction
+    (see the two helpers above). `monkeypatch.setattr("dotted.path", value)`,
     `monkeypatch.delattr("dotted.path")`, `mock.patch("dotted.path",
     ...)`/`mocker.patch(...)`, and a bare `patch("dotted.path", ...)` (after
     `from unittest.mock import patch`) do so INSIDE pytest's/`unittest.mock`'s
@@ -5355,6 +5402,10 @@ def _is_runtime_import_call(node: ast.Call) -> bool:
     ALREADY-IMPORTED object and performs no import at all.
     """
     func = node.func
+    if _is_getattr_indirected_import_call(func):
+        return True
+    if _is_partial_wrapped_import_call(func, node.args):
+        return True
     if isinstance(func, ast.Name):
         return (
             func.id in RUNTIME_IMPORT_CALLEES or func.id in BARE_DYNAMIC_PATCH_CALLEES

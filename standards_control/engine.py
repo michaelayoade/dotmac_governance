@@ -5977,7 +5977,17 @@ def _named_modules(
     A leading-dot literal (`import_module(".sub", __name__)`) is resolved
     against THIS FILE's own package (`_resolve_relative_dotted_head`) rather
     than matched against the anchored absolute-path regex, which a relative
-    literal can never satisfy on its own.
+    literal can never satisfy on its own — but ONLY when the literal IS the
+    harvested module-naming expression itself, never a Constant merely
+    NESTED somewhere inside it: `spec_from_file_location(filename.
+    removesuffix(".py"), path)`'s `".py"` starts with a dot too, and is
+    reachable by `ast.walk`, but it is `str.removesuffix`'s OWN argument,
+    not a relative-import fragment — resolving it anyway manufactured
+    `tests.py`/`tests` as a false edge from an ordinary suffix-strip. A
+    dict/list literal traced through an assignment (`PROVIDERS = {"k":
+    ".sub"}`) is consequently NOT resolved as relative either; this is a
+    named, narrower trade-off in favour of eliminating that false-positive
+    class, not an oversight.
 
     The `module:attribute` entry-point form is split, so both halves of
     `"product.integrations.mailgun:build"` are read as naming the module.
@@ -5991,9 +6001,10 @@ def _named_modules(
             if id(node) in fragment_ids:
                 continue
             if node.value.startswith("."):
-                resolved = _resolve_relative_dotted_head(node.value, relative)
-                if resolved:
-                    names |= _prefixes(resolved)
+                if node is expression:
+                    resolved = _resolve_relative_dotted_head(node.value, relative)
+                    if resolved:
+                        names |= _prefixes(resolved)
                 continue
             candidate = node.value.split(":", 1)[0].strip()
             if DOTTED_MODULE_NAME.match(candidate):
@@ -6048,7 +6059,14 @@ def _named_packages(
     for expression in _dynamic_import_expressions(tree, aliases):
         for node in ast.walk(expression):
             if isinstance(node, ast.JoinedStr):
-                relative_prefix = _relative_head_prefix(node.values, relative)
+                # Relative resolution only when this JoinedStr IS the
+                # harvested expression itself — the same restriction as
+                # `_named_modules`, for the same reason.
+                relative_prefix = (
+                    _relative_head_prefix(node.values, relative)
+                    if node is expression
+                    else None
+                )
                 if relative_prefix is not None:
                     prefixes.add(relative_prefix)
                     continue
@@ -6065,11 +6083,15 @@ def _named_packages(
                 if concatenated is None:
                     continue
                 if concatenated.startswith("."):
-                    resolved = _resolve_relative_dotted_head(concatenated, relative)
-                    if resolved:
-                        prefixes.add(
-                            resolved if resolved.endswith(".") else resolved + "."
-                        )
+                    # Same restriction as `_named_modules`: only when this
+                    # BinOp IS the harvested expression itself, never one
+                    # merely reachable inside an unrelated call's argument.
+                    if node is expression:
+                        resolved = _resolve_relative_dotted_head(concatenated, relative)
+                        if resolved:
+                            prefixes.add(
+                                resolved if resolved.endswith(".") else resolved + "."
+                            )
                     continue
                 head = concatenated.split(":", 1)[0]
                 if DOTTED_PACKAGE_PREFIX.match(head):

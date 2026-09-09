@@ -5664,7 +5664,7 @@ def _bound_names(target: ast.expr) -> frozenset[str]:
 
 
 def _positional_parameter_names(
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
 ) -> list[str]:
     """This function's positional parameters, in call order.
 
@@ -5719,15 +5719,19 @@ def _scope_bound_names(
     tree: ast.Module, scopes: dict[int, ast.AST]
 ) -> dict[int, set[str]]:
     """Every name a scope binds DIRECTLY: `Name` `Store`/`Del` targets
-    (assignment, `for`, comprehension, `with ... as`, `except ... as`), plus
-    a function's own parameters — which are `ast.arg`, not `Name`, nodes and
-    so need separate handling.
+    (assignment, `for`, comprehension, `with ... as`), plus a function's or
+    `lambda`'s own parameters — which are `ast.arg`, not `Name`, nodes and so
+    need separate handling. `except ... as name` does NOT bind through a
+    `Name` node (`ExceptHandler.name` is a plain `str`) and is not collected
+    here — a named gap alongside the closure/`global`/`nonlocal` ones,
+    narrower than the module-wide flat scheme it replaced since Python
+    itself deletes the exception name at the handler's end.
     """
     bound: dict[int, set[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             bound.setdefault(id(scopes[id(node)]), set()).add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             names = {
                 *_positional_parameter_names(node),
                 *(arg.arg for arg in node.args.kwonlyargs),
@@ -5868,8 +5872,15 @@ def _taint_edges(
         if forwarded is not None:
             reference, forwarded_args = forwarded
             if isinstance(reference, ast.Name):
-                resolved_name = _resolve_alias(reference.id, aliases)
-                function = functions.get(resolved_name) if resolved_name else None
+                # NOT resolved through `aliases`, matching the direct-call
+                # branch above: `aliases` maps a local name to a terminal
+                # name DEFINED ELSEWHERE, while `functions` is keyed by
+                # LOCAL `def` names — resolving first would let
+                # `from vendor.helpers import _load as loader` match an
+                # unrelated local `def _load`. An unresolved lookup that
+                # finds nothing is the correct outcome for an aliased name,
+                # by construction.
+                function = functions.get(reference.id)
                 if function is not None:
                     add_call_edges(function, forwarded_args, call_scope)
     return edges
@@ -5923,24 +5934,39 @@ def _import_fed_names(
 
 def _dynamic_import_expressions(
     tree: ast.Module, aliases: dict[str, str]
-) -> list[ast.expr]:
-    """Every expression this module puts within reach of a runtime import: a
-    runtime-import call's OWN module-naming argument(s) (`_module_naming_
-    arguments` — never `return_value=`, a `patch()` keyword, or a
-    `spec_from_file_location` PATH argument), plus the value/iterable/
-    argument side of any `_taint_edges` step whose SCOPED bound names the
-    call's arguments can be traced back to.
+) -> list[tuple[ast.expr, bool]]:
+    """Every expression this module puts within reach of a runtime import,
+    paired with its PROVENANCE: `True` for a runtime-import call's OWN
+    module-naming argument(s) (`_module_naming_arguments` — never
+    `return_value=`, a `patch()` keyword, or a `spec_from_file_location`
+    PATH argument); `False` for the value/iterable/argument side of a
+    `_taint_edges` step the call's arguments were only traced BACK TO.
+
+    The two provenances are NOT interchangeable for relative-import
+    resolution (`_named_modules`/`_named_packages`): `SUFFIX = ".py"` at
+    module level, traced back to because an unrelated `stem = filename.
+    removesuffix(SUFFIX)` happens to feed `spec_from_file_location`, is a
+    Constant that starts with a dot but was never itself passed to a
+    runtime-import call — resolving it as if it had been manufactured a
+    false edge to `app/__init__.py` in a real corpus. Only a `True`-tagged
+    expression may be read as a relative dotted-import fragment; a
+    `False`-tagged one may still be scanned for an ORDINARY absolute
+    `DOTTED_MODULE_NAME` match, since that risk (an unrelated string that
+    happens to look like a complete dotted identifier) is the one this whole
+    PR already accepts as the residual cost of measuring more.
     """
     scopes = _function_scopes(tree)
     bound = _scope_bound_names(tree, scopes)
-    expressions: list[ast.expr] = []
+    expressions: list[tuple[ast.expr, bool]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and _is_runtime_import_call(node, aliases):
-            expressions.extend(_module_naming_arguments(node, aliases))
+            expressions.extend(
+                (argument, True) for argument in _module_naming_arguments(node, aliases)
+            )
     tainted = _import_fed_names(tree, aliases)
     for targets, _, value in _taint_edges(tree, scopes, bound, aliases):
         if targets & tainted:
-            expressions.append(value)
+            expressions.append((value, False))
     return expressions
 
 
@@ -6056,23 +6082,31 @@ def _named_modules(
     A leading-dot literal (`import_module(".sub", __name__)`) is resolved
     against THIS FILE's own package (`_resolve_relative_dotted_head`) rather
     than matched against the anchored absolute-path regex, which a relative
-    literal can never satisfy on its own — but ONLY when the literal IS the
-    harvested module-naming expression itself, never a Constant merely
-    NESTED somewhere inside it: `spec_from_file_location(filename.
-    removesuffix(".py"), path)`'s `".py"` starts with a dot too, and is
-    reachable by `ast.walk`, but it is `str.removesuffix`'s OWN argument,
-    not a relative-import fragment — resolving it anyway manufactured
-    `tests.py`/`tests` as a false edge from an ordinary suffix-strip. A
-    dict/list literal traced through an assignment (`PROVIDERS = {"k":
-    ".sub"}`) is consequently NOT resolved as relative either; this is a
-    named, narrower trade-off in favour of eliminating that false-positive
-    class, not an oversight.
+    literal can never satisfy on its own — but ONLY when the literal is
+    tagged DIRECT (`_dynamic_import_expressions`'s provenance) AND is the
+    harvested expression itself, never a Constant merely NESTED somewhere
+    inside it or reached only through a traced assignment. Two real
+    false-positive shapes are the reason for both halves of that gate: a
+    module-level `SUFFIX = ".py"`, traced back to only because an unrelated
+    `stem = filename.removesuffix(SUFFIX)` happens to feed
+    `spec_from_file_location`, is a Constant that starts with a dot but was
+    never itself passed to a runtime-import call; `str.removesuffix(".py")`
+    (no intermediate variable at all) is the same shape one hop shorter. A
+    shape gate cannot distinguish either from a genuine relative import —
+    `"py"` is identifier-shaped and would pass `DOTTED_MODULE_NAME` on its
+    own — so provenance is the enforceable premise, not "the chain didn't
+    cross a `Call`". The accepted cost: a GENUINE one-hop relative import
+    (`name = ".sub"; import_module(name)`) is NOT resolved either, since its
+    literal is ALSO only reachable through a traced assignment, not a direct
+    argument — a named, narrower unmonitored region, not an oversight. A
+    direct argument (`import_module(".sub", __name__)`,
+    `import_module(f".{x}", __package__)`) is unaffected and still resolves.
 
     The `module:attribute` entry-point form is split, so both halves of
     `"product.integrations.mailgun:build"` are read as naming the module.
     """
     names: set[str] = set()
-    for expression in _dynamic_import_expressions(tree, aliases):
+    for expression, direct in _dynamic_import_expressions(tree, aliases):
         fragment_ids = _joinedstr_fragment_ids(expression)
         for node in ast.walk(expression):
             if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
@@ -6080,7 +6114,7 @@ def _named_modules(
             if id(node) in fragment_ids:
                 continue
             if node.value.startswith("."):
-                if node is expression:
+                if direct and node is expression:
                     resolved = _resolve_relative_dotted_head(node.value, relative)
                     if resolved:
                         names |= _prefixes(resolved)
@@ -6135,15 +6169,18 @@ def _named_packages(
     match.
     """
     prefixes: set[str] = set()
-    for expression in _dynamic_import_expressions(tree, aliases):
+    for expression, direct in _dynamic_import_expressions(tree, aliases):
         for node in ast.walk(expression):
             if isinstance(node, ast.JoinedStr):
                 # Relative resolution only when this JoinedStr IS the
-                # harvested expression itself — the same restriction as
-                # `_named_modules`, for the same reason.
+                # harvested expression itself, AND that expression came
+                # DIRECTLY from a runtime-import call's own argument — the
+                # same restriction `_named_modules` applies, for the same
+                # reason (see `_dynamic_import_expressions`'s provenance
+                # docstring).
                 relative_prefix = (
                     _relative_head_prefix(node.values, relative)
-                    if node is expression
+                    if direct and node is expression
                     else None
                 )
                 if relative_prefix is not None:
@@ -6163,9 +6200,9 @@ def _named_packages(
                     continue
                 if concatenated.startswith("."):
                     # Same restriction as `_named_modules`: only when this
-                    # BinOp IS the harvested expression itself, never one
-                    # merely reachable inside an unrelated call's argument.
-                    if node is expression:
+                    # BinOp IS the harvested expression itself AND came
+                    # DIRECTLY from a runtime-import call's own argument.
+                    if direct and node is expression:
                         resolved = _resolve_relative_dotted_head(concatenated, relative)
                         if resolved:
                             prefixes.add(

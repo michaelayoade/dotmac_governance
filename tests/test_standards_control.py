@@ -6472,7 +6472,9 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         self, source: str, relative: str = "app/consumer.py"
     ) -> frozenset[str]:
         tree = ast.parse(source)
-        return _named_modules(tree, PurePosixPath(relative), _local_import_aliases(tree))
+        return _named_modules(
+            tree, PurePosixPath(relative), _local_import_aliases(tree)
+        )
 
     def named_packages(
         self, source: str, relative: str = "app/consumer.py"
@@ -6503,7 +6505,9 @@ class ImportEdgeClassificationTests(unittest.TestCase):
             relative: IMPORT_EDGE_EXPECTED.get(relative, frozenset())
             for relative in IMPORT_EDGE_CORPUS
         }
-        actual = {relative: importers.get(relative, frozenset()) for relative in expected}
+        actual = {
+            relative: importers.get(relative, frozenset()) for relative in expected
+        }
         self.assertEqual(actual, expected)
 
     def test_a_real_import_of_the_identical_name_is_an_edge(self) -> None:
@@ -6637,9 +6641,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            self.named_modules(
-                IMPORT_EDGE_CORPUS["app/consumer_getattr_unrelated.py"]
-            ),
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_getattr_unrelated.py"]),
             frozenset(),
         )
 
@@ -6655,9 +6657,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         )
         self.assertIn(
             "app.kernel_runtime",
-            self.named_modules(
-                IMPORT_EDGE_CORPUS["app/consumer_functools_partial.py"]
-            ),
+            self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_functools_partial.py"]),
         )
         self.assertEqual(
             self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_partial_unrelated.py"]),
@@ -6668,9 +6668,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         """`importlib.util.find_spec(...)` is the documented entry point of
         the manual-import protocol.
         """
-        self.assertTrue(
-            self.is_runtime_import_call("importlib.util.find_spec('x.y')")
-        )
+        self.assertTrue(self.is_runtime_import_call("importlib.util.find_spec('x.y')"))
         self.assertIn(
             "app.kernel_runtime",
             self.named_modules(IMPORT_EDGE_CORPUS["app/consumer_find_spec.py"]),

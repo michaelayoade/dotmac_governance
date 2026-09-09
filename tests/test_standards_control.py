@@ -24,6 +24,7 @@ from standards_control.contracts import (
 from standards_control.engine import (
     _CREDENTIAL_FILENAMES,
     _CREDENTIAL_SUFFIXES,
+    _bound_names,
     _credential_filenames,
     _fingerprint,
     _importers,
@@ -6235,6 +6236,24 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "    with mock.patch('app.kernel_runtime.boot'):\n"
         "        pass\n"
     ),
+    "app/consumer_getattr_indirection.py": (
+        "import importlib\n\n"
+        "getattr(importlib, 'import_module')('app.kernel_runtime')\n"
+    ),
+    "app/consumer_functools_partial.py": (
+        "import functools\n"
+        "from importlib import import_module\n\n"
+        "loader = functools.partial(import_module, 'app.kernel_runtime')\n"
+    ),
+    "app/consumer_find_spec.py": (
+        "import importlib.util\n\n"
+        "importlib.util.find_spec('app.kernel_runtime')\n"
+    ),
+    "app/consumer_binop_concat.py": (
+        "import importlib\n\n"
+        "def load(name: str) -> object:\n"
+        "    return importlib.import_module('example.plugins.' + name)\n"
+    ),
     # -- Characterization / inventory mentions: must NOT bite ---------------
     # Academy's shape: a dict of dotted names feeding a SUBPROCESS PROBE, not
     # an import.
@@ -6275,6 +6294,18 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "    return None\n\n"
         "my_loader('app.kernel_runtime')\n"
     ),
+    # Near-miss: an unrelated `self.<attr> = "dotted-looking"` assignment
+    # elsewhere in the SAME class must not leak module-wide just because
+    # `self.other` feeds an import call somewhere else in the file — the
+    # `_bound_names` boundary this fix depends on.
+    "app/consumer_unrelated_self_attribute.py": (
+        "import importlib\n\n"
+        "class Loader:\n"
+        "    def configure(self) -> None:\n"
+        "        self.label = 'app.kernel_runtime'\n\n"
+        "    def load(self) -> None:\n"
+        "        importlib.import_module(self.other)\n"
+    ),
 }
 
 
@@ -6310,6 +6341,9 @@ class ImportEdgeClassificationTests(unittest.TestCase):
                     "app/consumer_router_spec_list.py",
                     "app/consumer_monkeypatch_setattr.py",
                     "app/consumer_qualified_mock_patch.py",
+                    "app/consumer_getattr_indirection.py",
+                    "app/consumer_functools_partial.py",
+                    "app/consumer_find_spec.py",
                 }
             ),
             importers["app/kernel_runtime.py"],
@@ -6331,7 +6365,9 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         )
         self.assertEqual(
             importers["example/plugins/mailgun_client.py"],
-            frozenset({"app/consumer_assembled_name.py"}),
+            frozenset(
+                {"app/consumer_assembled_name.py", "app/consumer_binop_concat.py"}
+            ),
             importers["example/plugins/mailgun_client.py"],
         )
         self.assertEqual(
@@ -6348,6 +6384,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
             "app/consumer_monkeypatch_object_form.py",
             "app/consumer_aliased_import_module.py",
             "app/consumer_local_wrapper.py",
+            "app/consumer_unrelated_self_attribute.py",
         ):
             for target, sources in importers.items():
                 self.assertNotIn(
@@ -6459,6 +6496,85 @@ class ImportEdgeClassificationTests(unittest.TestCase):
     ) -> None:
         tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_assembled_name.py"])
         self.assertIn("example.plugins.", _named_packages(tree))
+
+    def test_a_getattr_indirected_import_module_call_is_recognised(self) -> None:
+        """`getattr(importlib, "import_module")(...)` — the callee is itself
+        a `Call`, which a naive `isinstance(func, ast.Attribute)` check
+        falls straight through on.
+        """
+        call = (
+            ast.parse("getattr(importlib, 'import_module')('x.y')").body[0].value
+        )
+        self.assertTrue(_is_runtime_import_call(call))
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_getattr_indirection.py"])
+        self.assertIn("app.kernel_runtime", _named_modules(tree))
+
+    def test_a_functools_partial_wrapped_import_module_is_recognised(self) -> None:
+        """`functools.partial(import_module, "x.y")` constructs a callable
+        that WILL import "x.y" once invoked, with no later call site the
+        engine can see — the construction itself is the point of
+        consumption.
+        """
+        call = (
+            ast.parse("functools.partial(import_module, 'x.y')").body[0].value
+        )
+        self.assertTrue(_is_runtime_import_call(call))
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_functools_partial.py"])
+        self.assertIn("app.kernel_runtime", _named_modules(tree))
+
+    def test_find_spec_is_a_recognised_runtime_import_call(self) -> None:
+        """`importlib.util.find_spec(...)` is the documented entry point of
+        the manual-import protocol.
+        """
+        call = ast.parse("importlib.util.find_spec('x.y')").body[0].value
+        self.assertTrue(_is_runtime_import_call(call))
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_find_spec.py"])
+        self.assertIn("app.kernel_runtime", _named_modules(tree))
+
+    def test_a_binop_concatenated_prefix_reaching_import_module_is_dynamic(
+        self,
+    ) -> None:
+        """`"pkg." + suffix` reaches the same package `f"pkg.{suffix}"`
+        does — the `BinOp` counterpart of the f-string handling.
+        """
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_binop_concat.py"])
+        self.assertIn("example.plugins.", _named_packages(tree))
+
+    def test_bound_names_stops_at_an_attribute_or_subscript_target(self) -> None:
+        """The Blocking-2 regression proof: `self.x = ...`/`d[k] = ...` must
+        contribute NOTHING, not even the receiver `Name` — matching the
+        function's own docstring.
+        """
+        self.assertEqual(
+            _bound_names(ast.parse("self.x = 1").body[0].targets[0]),
+            frozenset(),
+        )
+        self.assertEqual(
+            _bound_names(ast.parse("d[k] = 1").body[0].targets[0]),
+            frozenset(),
+        )
+
+    def test_bound_names_unpacks_tuple_list_and_starred_targets(self) -> None:
+        self.assertEqual(
+            _bound_names(ast.parse("a, (b, c) = x").body[0].targets[0]),
+            frozenset({"a", "b", "c"}),
+        )
+        self.assertEqual(
+            _bound_names(ast.parse("a, self.x, *rest = x").body[0].targets[0]),
+            frozenset({"a", "rest"}),
+        )
+
+    def test_an_unrelated_self_attribute_does_not_leak_module_wide(self) -> None:
+        """The full-pipeline proof for the same regression: `self.label`
+        holds a dotted-looking literal in one method; `self.other` (a
+        DIFFERENT attribute) feeds a real import call in another. Fixing
+        `_bound_names` in isolation is not enough if `_named_modules` still
+        found a path to leak the two together.
+        """
+        tree = ast.parse(
+            IMPORT_EDGE_CORPUS["app/consumer_unrelated_self_attribute.py"]
+        )
+        self.assertEqual(_named_modules(tree), frozenset())
 
 
 # -- Closed untracked-source rule ------------------------------------------

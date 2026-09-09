@@ -6299,6 +6299,52 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "def trigger() -> object:\n"
         "    return load('app.kernel_runtime')\n"
     ),
+    # A function reference passed AS DATA to a higher-order caller reaches
+    # its own module-level function's parameter scope the same way a direct
+    # call does — the `app/main.py` deferred-router shape a real corpus
+    # confirmed was otherwise lost.
+    "app/consumer_forwarded_to_thread.py": (
+        "import asyncio\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "async def trigger() -> object:\n"
+        "    return await asyncio.to_thread(_load, 'app.kernel_runtime')\n"
+    ),
+    "app/consumer_forwarded_thread_target.py": (
+        "import threading\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "def trigger() -> None:\n"
+        "    threading.Thread(target=_load, args=('app.kernel_runtime',)).start()\n"
+    ),
+    # Near-miss: the SAME forwarding shape, wrapping an UNRELATED function —
+    # the shape is recognised, but the edge is not manufactured because
+    # `_other_helper` never itself reaches a runtime-import call.
+    "app/consumer_forwarded_unrelated_function.py": (
+        "import asyncio\n\n"
+        "def _other_helper(value: str) -> str:\n"
+        "    return value.upper()\n\n"
+        "async def trigger() -> object:\n"
+        "    return await asyncio.to_thread(_other_helper, 'app.kernel_runtime')\n"
+    ),
+    # Permanent regression plant: the relative-import "starts with a dot"
+    # check must resolve ONLY the harvested expression itself, never a
+    # Constant merely reachable inside it — a real corpus caught
+    # `str.removesuffix(".py")`'s own argument being misread as a relative
+    # import fragment and manufacturing a false edge to `conftest`/the
+    # importer's own package. `"conftest.py"` is a DOTTED_MODULE_NAME match
+    # on its own (each segment is identifier-shaped), so this is also a
+    # second, independent proof that `spec_from_file_location`'s harvesting
+    # stays bound to the NAME position, not "every reachable literal".
+    "app/consumer_removesuffix_not_a_relative_import.py": (
+        "import importlib.util\n\n"
+        "def _load_migration(filename: str):\n"
+        "    stem = filename.removesuffix('.py')\n"
+        "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
+        "    return spec\n"
+    ),
     # -- Characterization / inventory mentions: must NOT bite ---------------
     # Academy's shape: a dict of dotted names feeding a SUBPROCESS PROBE, not
     # an import.
@@ -6426,6 +6472,8 @@ IMPORT_EDGE_EXPECTED: dict[str, frozenset[str]] = {
             "app/consumer_importorskip.py",
             "app/consumer_comprehension_import.py",
             "app/consumer_scope_collision.py",
+            "app/consumer_forwarded_to_thread.py",
+            "app/consumer_forwarded_thread_target.py",
         }
     ),
     "app/main_module.py": frozenset(
@@ -6666,7 +6714,13 @@ class ImportEdgeClassificationTests(unittest.TestCase):
 
     def test_find_spec_is_a_recognised_runtime_import_call(self) -> None:
         """`importlib.util.find_spec(...)` is the documented entry point of
-        the manual-import protocol.
+        the manual-import protocol. DELIBERATELY no dedicated near-miss
+        here: `find_spec` is matched only on its own unambiguous `.attr`/
+        bare-name terminal (unlike `patch`/`setattr`, which need an
+        argument-count or receiver-scoped near-miss to prove they don't
+        over-match), so there is no distinct SHAPE for a negative pole to
+        exercise beyond `test_an_arbitrary_local_wrapper_is_not_a_
+        recognised_runtime_import_call`'s generic one.
         """
         self.assertTrue(self.is_runtime_import_call("importlib.util.find_spec('x.y')"))
         self.assertIn(
@@ -6793,6 +6847,56 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         )
         self.assertIn("app.kernel_runtime", modules)
         self.assertNotIn("app.legacy.decommissioned", modules)
+
+    def test_a_function_forwarded_to_asyncio_to_thread_is_still_traced(self) -> None:
+        """A function reference passed AS DATA to `asyncio.to_thread(fn,
+        *args)` reaches `fn`'s own parameter scope the same way a direct
+        call does — the `app/main.py` deferred-router shape a real corpus
+        confirmed was otherwise a genuine edge lost, not a false one
+        removed. Paired against a near-miss forwarding an UNRELATED
+        function.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_to_thread.py"]
+            ),
+        )
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_unrelated_function.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_a_function_forwarded_via_thread_target_is_still_traced(self) -> None:
+        """`threading.Thread(target=fn, args=(...))` — the KEYWORD-shaped
+        forwarder, distinct from `to_thread`/`submit`'s positional one.
+        """
+        self.assertIn(
+            "app.kernel_runtime",
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_thread_target.py"]
+            ),
+        )
+
+    def test_removesuffix_argument_is_not_a_relative_import(self) -> None:
+        """Permanent regression plant: `str.removesuffix(".py")`'s own
+        literal argument starts with a dot and is reachable by `ast.walk`
+        inside `spec_from_file_location`'s harvested expression, but it is
+        NOT the harvested expression itself — resolving it anyway
+        manufactured a false edge in a real corpus
+        (`tests/test_ticket_assignment_authorization.py` ->
+        `tests/__init__.py`). `"conftest.py"`-shaped strings independently
+        match the anchored `DOTTED_MODULE_NAME` pattern, so this also proves
+        harvesting stays bound to the NAME position.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_removesuffix_not_a_relative_import.py"]
+            ),
+            frozenset(),
+        )
 
     def test_monkeypatch_setattrs_value_argument_is_not_harvested(self) -> None:
         """Finding 6: `monkeypatch.setattr("app.cfg.BACKEND",

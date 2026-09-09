@@ -5452,6 +5452,62 @@ def _is_partial_wrapped_import_call(
     )
 
 
+#: Terminal callee names (bare or `.attr`) recognised as "the argument at a
+#: KNOWN position is a CALLABLE that will really run, with the remaining
+#: positional arguments reaching IT" — the same shape `functools.partial`
+#: already has, shared through `_forwarded_call` rather than duplicated.
+#: Scoped to a short, named list, not any `.submit()`/`.to_thread()` — the
+#: accepted false-positive cost is a receiver that happens to share one of
+#: these names, matching the same philosophy as `patch`/`setattr`.
+FORWARDING_CALLEES_FUNCTION_FIRST = frozenset({"to_thread", "submit", "partial"})
+#: `loop.run_in_executor(executor, fn, *args)` — the executor is first, the
+#: function second.
+FORWARDING_CALLEES_FUNCTION_SECOND = frozenset({"run_in_executor"})
+#: `Thread(target=fn, args=(...))` / `Process(target=fn, args=(...))` — a
+#: KEYWORD shape, not positional.
+FORWARDING_CALLEES_KEYWORD_TARGET = frozenset({"Thread", "Process"})
+
+
+def _forwarded_call(
+    node: ast.Call, aliases: dict[str, str]
+) -> tuple[ast.expr, list[ast.expr]] | None:
+    """If this call forwards to ANOTHER callable rather than calling it
+    directly, return (the expression NAMING that callable, the argument
+    expressions that will reach it) — else `None`.
+
+    `functools.partial(fn, a, b)`, `asyncio.to_thread(fn, a, b)`,
+    `executor.submit(fn, a, b)`, `loop.run_in_executor(executor, fn, a, b)`,
+    and `Thread(target=fn, args=(a, b))` are all this SAME shape:
+    `_load_router_object` sits in the callee-naming position of the OUTER
+    call, not as the call's own `func` — the same reason
+    `_is_getattr_indirected_import_call` exists for `getattr(...)(...)`.
+    `_taint_edges` uses this to keep following a value through a
+    LOCALLY-DEFINED helper reached through one of these forwarders, exactly
+    as it already follows a value through a direct call — `functools.
+    partial`'s own narrower "does the wrapped callable directly resolve a
+    module name" question stays `_is_partial_wrapped_import_call`'s alone;
+    this is the general "what does this construction forward, and to whom".
+    """
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else None
+    attr = func.attr if isinstance(func, ast.Attribute) else None
+    callee = _resolve_alias(name, aliases) if name is not None else attr
+    if callee in FORWARDING_CALLEES_FUNCTION_FIRST and node.args:
+        return node.args[0], node.args[1:]
+    if callee in FORWARDING_CALLEES_FUNCTION_SECOND and len(node.args) >= 2:
+        return node.args[1], node.args[2:]
+    if callee in FORWARDING_CALLEES_KEYWORD_TARGET:
+        target = _keyword_argument(node, "target")
+        if not target:
+            return None
+        forwarded_args = _keyword_argument(node, "args")
+        forwarded: list[ast.expr] = []
+        if forwarded_args and isinstance(forwarded_args[0], (ast.Tuple, ast.List)):
+            forwarded = list(forwarded_args[0].elts)
+        return target[0], forwarded
+    return None
+
+
 def _is_runtime_import_call(node: ast.Call, aliases: dict[str, str]) -> bool:
     """Does this call resolve a string into a module at runtime?
 
@@ -5718,14 +5774,19 @@ def _taint_edges(
     tree: ast.Module,
     scopes: dict[int, ast.AST],
     bound: dict[int, set[str]],
+    aliases: dict[str, str],
 ) -> list[tuple[frozenset[ScopedName], frozenset[ScopedName], ast.expr]]:
     """Every (bound scoped names, referenced scoped names, value expression)
     step a value can flow through in this module: a simple assignment, a
     `for`/comprehension binding, or an argument passed BY POSITION to a
-    function DEFINED in this same module. Each triple says: if any of the
-    bound names is provably import-fed, the referenced names are pulled in
-    too, and the value expression itself is a place to harvest a literal
-    from directly.
+    function DEFINED in this same module — reached either DIRECTLY
+    (`_load_router_object(module_name, attr_name)`) or FORWARDED through a
+    higher-order caller (`asyncio.to_thread(_load_router_object,
+    module_name, attr_name)`, `executor.submit(fn, *args)`, `Thread(
+    target=fn, args=(...))` — see `_forwarded_call`). Each triple says: if
+    any of the bound names is provably import-fed, the referenced names are
+    pulled in too, and the value expression itself is a place to harvest a
+    literal from directly.
 
     Every binding and reference is SCOPED (`_function_scopes`) — `load`'s
     parameter `module_name` and `describe`'s unrelated local `module_name`
@@ -5734,29 +5795,18 @@ def _taint_edges(
     through a named helper — `_apply_router_spec(app, spec)` calling
     `_load_router_object(module_name, attr_name)` which calls
     `import_module(module_name)` — without becoming a general
-    interprocedural data-flow engine: only a direct call to a function this
+    interprocedural data-flow engine: only a call (direct, or forwarded
+    through one of the named higher-order callers) to a function this
     module itself defines (a MODULE-LEVEL `def`, matched by `ast.Name`, so a
     class method or a closure is NOT followed — `self._load(name)` and
     `Registry().load(name)` are both untraced), matched by simple positional
     position, is followed; the call's OWN scope supplies its argument
     references, the callee's OWN scope receives its parameter binding. A
-    value passed BY KEYWORD (`_load(module_name=x)`) is NOT traced —
-    matching a keyword to its parameter needs the callee's defaults and
-    `**kwargs` shape resolved too, which this reader does not attempt; a
-    keyword-only caller stops the chain there rather than guessing.
-
-    A function reference passed AS DATA to a higher-order caller —
-    `asyncio.to_thread(_load_router_object, module_name, attr_name)`,
-    `executor.submit(fn, *args)`, `Thread(target=fn, args=(...))` — is
-    likewise NOT followed: `_load_router_object` there is an ARGUMENT, not
-    the call's own `func`, so this mechanism's `isinstance(node.func,
-    ast.Name)` gate never sees it. A real corpus confirmed this drops a
-    genuine edge (`app/main.py`'s deferred-router loader). This is a
-    DECIDABLE, BOUNDED extension — recognise a short list of forwarding
-    callees and shift the argument-to-parameter mapping by the forwarded
-    function's own position — that remains UNIMPLEMENTED, not a claim that
-    it cannot be done; it is named here as an open gap rather than silently
-    dropped.
+    value passed BY KEYWORD to the reached function itself (`_load(
+    module_name=x)`) is still NOT traced — matching a keyword to ITS
+    parameter needs the callee's defaults and `**kwargs` shape resolved too,
+    which this reader does not attempt; a keyword-only caller stops the
+    chain there rather than guessing.
     """
     edges: list[tuple[frozenset[ScopedName], frozenset[ScopedName], ast.expr]] = []
     for node in ast.walk(tree):
@@ -5790,15 +5840,14 @@ def _taint_edges(
                 )
 
     functions = _module_level_functions(tree)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-            continue
-        function = functions.get(node.func.id)
-        if function is None:
-            continue
-        call_scope = scopes.get(id(node), tree)
+
+    def add_call_edges(
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        forwarded_args: list[ast.expr],
+        call_scope: ast.AST,
+    ) -> None:
         parameters = _positional_parameter_names(function)
-        for parameter, argument in zip(parameters, node.args):
+        for parameter, argument in zip(parameters, forwarded_args):
             edges.append(
                 (
                     frozenset({(id(function), parameter)}),
@@ -5806,6 +5855,23 @@ def _taint_edges(
                     argument,
                 )
             )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        call_scope = scopes.get(id(node), tree)
+        if isinstance(node.func, ast.Name):
+            function = functions.get(node.func.id)
+            if function is not None:
+                add_call_edges(function, node.args, call_scope)
+        forwarded = _forwarded_call(node, aliases)
+        if forwarded is not None:
+            reference, forwarded_args = forwarded
+            if isinstance(reference, ast.Name):
+                resolved_name = _resolve_alias(reference.id, aliases)
+                function = functions.get(resolved_name) if resolved_name else None
+                if function is not None:
+                    add_call_edges(function, forwarded_args, call_scope)
     return edges
 
 
@@ -5844,7 +5910,7 @@ def _import_fed_names(
             for argument in _module_naming_arguments(node, aliases):
                 tainted |= _scoped_references(argument, call_scope, scopes, bound, tree)
 
-    edges = _taint_edges(tree, scopes, bound)
+    edges = _taint_edges(tree, scopes, bound, aliases)
     changed = True
     while changed:
         changed = False
@@ -5872,7 +5938,7 @@ def _dynamic_import_expressions(
         if isinstance(node, ast.Call) and _is_runtime_import_call(node, aliases):
             expressions.extend(_module_naming_arguments(node, aliases))
     tainted = _import_fed_names(tree, aliases)
-    for targets, _, value in _taint_edges(tree, scopes, bound):
+    for targets, _, value in _taint_edges(tree, scopes, bound, aliases):
         if targets & tainted:
             expressions.append(value)
     return expressions

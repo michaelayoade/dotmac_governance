@@ -5334,6 +5334,21 @@ RUNTIME_IMPORT_CALLEES = frozenset(
     }
 )
 
+#: `celery_app.autodiscover_tasks(["app.tasks", ...])` — a genuine,
+#: documented Celery dynamic importer: for each package NAME in the list (or
+#: `packages=`/`related_name=`-shaped call), it imports `<package>.<related_
+#: name>` (default `related_name="tasks"`), not the bare package name — a
+#: false negative of the identical class as `pytest.importorskip` in a
+#: Celery-heavy codebase, kept in its OWN set rather than
+#: `RUNTIME_IMPORT_CALLEES` because its argument is a LIST, not a single
+#: string, and its target is the argument PLUS a suffix, not the argument
+#: verbatim — `_module_naming_arguments` handles it before falling through to
+#: the generic single-string branch. A custom `related_name=` override is
+#: NOT resolved (only the documented default `"tasks"` is); a named,
+#: narrower gap, not a silent one.
+LIST_OF_PACKAGES_CALLEES = frozenset({"autodiscover_tasks"})
+AUTODISCOVER_TASKS_DEFAULT_RELATED_NAME = "tasks"
+
 #: Callee terminal names `functools.partial(...)`'s FIRST positional argument
 #: must resolve to for the partial construction itself to count as reaching a
 #: runtime import: `functools.partial(import_module, "x.y")` does not import
@@ -5392,6 +5407,21 @@ def _local_import_aliases(tree: ast.Module) -> dict[str, str]:
     reader; only a rename happening in a DIFFERENT module (a re-export this
     module merely imports under yet another name) is, since that needs
     following the import across a file this reader does not have open.
+
+    Collected MODULE-WIDE, with no scope awareness, unlike every other
+    binding this fix made scope-precise: a function-local `from unittest.
+    mock import patch as p` — importing inside a function body, an unusual
+    but legal Python idiom — makes `p` resolve to `"patch"` for the WHOLE
+    module, so an unrelated `p` parameter elsewhere (`def handler(p): ...`)
+    would be misread as the alias too if it were ever checked against
+    `RUNTIME_IMPORT_CALLEES` by name. In practice this is bounded by what
+    alias resolution is actually USED for — matching a CALLEE's own name/
+    receiver, never an arbitrary parameter — so the exposure is narrower
+    than it sounds; it is nonetheless a residual, undocumented-until-now gap
+    rather than a scoped one, and no corpus signal (real or fixture) has yet
+    exercised it — closing it would mean threading `_function_scopes` through
+    here too and keying this dict by `(scope_id, name)` like everything
+    else.
     """
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -5539,10 +5569,11 @@ def _is_runtime_import_call(node: ast.Call, aliases: dict[str, str]) -> bool:
         return (
             resolved_name in RUNTIME_IMPORT_CALLEES
             or resolved_name in BARE_DYNAMIC_PATCH_CALLEES
+            or resolved_name in LIST_OF_PACKAGES_CALLEES
         )
     if not isinstance(func, ast.Attribute):
         return False
-    if func.attr in RUNTIME_IMPORT_CALLEES:
+    if func.attr in RUNTIME_IMPORT_CALLEES or func.attr in LIST_OF_PACKAGES_CALLEES:
         return True
     if func.attr == "patch":
         return _resolve_alias(_name(func.value), aliases) in DYNAMIC_PATCH_RECEIVERS
@@ -5574,6 +5605,19 @@ def _module_naming_arguments(node: ast.Call, aliases: dict[str, str]) -> list[as
         # wrapped callable itself; the NAMED function's own first argument
         # sits at index 1.
         return node.args[1:2]
+    autodiscover_callee = (
+        _resolve_alias(func.id, aliases)
+        if isinstance(func, ast.Name)
+        else func.attr
+        if isinstance(func, ast.Attribute)
+        else None
+    )
+    if autodiscover_callee in LIST_OF_PACKAGES_CALLEES:
+        # Handled BEFORE the generic single-string branches below: the
+        # naming "argument" here is not one of `node.args` at all, but a
+        # set of SYNTHETIC, already-suffixed Constants built from the list
+        # literal's own elements.
+        return _autodiscover_tasks_arguments(node)
     if isinstance(func, ast.Name):
         resolved_name = _resolve_alias(func.id, aliases)
         if resolved_name in RUNTIME_IMPORT_CALLEES:
@@ -5616,6 +5660,34 @@ def _module_naming_arguments(node: ast.Call, aliases: dict[str, str]) -> list[as
 
 def _keyword_argument(node: ast.Call, name: str) -> list[ast.expr]:
     return [keyword.value for keyword in node.keywords if keyword.arg == name]
+
+
+def _autodiscover_tasks_arguments(node: ast.Call) -> list[ast.expr]:
+    """`celery_app.autodiscover_tasks(["app.tasks", ...])` reaches
+    `<package>.tasks` for each string element of its list/tuple/set
+    argument (the `packages` positional/keyword parameter), not the bare
+    package name — Celery's own `related_name="tasks"` default. Each
+    Constant element is read out and a SYNTHETIC `Constant` carrying the
+    suffixed name is returned, so the ordinary Constant-harvesting loop in
+    `_named_modules` needs no special case of its own: it sees an
+    already-correct `"<package>.tasks"` literal (`_prefixes` then also
+    reaches the bare package, matching Python's own parent-package import
+    semantics). A non-Constant element (a computed package name) is skipped
+    rather than guessed at; a `related_name=` override is likewise not
+    resolved.
+    """
+    candidates = node.args[:1] or _keyword_argument(node, "packages")
+    if not candidates or not isinstance(candidates[0], (ast.List, ast.Tuple, ast.Set)):
+        return []
+    synthetic: list[ast.expr] = []
+    for element in candidates[0].elts:
+        if isinstance(element, ast.Constant) and isinstance(element.value, str):
+            synthetic.append(
+                ast.Constant(
+                    value=f"{element.value}.{AUTODISCOVER_TASKS_DEFAULT_RELATED_NAME}"
+                )
+            )
+    return synthetic
 
 
 def _referenced_names(node: ast.expr) -> frozenset[str]:
@@ -5766,6 +5838,18 @@ def _scoped_references(
     real closure capture — is not modelled; a value reaching an import ONLY
     through a closure over a non-module outer function is a named residual
     gap, not a silent one).
+
+    `global`/`nonlocal` are likewise NOT read anywhere in this module: a
+    `global MODULE_NAME` declared in one function and assigned there is not
+    connected to a read of the SAME name in a different function, even
+    though real Python would resolve both to the identical module-level
+    binding. This is a partitioning-caused regression the flat, unscoped
+    scheme this replaced did not have (a flat by-name set connected them by
+    accident, the same way it connected two UNRELATED same-named locals) —
+    closing it needs walking a function's `ast.Global`/`ast.Nonlocal`
+    statements and redirecting the names they list to the declared outer
+    scope instead of the function's own; a decidable, bounded extension that
+    remains unimplemented, named here rather than left silent.
     """
     references: set[ScopedName] = set()
     for child in ast.walk(node):

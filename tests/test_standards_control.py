@@ -6190,6 +6190,8 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
     "app/services/finance/gl/sibling.py": "VALUE = 1\n",
     "conftest.py": "FIXTURE = 1\n",
     "app/legacy/decommissioned.py": "def run() -> None:\n    return None\n",
+    "app/tasks/__init__.py": "",
+    "app/tasks/tasks.py": "def run_invoice_cycle() -> None:\n    return None\n",
     # -- Real static imports: `Import`/`ImportFrom` nodes ------------------
     "app/consumer_static_import.py": "import app.kernel_runtime\n",
     "app/consumer_from_import.py": "from app.main_module import main\n",
@@ -6378,6 +6380,18 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
         "    return spec\n"
     ),
+    # `celery_app.autodiscover_tasks([...])` is a genuine, documented Celery
+    # dynamic importer reaching `<package>.tasks` (Celery's own
+    # `related_name="tasks"` default), not the bare package name.
+    "app/consumer_autodiscover_tasks.py": (
+        "celery_app.autodiscover_tasks(['app.tasks'])\n"
+    ),
+    # Near-miss: a COMPUTED package list — not a list/tuple/set literal at
+    # all — is not resolvable, so nothing is harvested rather than guessed
+    # at.
+    "app/consumer_autodiscover_tasks_computed.py": (
+        "celery_app.autodiscover_tasks(discover_package_names())\n"
+    ),
     # -- Characterization / inventory mentions: must NOT bite ---------------
     # Academy's shape: a dict of dotted names feeding a SUBPROCESS PROBE, not
     # an import.
@@ -6534,6 +6548,8 @@ IMPORT_EDGE_EXPECTED: dict[str, frozenset[str]] = {
     "example/plugins/mailgun_client.py": frozenset(
         {"app/consumer_assembled_name.py", "app/consumer_binop_concat.py"}
     ),
+    "app/tasks/__init__.py": frozenset({"app/consumer_autodiscover_tasks.py"}),
+    "app/tasks/tasks.py": frozenset({"app/consumer_autodiscover_tasks.py"}),
 }
 
 
@@ -7003,6 +7019,27 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         self.assertEqual(
             self.named_modules(
                 IMPORT_EDGE_CORPUS["app/consumer_removesuffix_not_a_relative_import.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_autodiscover_tasks_reaches_the_tasks_submodule(self) -> None:
+        """`celery_app.autodiscover_tasks(["app.tasks"])` is a genuine,
+        documented Celery dynamic importer reaching `<package>.tasks`
+        (Celery's own `related_name="tasks"` default) — chosen over the bare
+        package name alone because that IS what Celery actually imports; the
+        bare package still resolves too, via `_prefixes`, matching Python's
+        own parent-package import semantics. Paired against a near-miss
+        where the argument is NOT a list/tuple/set literal at all.
+        """
+        modules = self.named_modules(
+            IMPORT_EDGE_CORPUS["app/consumer_autodiscover_tasks.py"]
+        )
+        self.assertIn("app.tasks.tasks", modules)
+        self.assertIn("app.tasks", modules)
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_autodiscover_tasks_computed.py"]
             ),
             frozenset(),
         )

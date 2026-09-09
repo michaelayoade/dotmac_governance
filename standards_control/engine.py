@@ -5312,12 +5312,20 @@ DOTTED_PACKAGE_PREFIX = re.compile(
 #: rather than being guessed into an edge on a call name that doesn't
 #: textually match. A call through an arbitrary local wrapper
 #: (`my_loader(name)`) is likewise not recognised for the same reason.
-#: `find_spec` joins this set for the same reason as `import_module`: it is
-#: the unambiguous, documented entry point of the manual-import protocol
-#: (`importlib.util.find_spec(name)` / `spec.loader.exec_module(...)`), and —
-#: unlike `patch`/`setattr` — not a generic enough verb to risk matching an
-#: unrelated receiver.
-RUNTIME_IMPORT_CALLEES = frozenset({"import_module", "__import__", "find_spec"})
+#: `find_spec`/`spec_from_file_location` join this set for the same reason
+#: as `import_module`: they are the unambiguous, documented entry points of
+#: the manual-import protocol (`importlib.util.find_spec(name)` /
+#: `importlib.util.spec_from_file_location(name, path)`, each followed by
+#: `module_from_spec(spec)` and `spec.loader.exec_module(module)`), and —
+#: unlike `patch`/`setattr` — not generic enough verbs to risk matching an
+#: unrelated receiver. `module_from_spec`/`exec_module` are deliberately NOT
+#: in this set: their own argument is the `spec`/`module` OBJECT, never the
+#: name literal, so recognising them harvests nothing that `find_spec`/
+#: `spec_from_file_location` didn't already capture at the step that
+#: actually names the module.
+RUNTIME_IMPORT_CALLEES = frozenset(
+    {"import_module", "__import__", "find_spec", "spec_from_file_location"}
+)
 
 #: Callee terminal names `functools.partial(...)`'s FIRST positional argument
 #: must resolve to for the partial construction itself to count as reaching a

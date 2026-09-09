@@ -6248,6 +6248,10 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
     "app/consumer_find_spec.py": (
         "import importlib.util\n\nimportlib.util.find_spec('app.kernel_runtime')\n"
     ),
+    "app/consumer_spec_from_file_location.py": (
+        "import importlib.util\n\n"
+        "importlib.util.spec_from_file_location('app.kernel_runtime', SOME_PATH)\n"
+    ),
     "app/consumer_binop_concat.py": (
         "import importlib\n\n"
         "def load(name: str) -> object:\n"
@@ -6343,6 +6347,7 @@ class ImportEdgeClassificationTests(unittest.TestCase):
                     "app/consumer_getattr_indirection.py",
                     "app/consumer_functools_partial.py",
                     "app/consumer_find_spec.py",
+                    "app/consumer_spec_from_file_location.py",
                 }
             ),
             importers["app/kernel_runtime.py"],
@@ -6524,6 +6529,24 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         call = ast.parse("importlib.util.find_spec('x.y')").body[0].value
         self.assertTrue(_is_runtime_import_call(call))
         tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_find_spec.py"])
+        self.assertIn("app.kernel_runtime", _named_modules(tree))
+
+    def test_spec_from_file_location_is_a_recognised_runtime_import_call(
+        self,
+    ) -> None:
+        """The other manual-import entry point named in review: the NAME
+        argument only occasionally matches a real dotted module (a real
+        corpus mostly uses it with an arbitrary `sys.modules` label), but
+        when it does, it is a genuine edge the same way `find_spec` is.
+        `module_from_spec`/`exec_module` are deliberately NOT separately
+        recognised — their own argument is the `spec`/`module` object, never
+        the name literal.
+        """
+        call = (
+            ast.parse("importlib.util.spec_from_file_location('x.y', p)").body[0].value
+        )
+        self.assertTrue(_is_runtime_import_call(call))
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_spec_from_file_location.py"])
         self.assertIn("app.kernel_runtime", _named_modules(tree))
 
     def test_a_binop_concatenated_prefix_reaching_import_module_is_dynamic(

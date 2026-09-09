@@ -6134,6 +6134,333 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
         self.assertEqual(actual, self.authority())
 
 
+# -- Import-edge classification: consumption, not string-matching -----------
+#
+# `_importers()` measured a false edge from any file that merely NAMED a
+# dotted path — an inventory dict, an exclusion list, a subprocess-probe
+# argument — as if it had imported the module. Two independent false
+# positives were reported this way: Academy's readiness ratchet
+# (`FAMILY_ENTRY_MODULE`, a dict of entry-module names feeding a subprocess
+# probe) and Sub's CRM freeze classifier (a scanner that names decommissioned
+# script paths IN ORDER TO EXCLUDE them). A dependency edge is now the
+# genuine consumption of a literal: a real `Import`/`ImportFrom` node, or a
+# literal reaching a runtime-import call (`importlib.import_module(...)`,
+# `__import__(...)`, `monkeypatch.setattr`/`delattr`'s string-target
+# overload, `mock.patch`/`mocker.patch`, or a bare `patch(...)`), traced
+# through simple assignment chains, `for` loops, and same-module helper
+# calls to a fixed point.
+#
+# This is a DIFFERENTIAL fixture in the sense Michael asked for: it is not
+# "some edges appear/disappear", it is the FULL edge set `_importers()`
+# computes over a fixed, embedded, reproducible corpus, asserted by exact
+# equality — through `_importers` itself, the real function CI runs, not a
+# reimplementation of the rule. A future change that silently drops a
+# genuine edge, or silently starts counting a mention again, fails this
+# test rather than requiring someone to notice in review. A corpus
+# differential against two independent real repositories (dotmac_academy_app,
+# dotmac_sub; analysis only, not part of any test suite here) is what
+# surfaced every shape represented below, including two the engine initially
+# mis-classified: a dynamic import reached through a `for` loop and a
+# same-module helper function (the `_CORE_ROUTER_SPECS` shape), and the bare
+# `patch(...)` spelling of `unittest.mock.patch` with no receiver to scope a
+# match on.
+IMPORT_EDGE_CORPUS: dict[str, str] = {
+    # -- Targets: the modules every edge below points at or past -----------
+    "app/kernel_runtime.py": "def boot() -> None:\n    return None\n",
+    "app/main_module.py": "def main() -> None:\n    return None\n",
+    "example/mailgun_client.py": (
+        "def build_client(api_key: str):\n    return api_key\n"
+    ),
+    "example/plugins/__init__.py": "",
+    "example/plugins/mailgun_client.py": (
+        "def build_client(api_key: str):\n    return api_key\n"
+    ),
+    "app/services/job_heartbeat.py": (
+        "def record_success() -> None:\n    return None\n"
+    ),
+    "crm/scripts/legacy_sync.py": "def run() -> None:\n    return None\n",
+    # -- Real static imports: `Import`/`ImportFrom` nodes ------------------
+    "app/consumer_static_import.py": "import app.kernel_runtime\n",
+    "app/consumer_from_import.py": "from app.main_module import main\n",
+    # -- Genuine dynamic imports: must all still bite -----------------------
+    "app/consumer_direct_import_module.py": (
+        "import importlib\n\nimportlib.import_module('app.kernel_runtime')\n"
+    ),
+    "app/consumer_dunder_import.py": "__import__('app.kernel_runtime')\n",
+    "app/consumer_registry_wiring.py": (
+        "import importlib\n\n"
+        "PROVIDERS = {'mailgun': 'example.mailgun_client:build_client'}\n\n"
+        "def resolve(name: str) -> object:\n"
+        "    module_name, _, attribute = PROVIDERS[name].partition(':')\n"
+        "    return getattr(importlib.import_module(module_name), attribute)\n"
+    ),
+    "app/consumer_assembled_name.py": (
+        "import importlib\n\n"
+        "DEFAULT_PROVIDERS = ('mailgun_client',)\n\n"
+        "def load() -> dict:\n"
+        "    return {\n"
+        "        name: importlib.import_module(f'example.plugins.{name}')\n"
+        "        for name in DEFAULT_PROVIDERS\n"
+        "    }\n"
+    ),
+    "app/consumer_router_spec_list.py": (
+        "from importlib import import_module\n\n"
+        "_CORE_ROUTER_SPECS = [\n"
+        "    ('app.kernel_runtime', 'boot'),\n"
+        "    ('app.main_module', 'main'),\n"
+        "]\n\n"
+        "def _load(module_name: str, attr_name: str):\n"
+        "    module = import_module(module_name)\n"
+        "    return getattr(module, attr_name)\n\n"
+        "def _apply(spec: tuple) -> None:\n"
+        "    module_name, attr_name = spec\n"
+        "    _load(module_name, attr_name)\n\n"
+        "def include_core_routers() -> None:\n"
+        "    for spec in _CORE_ROUTER_SPECS:\n"
+        "        _apply(spec)\n"
+    ),
+    "app/consumer_monkeypatch_setattr.py": (
+        "def test_boots(monkeypatch) -> None:\n"
+        "    monkeypatch.setattr('app.kernel_runtime.boot', lambda: None)\n"
+    ),
+    "app/consumer_bare_mock_patch.py": (
+        "from unittest.mock import patch\n\n"
+        "def test_boots() -> None:\n"
+        "    with patch('app.services.job_heartbeat.record_success'):\n"
+        "        pass\n"
+    ),
+    "app/consumer_qualified_mock_patch.py": (
+        "from unittest import mock\n\n"
+        "def test_boots() -> None:\n"
+        "    with mock.patch('app.kernel_runtime.boot'):\n"
+        "        pass\n"
+    ),
+    # -- Characterization / inventory mentions: must NOT bite ---------------
+    # Academy's shape: a dict of dotted names feeding a SUBPROCESS PROBE, not
+    # an import.
+    "readiness/ratchet.py": (
+        "import subprocess, sys\n\n"
+        "FAMILY_ENTRY_MODULE = {'boot': 'app.kernel_runtime', 'main': 'app.main_module'}\n\n"
+        "def probe(family: str) -> None:\n"
+        "    subprocess.run([sys.executable, '-m', FAMILY_ENTRY_MODULE[family]], check=True)\n"
+    ),
+    # Sub's shape: an EXCLUSION list naming a decommissioned surface so it can
+    # be excluded, not imported.
+    "governance/freeze_classifier.py": (
+        "DECOMMISSIONED = ['crm.scripts.legacy_sync']\n\n"
+        "def is_excluded(name: str) -> bool:\n"
+        "    return name in DECOMMISSIONED\n"
+    ),
+    # An expected-value fixture: a Celery-style task-routing assertion that
+    # COMPARES a dotted string, never imports it.
+    "tests/test_task_routing_expected.py": (
+        "TASK_NAME = 'app.kernel_runtime.boot'\n\n"
+        "def test_route() -> None:\n"
+        "    assert TASK_NAME in {'app.kernel_runtime.boot'}\n"
+    ),
+    # Near-miss: a 3-positional-argument `monkeypatch.setattr(obj, name,\n"
+    # value)` patches an ALREADY-IMPORTED object; no import happens.
+    "app/consumer_monkeypatch_object_form.py": (
+        "def test_patches_object(monkeypatch) -> None:\n"
+        "    monkeypatch.setattr('app.kernel_runtime', 'boot', lambda: None)\n"
+    ),
+    # Near-miss: an import bound under a local alias is not resolved.
+    "app/consumer_aliased_import_module.py": (
+        "from importlib import import_module as _im\n\n_im('app.kernel_runtime')\n"
+    ),
+    # Near-miss: a call through an arbitrary local wrapper, not a recognised
+    # runtime-import callee.
+    "app/consumer_local_wrapper.py": (
+        "def my_loader(name: str) -> None:\n"
+        "    return None\n\n"
+        "my_loader('app.kernel_runtime')\n"
+    ),
+}
+
+
+class ImportEdgeClassificationTests(unittest.TestCase):
+    """`_importers` classifies a dotted string by how it is CONSUMED, not by
+    whether it looks like a module path.
+    """
+
+    def importers(self) -> dict[str, frozenset[str]]:
+        trees = {
+            PurePosixPath(relative): ast.parse(source, filename=relative)
+            for relative, source in IMPORT_EDGE_CORPUS.items()
+        }
+        return {
+            target.as_posix(): frozenset(item.as_posix() for item in sources)
+            for target, sources in _importers(trees).items()
+        }
+
+    def test_the_full_edge_set_is_exactly_this(self) -> None:
+        """The DIFFERENTIAL assertion: not 'an edge exists/does not exist',
+        but the WHOLE set, through `_importers` itself. Any future change
+        that adds a false edge back, or silently drops a genuine one, moves
+        this dict and fails here.
+        """
+        importers = self.importers()
+        self.assertEqual(
+            importers["app/kernel_runtime.py"],
+            frozenset(
+                {
+                    "app/consumer_static_import.py",
+                    "app/consumer_direct_import_module.py",
+                    "app/consumer_dunder_import.py",
+                    "app/consumer_router_spec_list.py",
+                    "app/consumer_monkeypatch_setattr.py",
+                    "app/consumer_qualified_mock_patch.py",
+                }
+            ),
+            importers["app/kernel_runtime.py"],
+        )
+        self.assertEqual(
+            importers["app/main_module.py"],
+            frozenset(
+                {
+                    "app/consumer_from_import.py",
+                    "app/consumer_router_spec_list.py",
+                }
+            ),
+            importers["app/main_module.py"],
+        )
+        self.assertEqual(
+            importers["example/mailgun_client.py"],
+            frozenset({"app/consumer_registry_wiring.py"}),
+            importers["example/mailgun_client.py"],
+        )
+        self.assertEqual(
+            importers["example/plugins/mailgun_client.py"],
+            frozenset({"app/consumer_assembled_name.py"}),
+            importers["example/plugins/mailgun_client.py"],
+        )
+        self.assertEqual(
+            importers["app/services/job_heartbeat.py"],
+            frozenset({"app/consumer_bare_mock_patch.py"}),
+            importers["app/services/job_heartbeat.py"],
+        )
+        # Every characterization/mention/near-miss file produces NO edge to
+        # ANYTHING — the whole point of the fix.
+        for mention_source in (
+            "readiness/ratchet.py",
+            "governance/freeze_classifier.py",
+            "tests/test_task_routing_expected.py",
+            "app/consumer_monkeypatch_object_form.py",
+            "app/consumer_aliased_import_module.py",
+            "app/consumer_local_wrapper.py",
+        ):
+            for target, sources in importers.items():
+                self.assertNotIn(
+                    mention_source,
+                    sources,
+                    f"{mention_source} must not reach {target}: {sources}",
+                )
+
+    def test_a_real_import_of_the_identical_name_is_an_edge(self) -> None:
+        """Paired plant, half one: a genuine `Import` node."""
+        importers = self.importers()
+        self.assertIn(
+            "app/consumer_static_import.py",
+            importers["app/kernel_runtime.py"],
+        )
+
+    def test_a_characterization_mention_of_the_identical_name_is_not_an_edge(
+        self,
+    ) -> None:
+        """Paired plant, half two: the SAME dotted name, `app.kernel_runtime`,
+        held in a subprocess-probe dict (Academy's shape) rather than
+        imported. Same string, opposite outcome, decided by consumption.
+        """
+        importers = self.importers()
+        self.assertNotIn(
+            "readiness/ratchet.py",
+            importers["app/kernel_runtime.py"],
+        )
+        self.assertNotIn(
+            "readiness/ratchet.py",
+            importers["app/main_module.py"],
+        )
+
+    def test_a_decommission_scanners_exclusion_list_is_not_an_edge(self) -> None:
+        """Sub's PR #3015 shape, paired against a real import of the SAME
+        name below.
+        """
+        importers = self.importers()
+        self.assertNotIn(
+            "governance/freeze_classifier.py",
+            importers.get("crm/scripts/legacy_sync.py", frozenset()),
+        )
+
+    def test_a_direct_dynamic_import_of_the_identical_excluded_name_is_an_edge(
+        self,
+    ) -> None:
+        """Clause 2 is not weakened: a genuine `importlib.import_module(...)`
+        naming the SAME `crm.scripts.legacy_sync` the exclusion list above
+        mentions still bites.
+        """
+        trees = {
+            PurePosixPath("crm/scripts/legacy_sync.py"): ast.parse(
+                "def run() -> None:\n    return None\n"
+            ),
+            PurePosixPath("app/loader.py"): ast.parse(
+                "import importlib\n\n"
+                "importlib.import_module('crm.scripts.legacy_sync')\n"
+            ),
+        }
+        importers = _importers(trees)
+        self.assertIn(
+            PurePosixPath("app/loader.py"),
+            importers[PurePosixPath("crm/scripts/legacy_sync.py")],
+        )
+
+    def test_dunder_import_is_a_recognised_runtime_import_call(self) -> None:
+        call = ast.parse("__import__('x.y')").body[0].value
+        self.assertTrue(_is_runtime_import_call(call))
+
+    def test_a_bare_patch_call_is_a_recognised_runtime_import_call(self) -> None:
+        call = ast.parse("patch('x.y')").body[0].value
+        self.assertTrue(_is_runtime_import_call(call))
+
+    def test_an_arbitrary_local_wrapper_is_not_a_recognised_runtime_import_call(
+        self,
+    ) -> None:
+        call = ast.parse("my_loader('x.y')").body[0].value
+        self.assertFalse(_is_runtime_import_call(call))
+
+    def test_a_three_argument_monkeypatch_setattr_is_not_recognised(self) -> None:
+        """The near-miss that distinguishes an object-patch from an import:
+        arg COUNT, not whether the first argument happens to be a literal.
+        """
+        call = (
+            ast.parse("monkeypatch.setattr(some_object, 'attr', value)").body[0].value
+        )
+        self.assertFalse(_is_runtime_import_call(call))
+
+    def test_a_literal_reaching_no_recognised_call_is_a_mention(self) -> None:
+        tree = ast.parse(
+            "ENTRY = {'boot': 'app.kernel_runtime'}\n\n"
+            "def describe() -> str:\n    return ENTRY['boot']\n"
+        )
+        self.assertEqual(_named_modules(tree), frozenset())
+
+    def test_the_same_literal_traced_through_a_registry_is_dynamic(self) -> None:
+        """The repository's own existing plugin-registry fixture
+        (`test_a_connector_named_by_a_dotted_string_is_reachable`, using
+        `DOTTED_NAME_WIRING`): a dotted name in a dict, reaching
+        `import_module` through one hop of assignment, must stay measured —
+        the classifier is narrowed to consumption, not narrowed past what the
+        suite already relies on.
+        """
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_registry_wiring.py"])
+        self.assertIn("example.mailgun_client", _named_modules(tree))
+
+    def test_an_assembled_f_string_reaching_import_module_is_still_dynamic(
+        self,
+    ) -> None:
+        tree = ast.parse(IMPORT_EDGE_CORPUS["app/consumer_assembled_name.py"])
+        self.assertIn("example.plugins.", _named_packages(tree))
+
+
 # -- Closed untracked-source rule ------------------------------------------
 #
 # A dependency environment is worktree state. Its METADATA and RECORD are

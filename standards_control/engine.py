@@ -5327,23 +5327,38 @@ RUNTIME_IMPORT_CALLEES = frozenset({"import_module", "__import__"})
 DYNAMIC_PATCH_RECEIVERS = frozenset({"monkeypatch", "mocker", "mock"})
 
 
+#: Bare (unqualified) callee names recognised the same way as
+#: `DYNAMIC_PATCH_RECEIVERS`-scoped `.patch(...)` — the overwhelmingly
+#: dominant real-world spelling is `from unittest.mock import patch` followed
+#: by a bare `patch("dotted.path", ...)` call or `@patch("dotted.path")`
+#: decorator, with no receiver to scope on at all. A LOCAL function
+#: coincidentally named `patch` performing something unrelated is the
+#: accepted false-positive cost — clause 2 explicitly prefers measuring more
+#: over silently dropping this idiom, which a corpus differential showed is
+#: the common case, not the rare one.
+BARE_DYNAMIC_PATCH_CALLEES = frozenset({"patch"})
+
+
 def _is_runtime_import_call(node: ast.Call) -> bool:
     """Does this call resolve a string into a module at runtime?
 
     `importlib.import_module(...)`/`__import__(...)` do so directly.
     `monkeypatch.setattr("dotted.path", value)`,
-    `monkeypatch.delattr("dotted.path")`, and `mock.patch("dotted.path",
-    ...)`/`mocker.patch(...)` do so INSIDE pytest's/`unittest.mock`'s own
-    machinery when given a bare dotted-string target — genuinely importing
-    the named module to resolve it, not merely naming it — so they are an
-    equivalent runtime-import call under clause 2. `setattr`/`delattr` are
-    scoped further to the 2-positional-argument, string-first-argument form:
-    a 3-argument `monkeypatch.setattr(obj, "attr", value)` patches an
+    `monkeypatch.delattr("dotted.path")`, `mock.patch("dotted.path",
+    ...)`/`mocker.patch(...)`, and a bare `patch("dotted.path", ...)` (after
+    `from unittest.mock import patch`) do so INSIDE pytest's/`unittest.mock`'s
+    own machinery when given a bare dotted-string target — genuinely
+    importing the named module to resolve it, not merely naming it — so they
+    are an equivalent runtime-import call under clause 2. `setattr`/`delattr`
+    are scoped further to the 2-positional-argument, string-first-argument
+    form: a 3-argument `monkeypatch.setattr(obj, "attr", value)` patches an
     ALREADY-IMPORTED object and performs no import at all.
     """
     func = node.func
     if isinstance(func, ast.Name):
-        return func.id in RUNTIME_IMPORT_CALLEES
+        return (
+            func.id in RUNTIME_IMPORT_CALLEES or func.id in BARE_DYNAMIC_PATCH_CALLEES
+        )
     if not isinstance(func, ast.Attribute):
         return False
     if func.attr in RUNTIME_IMPORT_CALLEES:

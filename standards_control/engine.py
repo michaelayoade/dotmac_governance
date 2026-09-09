@@ -5330,32 +5330,118 @@ def _call_string_arguments(node: ast.Call) -> list[ast.expr]:
     return [*node.args, *(keyword.value for keyword in node.keywords)]
 
 
+def _referenced_names(node: ast.expr) -> frozenset[str]:
+    """Every `Name` this expression subtree reads, however deeply nested."""
+    return frozenset(
+        child.id for child in ast.walk(node) if isinstance(child, ast.Name)
+    )
+
+
+def _assign_bound_names(node: ast.Assign | ast.AnnAssign) -> frozenset[str]:
+    """Every plain `Name` a simple assignment binds.
+
+    Named distinctly from the unrelated `_assigned_names` above (a
+    credential-attribute detector, both declaration styles, `list[str]`) — a
+    coincidental same name would silently shadow it. An `Attribute`/
+    `Subscript` target (`self.x = ...`, `d[k] = ...`) is not a new local
+    binding this syntactic tracer can resolve back to a source, so it
+    contributes nothing here — the taint chain simply stops there rather
+    than guessing.
+    """
+    targets: list[ast.expr] = (
+        list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+    )
+    names: set[str] = set()
+    for target in targets:
+        names |= frozenset(
+            child.id for child in ast.walk(target) if isinstance(child, ast.Name)
+        )
+    return frozenset(names)
+
+
+def _import_fed_names(tree: ast.Module) -> frozenset[str]:
+    """Every `Name` whose value can reach a runtime-import call in this
+    module, traced backward through simple assignment chains to a fixed
+    point.
+
+    `importlib.import_module(module_name)` seeds `module_name`; if
+    `module_name, _, _ = REGISTRY[key].partition(":")` assigns it, `REGISTRY`
+    is pulled in too — one hop of backward taint — because REGISTRY's own
+    string values are what actually reach the import call. This is what lets
+    an ordinarily-shaped plugin registry still register as a dependency when
+    the resolved name passes through a lookup and a `partition` before
+    reaching `import_module`, without treating every dict or list of
+    dotted-looking strings in the module as reaching it: a name earns its way
+    into this set only by provably feeding a real runtime-import call.
+
+    This is a syntactic reader, not a data-flow engine: an assignment through
+    an `Attribute`/`Subscript` target, a function boundary, or any expression
+    shape it does not recognise breaks the chain there rather than guessing
+    past it.
+    """
+    tainted: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_runtime_import_call(node):
+            for argument in _call_string_arguments(node):
+                tainted |= _referenced_names(argument)
+
+    edges: list[tuple[frozenset[str], frozenset[str]]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = _assign_bound_names(node)
+            if targets:
+                edges.append((targets, _referenced_names(node.value)))
+
+    changed = True
+    while changed:
+        changed = False
+        for targets, sources in edges:
+            if targets & tainted and not sources <= tainted:
+                tainted |= sources
+                changed = True
+    return frozenset(tainted)
+
+
+def _dynamic_import_expressions(tree: ast.Module) -> list[ast.expr]:
+    """Every expression this module puts within reach of a runtime import:
+    a runtime-import call's own arguments, plus the right-hand side of any
+    assignment whose target the call's arguments can be traced back to.
+    """
+    expressions: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_runtime_import_call(node):
+            expressions.extend(_call_string_arguments(node))
+    tainted = _import_fed_names(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            if _assign_bound_names(node) & tainted:
+                expressions.append(node.value)
+    return expressions
+
+
 def _named_modules(tree: ast.Module) -> frozenset[str]:
     """Module names this source DYNAMICALLY IMPORTS as a string literal.
 
-    Only a string literal that is itself an argument to a genuine
-    runtime-import call — `importlib.import_module(...)`, `__import__(...)`,
-    or an equivalently named call — is a dependency edge. The same dotted
-    name appearing anywhere else in the source (a dict value, a list
-    element, a module-level constant, a subprocess-probe argument) is a
-    MENTION: an inventory necessarily names the things it inventories, and
+    A dotted name is a dependency edge only when it is provably CONSUMED by a
+    genuine runtime-import call — `importlib.import_module(...)`,
+    `__import__(...)`, an equivalently named call, or a simple local variable
+    traced back to one of those (`_dynamic_import_expressions`). The same
+    dotted name appearing anywhere else in the source — a dict value or list
+    element nothing traces to an import call, a module-level constant used to
+    build a subprocess probe, a baseline/exclusion list — is a MENTION, not a
+    dependency: an inventory necessarily names the things it inventories, and
     reading that naming as reaching them turns every characterization module
     into a false dependency on everything it characterizes.
 
     The `module:attribute` entry-point form is split, so both halves of
-    `"product.integrations.mailgun:build"` are read as naming the module
-    when passed to a runtime-import call.
+    `"product.integrations.mailgun:build"` are read as naming the module.
     """
     names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not _is_runtime_import_call(node):
-            continue
-        for argument in _call_string_arguments(node):
-            if not isinstance(argument, ast.Constant) or not isinstance(
-                argument.value, str
-            ):
+    for expression in _dynamic_import_expressions(tree):
+        for node in ast.walk(expression):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
                 continue
-            candidate = argument.value.split(":", 1)[0].strip()
+            candidate = node.value.split(":", 1)[0].strip()
             if DOTTED_MODULE_NAME.match(candidate):
                 names |= _prefixes(candidate)
     return frozenset(names)
@@ -5367,19 +5453,18 @@ def _named_packages(tree: ast.Module) -> frozenset[str]:
     `importlib.import_module(f"product.integrations.{name}")` reaches a
     module the engine cannot individually identify, so it may not conclude
     that ANY module under that package is unreachable — but only when the
-    assembled string is itself the argument to a genuine runtime-import call.
-    An f-string built for a log line, a file path, or a characterization
-    fixture is not a request to import anything, and the literal head must be
-    a dotted package path: an interpolated URL is not a module reference.
+    assembled string is itself consumed by a genuine runtime-import call (see
+    `_dynamic_import_expressions`). An f-string built for a log line, a file
+    path, or a characterization fixture is not a request to import anything,
+    and the literal head must be a dotted package path: an interpolated URL
+    is not a module reference.
     """
     prefixes: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not _is_runtime_import_call(node):
-            continue
-        for argument in _call_string_arguments(node):
-            if not isinstance(argument, ast.JoinedStr):
+    for expression in _dynamic_import_expressions(tree):
+        for node in ast.walk(expression):
+            if not isinstance(node, ast.JoinedStr):
                 continue
-            for value in argument.values:
+            for value in node.values:
                 if not isinstance(value, ast.Constant) or not isinstance(
                     value.value, str
                 ):

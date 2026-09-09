@@ -6380,6 +6380,24 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
         "    return spec\n"
     ),
+    # The HOISTED variant of the same false-positive shape: `SUFFIX` is a
+    # module-level constant, not an inline literal, so the Constant `.py`
+    # reaches `_named_modules` only by being traced back to through TWO
+    # assignment hops (`stem`, then `SUFFIX`) rather than sitting directly
+    # in the call. `node is expression` alone does not catch this — the
+    # harvested expression IS `Constant('.py')` after tracing, satisfying
+    # identity — only PROVENANCE (never a runtime-import call's own
+    # argument) does. This is the exact reproduction a second review used
+    # to demonstrate the identity-only guard was one variable away from the
+    # same regression.
+    "app/consumer_hoisted_removesuffix_not_a_relative_import.py": (
+        "import importlib.util\n\n"
+        "SUFFIX = '.py'\n\n"
+        "def _load_migration(filename: str):\n"
+        "    stem = filename.removesuffix(SUFFIX)\n"
+        "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
+        "    return spec\n"
+    ),
     # `celery_app.autodiscover_tasks([...])` is a genuine, documented Celery
     # dynamic importer reaching `<package>.tasks` (Celery's own
     # `related_name="tasks"` default), not the bare package name.
@@ -7019,6 +7037,26 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         self.assertEqual(
             self.named_modules(
                 IMPORT_EDGE_CORPUS["app/consumer_removesuffix_not_a_relative_import.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_hoisted_removesuffix_argument_is_not_a_relative_import(self) -> None:
+        """The HOISTED reproduction of the SAME false-positive shape: `SUFFIX
+        = ".py"` at module scope, traced back to through `stem` and reaching
+        `_named_modules` only via `_taint_edges`, not as a runtime-import
+        call's own argument. `node is expression` alone is satisfied here
+        (the harvested expression, after tracing, IS the bare `Constant`)
+        — only PROVENANCE distinguishes this from a genuine direct relative
+        import. This is the exact case a second review used to show the
+        identity-only guard was one variable away from reproducing the
+        regression the inline plant above already fixed.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS[
+                    "app/consumer_hoisted_removesuffix_not_a_relative_import.py"
+                ]
             ),
             frozenset(),
         )

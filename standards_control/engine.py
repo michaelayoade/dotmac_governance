@@ -5512,7 +5512,11 @@ def _taint_edges(
     `_load_router_object(module_name, attr_name)` which calls
     `import_module(module_name)` — without becoming a general interprocedural
     data-flow engine: only a direct call to a function this module itself
-    defines, matched by simple positional position, is followed.
+    defines, matched by simple positional position, is followed. A value
+    passed BY KEYWORD (`_load(module_name=x)`) is NOT traced — matching a
+    keyword to its parameter needs the callee's defaults and `**kwargs`
+    shape resolved too, which this reader does not attempt; a keyword-only
+    caller stops the chain there rather than guessing.
     """
     edges: list[tuple[frozenset[str], frozenset[str], ast.expr]] = []
     for node in ast.walk(tree):
@@ -5629,6 +5633,30 @@ def _named_modules(tree: ast.Module) -> frozenset[str]:
     return frozenset(names)
 
 
+def _leading_constant_concat(node: ast.expr) -> str | None:
+    """The leading literal prefix of a `+`-concatenated string expression,
+    stopping at the first non-constant operand.
+
+    `"pkg." + suffix` and the chained `"pkg." + "sub." + suffix` both resolve
+    to their constant head (`"pkg."`, `"pkg.sub."`); a computed left-hand
+    side (`prefix() + suffix`) resolves to `None` rather than guessing. This
+    is the `BinOp` counterpart of the `JoinedStr` (f-string) handling below —
+    `"pkg." + name` and `f"pkg.{name}"` reach the same module the same way,
+    and treating only one of the two spellings as consumption would be an
+    arbitrary asymmetry.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _leading_constant_concat(node.left)
+        if left is None:
+            return None
+        if isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
+            return left + node.right.value
+        return left
+    return None
+
+
 def _named_packages(tree: ast.Module) -> frozenset[str]:
     """Package prefixes a runtime-import call ASSEMBLES a module name under.
 
@@ -5639,19 +5667,26 @@ def _named_packages(tree: ast.Module) -> frozenset[str]:
     `_dynamic_import_expressions`). An f-string built for a log line, a file
     path, or a characterization fixture is not a request to import anything,
     and the literal head must be a dotted package path: an interpolated URL
-    is not a module reference.
+    is not a module reference. `"product.integrations." + name` reaches the
+    identical package the f-string form does (`_leading_constant_concat`).
     """
     prefixes: set[str] = set()
     for expression in _dynamic_import_expressions(tree):
         for node in ast.walk(expression):
-            if not isinstance(node, ast.JoinedStr):
-                continue
-            for value in node.values:
-                if not isinstance(value, ast.Constant) or not isinstance(
-                    value.value, str
-                ):
+            if isinstance(node, ast.JoinedStr):
+                for value in node.values:
+                    if not isinstance(value, ast.Constant) or not isinstance(
+                        value.value, str
+                    ):
+                        continue
+                    head = value.value.split(":", 1)[0]
+                    if DOTTED_PACKAGE_PREFIX.match(head):
+                        prefixes.add(head)
+            elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                concatenated = _leading_constant_concat(node)
+                if concatenated is None:
                     continue
-                head = value.value.split(":", 1)[0]
+                head = concatenated.split(":", 1)[0]
                 if DOTTED_PACKAGE_PREFIX.match(head):
                     prefixes.add(head)
     return frozenset(prefixes)

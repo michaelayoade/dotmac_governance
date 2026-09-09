@@ -5744,6 +5744,19 @@ def _taint_edges(
     matching a keyword to its parameter needs the callee's defaults and
     `**kwargs` shape resolved too, which this reader does not attempt; a
     keyword-only caller stops the chain there rather than guessing.
+
+    A function reference passed AS DATA to a higher-order caller —
+    `asyncio.to_thread(_load_router_object, module_name, attr_name)`,
+    `executor.submit(fn, *args)`, `Thread(target=fn, args=(...))` — is
+    likewise NOT followed: `_load_router_object` there is an ARGUMENT, not
+    the call's own `func`, so this mechanism's `isinstance(node.func,
+    ast.Name)` gate never sees it. A real corpus confirmed this drops a
+    genuine edge (`app/main.py`'s deferred-router loader). This is a
+    DECIDABLE, BOUNDED extension — recognise a short list of forwarding
+    callees and shift the argument-to-parameter mapping by the forwarded
+    function's own position — that remains UNIMPLEMENTED, not a claim that
+    it cannot be done; it is named here as an open gap rather than silently
+    dropped.
     """
     edges: list[tuple[frozenset[ScopedName], frozenset[ScopedName], ast.expr]] = []
     for node in ast.walk(tree):

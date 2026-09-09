@@ -6398,6 +6398,41 @@ IMPORT_EDGE_CORPUS: dict[str, str] = {
         "    spec = importlib.util.spec_from_file_location(stem, filename)\n"
         "    return spec\n"
     ),
+    # A-2 regression plant: `_function_scopes` opens a scope for `ast.
+    # Lambda`, but if `_scope_bound_names` ever again collected parameters
+    # for `FunctionDef`/`AsyncFunctionDef` only, the lambda's OWN parameter
+    # `module_name` would fall back to MODULE scope — the SAME scope the
+    # unrelated module-level `module_name` below lives in — and this file's
+    # `import_module(module_name)` (a real, non-vacuous runtime-import call,
+    # seeded directly from inside the lambda body) would sweep
+    # `app.legacy.decommissioned` in as a false edge, reproducing the exact
+    # finding-5 name-coincidence class one scope-kind over. A `FunctionDef`
+    # fixture cannot catch this: the asymmetry WAS `Lambda` behaving
+    # differently from `FunctionDef`.
+    "app/consumer_lambda_parameter_scope.py": (
+        "import importlib\n\n"
+        "module_name = 'app.legacy.decommissioned'\n\n"
+        "load = lambda module_name: importlib.import_module(module_name)\n"
+    ),
+    # B-1 regression plant: if the forwarded-call branch in `_taint_edges`
+    # ever again resolved `reference.id` through `aliases` BEFORE the local
+    # `functions` lookup, `loader` (aliased from a DIFFERENT module's
+    # `_load`) would incorrectly resolve to THIS file's own local `def
+    # _load`, which genuinely reaches `import_module` — a real,
+    # non-vacuous seed — and the forwarded `'app.kernel_runtime'` argument
+    # would be wrongly connected to it. This is the ONLY exercise alias
+    # resolution has anywhere: the independent audit found zero real-corpus
+    # edges attributable to it, so if this regresses, nothing else in this
+    # repository notices.
+    "app/consumer_forwarded_alias_shadow.py": (
+        "import asyncio\n"
+        "from vendor.helpers import _load as loader\n"
+        "from importlib import import_module\n\n"
+        "def _load(module_name: str) -> object:\n"
+        "    return import_module(module_name)\n\n"
+        "async def trigger() -> object:\n"
+        "    return await asyncio.to_thread(loader, 'app.kernel_runtime')\n"
+    ),
     # `celery_app.autodiscover_tasks([...])` is a genuine, documented Celery
     # dynamic importer reaching `<package>.tasks` (Celery's own
     # `related_name="tasks"` default), not the bare package name.
@@ -6961,6 +6996,45 @@ class ImportEdgeClassificationTests(unittest.TestCase):
         )
         self.assertIn("app.kernel_runtime", modules)
         self.assertNotIn("app.legacy.decommissioned", modules)
+
+    def test_a_lambda_parameter_does_not_fall_back_to_module_scope(self) -> None:
+        """A-2 regression proof: `_scope_bound_names` must bind an
+        `ast.Lambda`'s OWN parameters, matching `_function_scopes` already
+        opening a scope for `Lambda`. If it did not, the lambda's `module_
+        name` parameter would fall back to MODULE scope — the SAME scope as
+        the unrelated top-level `module_name = "app.legacy.decommissioned"`
+        — and the lambda's own `import_module(module_name)` (a real,
+        non-vacuous seed) would sweep it in as a false edge. Verified
+        directly to reproduce under a `_scope_bound_names` that excludes
+        `Lambda` (the exact shape of the historical bug), so this assertion
+        is not merely consistent with the fix by coincidence.
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_lambda_parameter_scope.py"]
+            ),
+            frozenset(),
+        )
+
+    def test_forwarded_alias_does_not_shadow_a_local_function(self) -> None:
+        """B-1 regression proof: the forwarded-call branch in `_taint_edges`
+        must NOT resolve `reference.id` through `aliases` before the local
+        `functions` lookup — `aliases` maps a name to something DEFINED
+        ELSEWHERE, while `functions` is keyed by LOCAL `def` names. `loader`
+        (aliased from a different module's `_load`) must not match THIS
+        file's own local `def _load`, which genuinely reaches `import_
+        module` (a real, non-vacuous seed) via `asyncio.to_thread(loader,
+        'app.kernel_runtime')`. This is the ONLY exercise alias resolution
+        has anywhere in this suite or in the measured corpora — verified
+        directly to reproduce the false edge under a `_taint_edges` that
+        resolves the alias first (the exact shape of the historical bug).
+        """
+        self.assertEqual(
+            self.named_modules(
+                IMPORT_EDGE_CORPUS["app/consumer_forwarded_alias_shadow.py"]
+            ),
+            frozenset(),
+        )
 
     def test_a_function_forwarded_to_asyncio_to_thread_is_still_traced(self) -> None:
         """A function reference passed AS DATA to `asyncio.to_thread(fn,

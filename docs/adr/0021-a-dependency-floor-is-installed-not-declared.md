@@ -1030,3 +1030,143 @@ because ADR 0034's sentence remains true as written — it says what ITS accepta
 did not change, and a separate ruling changed this record's status. A reader
 meeting either should read them as dated, and this section as the current
 status.
+
+## Proposed amendment — 2026-09-17: measured floor and admitted repair pin
+
+**Status of this amendment: Proposed.** It is a draft for Michael Ayoade's
+required review. It does not change this ADR's accepted status, does not claim
+Governance approval, and authorizes neither a dependency change nor a
+deployment while it remains proposed.
+
+### Context
+
+The equality in § 10 correctly prevents an assembly from treating a newer
+kernel as compatible merely because its resolver accepts a `>=` range. It does
+not, by itself, describe the narrow case in which an independently verified
+repair artefact must be admitted above the measured compatibility floor.
+
+The proposed instance is `dotmac_platform_control_plane`'s clean-wheel
+`create_app` import defect: without product DSNs, `PYTHONPATH`, or the
+product-owned `psycopg` driver, the import
+`from dotmac_kernel.app_factory import create_app` fails on Kernel
+`0.1.0a100` with SQLAlchemy `ArgumentError` from eager reference-runtime URL
+parsing. With a DSN set but no driver, the same eager path instead fails with
+`ModuleNotFoundError: psycopg`. Kernel `0.1.0a101` defers the reference
+resolver import so the no-DSN/no-driver symbol import can succeed. The measured
+floor is exactly `dotmac-kernel ==0.1.0a100`, while the proposed repair
+admission is exactly the published `dotmac-kernel ==0.1.0a101` artefact.
+`a100` remains the compatibility measurement; `a101` is not silently promoted
+into a new floor, a new lower bound, or evidence that all later kernels are
+compatible.
+
+This proposed `a101` exception ends when Platform CP returns to exact equality
+with its measured floor, or when a separately approved exact repair record
+replaces it. It must be re-evaluated at every Platform CP Kernel repin. That
+retirement condition is a proposed review rule, not an approval, admission, or
+claim that Platform CP has deployed either version.
+
+For this proposed example, the published `a101` receipt is recorded in
+`dotmac_starter_mt` protected `main` at
+`docs/inventories/kernel-release-verifications/0.1.0a101.json`, introduced by
+commit `9d2df7215da6bef5f5c9afdbab86831616db8fe8`. It identifies wheel SHA-256
+`9145716dadd08423421d08483f6a9ff4de47d6d94ef4bcf16e29edcca008c569`, source
+commit `037ef065376c0ad4597cc59f86f4ef3eb7d5322b`, and independent verifier run
+`33714838596`. This is a factual receipt coordinate for the proposed example,
+not an assertion that Platform CP has deployed or adopted the repair.
+
+The historical `a100` negative observation is hosted run `33513594292`
+(`kernel-a100-arbitration`), recorded in Platform CP's dated a100 assessment.
+It records both the no-DSN `ArgumentError` and the DSN-set missing-`psycopg`
+failure for this import. The required pair uses the no-DSN condition. The `a101`
+release verifier run above installs and imports with product DSNs set; it does
+**not** prove this defect is repaired with those DSNs absent. No paired hosted
+`a101` positive coordinate is recorded here yet. Approval of this amendment
+would establish only a conditional rule; Platform CP must cite immutable,
+addressable a100-negative and a101-positive clean-wheel run evidence for the
+same import and exact wheels before the exception can be activated.
+
+### Decision
+
+If approved, the following narrowly amends § 10's equality rule.
+
+Only `dotmac_platform_control_plane` may use this proposed exception, and only
+for `dotmac-kernel ==0.1.0a101` above its independently measured
+`0.1.0a100` floor to repair the clean-wheel `create_app` defect named above.
+Any later or different over-floor repair requires its own separately proposed
+and approved Governance ADR amendment; this one creates no standing exception
+mechanism for another assembly, dependency, or Kernel version.
+
+The admission is an exception for one exact artefact, not a change from exact
+pins to ranges: every admitted repair remains `==` its named version. This
+amendment must not be read to relax any dependency declaration to `>=`, to
+permit an unbounded upgrade, or to alter the original derivation of the
+measured floor.
+
+Before the repair is admitted, the record must cite an immutable published
+artefact coordinate and receipt for that exact admitted artefact. A branch
+name, tag, mutable index result, source checkout, lockfile text, or deployment
+claim is not a substitute. The receipt establishes which published bytes were
+examined; it does not infer that any product has deployed or adopted them.
+Approval of this conditional policy is not itself a repair admission.
+
+The proof has two distinct clean-wheel runs, under an environment with no
+product driver and no product DSNs:
+
+- the **negative** run installs the exact measured-floor wheel and reproduces
+  the named defect on the relevant Kernel path;
+- the **positive** run installs the exact admitted-repair wheel and proves
+  that the same path succeeds.
+
+Both runs use published wheels rather than a source tree, identify the exact
+wheel artefact they install, and exercise the same narrowly named defect path.
+For the current proposed exception, those are separately an `a100`-negative
+run and an `a101`-positive run. The positive run is not evidence of a changed
+measured floor; the negative run remains the control preserving `a100` as the
+floor.
+
+The source-side and artefact-side verifier split in § 10.2 remains in force.
+The source-side derivation continues to derive the floor from the assembly and
+composed artefacts. A separate verifier reads the immutable repair artefact and
+its receipt; it must not rebuild it, substitute a fresh resolution for the
+named repair distribution, or infer deployment from a successful clean-wheel
+run. The probe does not claim transitive dependencies resolved for its
+clean-wheel environment as release-byte provenance; the exact named repair
+wheel and its receipt remain the immutable subject of this evidence.
+
+### Consequences
+
+If approved, a review can distinguish two facts that must not be conflated:
+the oldest compatible Kernel measured by the floor lane (`a100`), and the one
+independently verified repair artefact (`a101`) eligible for later admission
+only after the same-condition clean-wheel proof is recorded. A later repair
+needs its own separately approved Governance ADR amendment; it cannot inherit
+this exception by version ordering or resolver compatibility.
+
+### Drift prevention
+
+No Governance check is created by this proposed amendment. Until a named human
+approves it through the controlled workflow, it is non-normative and may not be
+cited as an authorization. Even after approval, Platform CP may use this
+exception only when the immutable artefact receipt and separate
+`a100`-negative/`a101`-positive clean-wheel run coordinates are recorded and
+addressable. Missing evidence, a changed exact version, a product driver or
+DSN in either run, a rebuilt verifier subject, or a claim of deployment
+inferred from these checks refuses admission; none is evidence of cutover.
+
+## Acceptance of the conditional repair-pin amendment — 2026-09-17
+
+Michael Ayoade approved this conditional amendment and authorised merging
+Governance PR #88. His reply was "merge it" to the explicit question asking
+whether he approved the conditional ADR-0021 amendment and authorised its
+acceptance note and merge after green CI. This is his approval decision; this
+agent-written note records it and does not place an agent in the approver role.
+The rule becomes effective only when this accepted revision is merged to
+`main`, as ADR-0001 requires.
+
+The "Proposed" status in the dated drafting section above records its status
+*before* this decision; it is retained as history, not a competing current
+status. Michael's approval is limited to Platform CP's exact Kernel `a101`
+repair above the independently measured `a100` compatibility floor. It does
+not provide the still-missing same-condition `a101`-positive clean-wheel run,
+activate the CP exception, change the CP standards pin, authorise deployment,
+or retire any writer. Those gates remain separate and fail closed.

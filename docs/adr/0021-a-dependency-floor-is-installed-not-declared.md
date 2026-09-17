@@ -1152,3 +1152,21 @@ exception only when the immutable artefact receipt and separate
 addressable. Missing evidence, a changed exact version, a product driver or
 DSN in either run, a rebuilt verifier subject, or a claim of deployment
 inferred from these checks refuses admission; none is evidence of cutover.
+
+## Acceptance of the conditional repair-pin amendment — 2026-09-17
+
+Michael Ayoade approved this conditional amendment and authorised merging
+Governance PR #88. His reply was "merge it" to the explicit question asking
+whether he approved the conditional ADR-0021 amendment and authorised its
+acceptance note and merge after green CI. This is his approval decision; this
+agent-written note records it and does not place an agent in the approver role.
+The rule becomes effective only when this accepted revision is merged to
+`main`, as ADR-0001 requires.
+
+The "Proposed" status in the dated drafting section above records its status
+*before* this decision; it is retained as history, not a competing current
+status. Michael's approval is limited to Platform CP's exact Kernel `a101`
+repair above the independently measured `a100` compatibility floor. It does
+not provide the still-missing same-condition `a101`-positive clean-wheel run,
+activate the CP exception, change the CP standards pin, authorise deployment,
+or retire any writer. Those gates remain separate and fail closed.

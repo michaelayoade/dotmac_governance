@@ -1030,3 +1030,108 @@ because ADR 0034's sentence remains true as written — it says what ITS accepta
 did not change, and a separate ruling changed this record's status. A reader
 meeting either should read them as dated, and this section as the current
 status.
+
+## Proposed amendment — 2026-09-17: measured floor and admitted repair pin
+
+**Status of this amendment: Proposed.** It is a draft for Michael Ayoade's
+required review. It does not change this ADR's accepted status, does not claim
+Governance approval, and authorizes neither a dependency change nor a
+deployment while it remains proposed.
+
+### Context
+
+The equality in § 10 correctly prevents an assembly from treating a newer
+kernel as compatible merely because its resolver accepts a `>=` range. It does
+not, by itself, describe the narrow case in which an independently verified
+repair artefact must be admitted above the measured compatibility floor.
+
+The proposed instance is `dotmac_platform_control_plane`'s Kernel defect:
+the measured floor is exactly `dotmac-kernel ==0.1.0a100`, while the proposed
+repair admission is exactly the published `dotmac-kernel ==0.1.0a101` artefact.
+`a100` remains the compatibility measurement; `a101` is not silently promoted
+into a new floor, a new lower bound, or evidence that all later kernels are
+compatible.
+
+This proposed `a101` exception ends when Platform CP returns to exact equality
+with its measured floor, or when a separately approved exact repair record
+replaces it. It must be re-evaluated at every Platform CP Kernel repin. That
+retirement condition is a proposed review rule, not an approval, admission, or
+claim that Platform CP has deployed either version.
+
+For this proposed example, the published `a101` receipt is recorded in
+`dotmac_starter_mt` protected `main` at
+`docs/inventories/kernel-release-verifications/0.1.0a101.json`, introduced by
+commit `9d2df7215da6bef5f5c9afdbab86831616db8fe8`. It identifies wheel SHA-256
+`9145716dadd08423421d08483f6a9ff4de47d6d94ef4bcf16e29edcca008c569`, source
+commit `037ef065376c0ad4597cc59f86f4ef3eb7d5322b`, and independent verifier run
+`33714838596`. This is a factual receipt coordinate for the proposed example,
+not an assertion that Platform CP has deployed or adopted the repair.
+
+### Decision
+
+If approved, the following narrowly amends § 10's equality rule.
+
+An assembly may admit an exact repair pin above its measured compatibility
+floor only when either:
+
+- it is this named `dotmac-kernel ==0.1.0a101` repair for the named
+  `dotmac_platform_control_plane` defect above; or
+- a separately named repair record has been explicitly approved by the named
+  human authority for that assembly and names the affected assembly, exact
+  dependency version, defect, measured floor, expiry or retirement condition,
+  and required evidence.
+
+The admission is an exception for one exact artefact, not a change from exact
+pins to ranges: every admitted repair remains `==` its named version. This
+amendment must not be read to relax any dependency declaration to `>=`, to
+permit an unbounded upgrade, or to alter the original derivation of the
+measured floor.
+
+Before the repair is admitted, the record must cite an immutable published
+artefact coordinate and receipt for that exact admitted artefact. A branch
+name, tag, mutable index result, source checkout, lockfile text, or deployment
+claim is not a substitute. The receipt establishes which published bytes were
+examined; it does not infer that any product has deployed or adopted them.
+
+The proof has two distinct clean-wheel runs, under an environment with no
+product driver and no product DSNs:
+
+- the **negative** run installs the exact measured-floor wheel and reproduces
+  the named defect on the relevant Kernel path;
+- the **positive** run installs the exact admitted-repair wheel and proves
+  that the same path succeeds.
+
+Both runs use published wheels rather than a source tree, identify the exact
+wheel artefact they install, and exercise the same narrowly named defect path.
+For the current proposed exception, those are separately an `a100`-negative
+run and an `a101`-positive run. The positive run is not evidence of a changed
+measured floor; the negative run remains the control preserving `a100` as the
+floor.
+
+The source-side and artefact-side verifier split in § 10.2 remains in force.
+The source-side derivation continues to derive the floor from the assembly and
+composed artefacts. A separate verifier reads the immutable repair artefact and
+its receipt; it must not rebuild it, substitute a fresh resolution for the
+named repair distribution, or infer deployment from a successful clean-wheel
+run. The probe does not claim transitive dependencies resolved for its
+clean-wheel environment as release-byte provenance; the exact named repair
+wheel and its receipt remain the immutable subject of this evidence.
+
+### Consequences
+
+If approved, a review can distinguish two facts that must not be conflated:
+the oldest compatible Kernel measured by the floor lane (`a100`), and the one
+independently verified repair artefact admitted for a named defect (`a101`). A
+later repair needs its own named approved repair record; it cannot inherit this
+exception by version ordering or resolver compatibility.
+
+### Drift prevention
+
+No Governance check is created by this proposed amendment. Until a named human
+approves it through the controlled workflow, it is non-normative and may not be
+cited as an authorization. If approved, its evidence remains reviewable only
+when the immutable artefact receipt, the separate `a100`-negative and
+`a101`-positive clean-wheel results, and the named repair record remain
+addressable. Missing evidence, a changed exact version, a product driver or
+DSN in either clean-wheel run, a rebuilt verifier subject, or a claim of
+deployment inferred from these checks is a finding, not an admission.

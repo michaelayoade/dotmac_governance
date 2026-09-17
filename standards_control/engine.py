@@ -5943,7 +5943,7 @@ def _taint_edges(
         call_scope: ast.AST,
     ) -> None:
         parameters = _positional_parameter_names(function)
-        for parameter, argument in zip(parameters, forwarded_args):
+        for parameter, argument in zip(parameters, forwarded_args, strict=False):
             edges.append(
                 (
                     frozenset({(id(function), parameter)}),

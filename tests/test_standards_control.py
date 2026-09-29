@@ -5780,14 +5780,74 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
     SOURCE_REPOSITORY = CanonicalRepository(
         "https://github.com/michaelayoade/dotmac_starter_mt"
     )
+    ERP_REPOSITORY = CanonicalRepository("https://github.com/michaelayoade/dotmac_erp")
     AUTHORITY_PATH = "policies/external-connector-runtime-authority.json"
+
+    @staticmethod
+    def traccar_engine() -> dict[str, object]:
+        return {
+            "authorization_id": "dotmac-erp-traccar",
+            "product_repository": ("https://github.com/michaelayoade/dotmac_erp"),
+            "engine_id": "traccar",
+            "runtime_role": "app",
+            "client_path": "app/services/fleet/tracking/traccar_client.py",
+            "client_symbol": "TraccarClient",
+            "service_path": "app/services/fleet/tracking/traccar_service.py",
+            "service_symbol": "FleetTrackingService",
+            "private_network": "dotmac_traccar_api",
+            "endpoint": "http://traccar:8082",
+            "public_device_ingress": "tcp/5001",
+            "private_ports": ["tcp/8082", "tcp/5432"],
+            "secret_path": "secret/data/dotmac/traccar/erp-service",
+            "secret_capabilities": ["read"],
+            "user_facing": False,
+            "browser_access": False,
+            "rbac_authority": "erp",
+            "failure_scope": "fleet-tracking",
+            "product_data": [
+                "vehicles",
+                "drivers-employees",
+                "vehicle-tracker-mapping",
+                "fleet-rbac",
+                "business-workflow",
+            ],
+            "engine_data": [
+                "gps-protocol-handling",
+                "raw-positions",
+                "telemetry",
+                "gps-history",
+                "raw-tracker-events",
+            ],
+        }
 
     @staticmethod
     def authority() -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "runtime_host": ConnectorRuntimeAuthorityTests.RUNTIME_HOST,
             "source_repositories": [ConnectorRuntimeAuthorityTests.SOURCE_REPOSITORY],
+            "co_deployed_internal_engines": [
+                ConnectorRuntimeAuthorityTests.traccar_engine()
+            ],
+        }
+
+    @staticmethod
+    def traccar_sources() -> dict[str, str]:
+        return {
+            "app/services/fleet/tracking/traccar_client.py": (
+                "import httpx\n\n"
+                "class TraccarClient:\n"
+                "    def server(self) -> object:\n"
+                "        return httpx.get("
+                "'http://traccar:8082/api/server')\n"
+            ),
+            "app/services/fleet/tracking/traccar_service.py": (
+                "from app.services.fleet.tracking.traccar_client "
+                "import TraccarClient\n\n"
+                "class FleetTrackingService:\n"
+                "    def __init__(self, client: TraccarClient) -> None:\n"
+                "        self.client = client\n"
+            ),
         }
 
     @staticmethod
@@ -6108,19 +6168,22 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
         cases = (
             {},
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "runtime_host": self.RUNTIME_HOST,
                 "source_repositories": [self.SOURCE_REPOSITORY],
+                "co_deployed_internal_engines": [],
             },
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "runtime_host": "not-a-url",
                 "source_repositories": [self.SOURCE_REPOSITORY],
+                "co_deployed_internal_engines": [],
             },
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "runtime_host": self.RUNTIME_HOST,
                 "source_repositories": [self.RUNTIME_HOST],
+                "co_deployed_internal_engines": [],
             },
         )
         for authority in cases:
@@ -6132,9 +6195,218 @@ class ConnectorRuntimeAuthorityTests(unittest.TestCase):
                     report.to_dict(),
                 )
 
-    def test_the_checked_in_authority_names_one_host_and_one_source(self) -> None:
+    def test_traccar_is_admitted_only_through_its_domain_service(self) -> None:
+        report = self.report(
+            repository=self.ERP_REPOSITORY,
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=self.traccar_sources(),
+        )
+        codes = self.codes(report)
+        self.assertIn(DiagnosticCode.INTERNAL_ENGINE_AUTHORIZED, codes)
+        self.assertNotIn(DiagnosticCode.INTERNAL_ENGINE_BOUNDARY_INVALID, codes)
+        self.assertNotIn(DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN, codes)
+        self.assertNotIn(DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED, codes)
+
+    def test_an_arbitrary_module_cannot_consume_the_traccar_client(self) -> None:
+        sources = self.traccar_sources()
+        sources["app/arbitrary.py"] = (
+            "from app.services.fleet.tracking.traccar_client "
+            "import TraccarClient\n\n"
+            "client = TraccarClient()\n"
+        )
+        report = self.report(
+            repository=self.ERP_REPOSITORY,
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=sources,
+        )
+        self.assertIn(
+            DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_a_browser_cannot_call_the_internal_traccar_endpoint(self) -> None:
+        sources = self.traccar_sources()
+        sources["static/traccar.js"] = "fetch('http://traccar:8082/api/devices')\n"
+        report = self.report(
+            repository=self.ERP_REPOSITORY,
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=sources,
+        )
+        self.assertIn(
+            DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_the_traccar_client_cannot_call_a_public_provider(self) -> None:
+        sources = self.traccar_sources()
+        sources["app/services/fleet/tracking/traccar_client.py"] += (
+            "\ndef escape() -> object:\n"
+            "    return httpx.get('https://api.provider.example/v1')\n"
+        )
+        report = self.report(
+            repository=self.ERP_REPOSITORY,
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=sources,
+        )
+        self.assertIn(
+            DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_other_public_provider_code_remains_connector_debt(self) -> None:
+        sources = self.traccar_sources()
+        sources["app/provider.py"] = PLANTED_HTTP_TRANSPORT
+        report = self.report(
+            repository=self.ERP_REPOSITORY,
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=sources,
+        )
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_another_product_cannot_claim_the_traccar_grant(self) -> None:
+        report = self.report(
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=self.traccar_sources(),
+        )
+        self.assertNotIn(
+            DiagnosticCode.INTERNAL_ENGINE_AUTHORIZED,
+            self.codes(report),
+            report.to_dict(),
+        )
+        self.assertIn(
+            DiagnosticCode.CONNECTOR_BASELINE_EXCEEDED,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_traccar_api_and_database_ports_cannot_be_public(self) -> None:
+        for port in (8082, 5432):
+            with self.subTest(port=port):
+                sources = self.traccar_sources()
+                sources["deploy/traccar/compose.yml"] = (
+                    f'services:\n  traccar:\n    ports:\n      - "{port}:{port}"\n'
+                )
+                report = self.report(
+                    repository=self.ERP_REPOSITORY,
+                    lock=self.lock(),
+                    authority=self.authority(),
+                    extra=sources,
+                )
+                self.assertIn(
+                    DiagnosticCode.INTERNAL_ENGINE_EXPOSURE_FORBIDDEN,
+                    self.codes(report),
+                    report.to_dict(),
+                )
+
+    def test_loopback_traccar_api_binding_is_not_public(self) -> None:
+        sources = self.traccar_sources()
+        sources["deploy/traccar/compose.yml"] = (
+            'services:\n  traccar:\n    ports:\n      - "127.0.0.1:8082:8082"\n'
+        )
+        report = self.report(
+            repository=self.ERP_REPOSITORY,
+            lock=self.lock(),
+            authority=self.authority(),
+            extra=sources,
+        )
+        self.assertNotIn(
+            DiagnosticCode.INTERNAL_ENGINE_EXPOSURE_FORBIDDEN,
+            self.codes(report),
+            report.to_dict(),
+        )
+
+    def test_long_syntax_and_ipv6_wildcards_are_public(self) -> None:
+        bindings = (
+            '      - "[::]:8082:8082"\n',
+            "      - target: 5432\n"
+            '        published: "5432"\n'
+            "        host_ip: 0.0.0.0\n",
+        )
+        for binding in bindings:
+            with self.subTest(binding=binding):
+                sources = self.traccar_sources()
+                sources["deploy/traccar/compose.yml"] = (
+                    f"services:\n  traccar:\n    ports:\n{binding}"
+                )
+                report = self.report(
+                    repository=self.ERP_REPOSITORY,
+                    lock=self.lock(),
+                    authority=self.authority(),
+                    extra=sources,
+                )
+                self.assertIn(
+                    DiagnosticCode.INTERNAL_ENGINE_EXPOSURE_FORBIDDEN,
+                    self.codes(report),
+                    report.to_dict(),
+                )
+
+    def test_internal_engine_authority_refuses_broad_coordinates(self) -> None:
+        mutations: tuple[tuple[str, object], ...] = (
+            ("runtime_role", "worker"),
+            ("client_path", "app/**/*.py"),
+            ("endpoint", "https://api.provider.example"),
+            ("private_network", "*"),
+            ("private_ports", ["tcp/5432"]),
+            ("secret_path", "secret/data/dotmac/*"),
+            ("secret_capabilities", ["read", "list"]),
+            ("secret_capabilities", ["create"]),
+            ("user_facing", True),
+            ("browser_access", True),
+            ("rbac_authority", "traccar"),
+        )
+        for key, replacement in mutations:
+            with self.subTest(key=key, replacement=replacement):
+                authority = copy.deepcopy(self.authority())
+                engines = authority["co_deployed_internal_engines"]
+                assert isinstance(engines, list)
+                engine = engines[0]
+                assert isinstance(engine, dict)
+                engine[key] = replacement
+                report = self.report(lock=self.lock(), authority=authority)
+                self.assertIn(
+                    DiagnosticCode.CONNECTOR_RUNTIME_AUTHORITY_UNAVAILABLE,
+                    self.codes(report),
+                    report.to_dict(),
+                )
+
+    def test_checked_in_authority_is_exact_and_read_only(self) -> None:
         actual = json.loads((ROOT / self.AUTHORITY_PATH).read_text(encoding="utf-8"))
         self.assertEqual(actual, self.authority())
+        engines = actual["co_deployed_internal_engines"]
+        self.assertEqual(len(engines), 1)
+        grant = engines[0]
+        self.assertEqual(grant["private_network"], "dotmac_traccar_api")
+        self.assertEqual(grant["endpoint"], "http://traccar:8082")
+        self.assertEqual(grant["public_device_ingress"], "tcp/5001")
+        self.assertEqual(grant["private_ports"], ["tcp/8082", "tcp/5432"])
+        self.assertEqual(grant["secret_path"], "secret/data/dotmac/traccar/erp-service")
+        self.assertEqual(grant["secret_capabilities"], ["read"])
+        granted_secret_permissions = {
+            (grant["secret_path"], capability)
+            for capability in grant["secret_capabilities"]
+        }
+        self.assertNotIn(
+            ("secret/data/dotmac/other-service", "read"),
+            granted_secret_permissions,
+        )
+        for forbidden in ("create", "update", "delete", "list", "sudo"):
+            self.assertNotIn(
+                ("secret/data/dotmac/traccar/erp-service", forbidden),
+                granted_secret_permissions,
+            )
 
 
 # -- Import-edge classification: consumption, not string-matching -----------

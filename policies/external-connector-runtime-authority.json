@@ -1,7 +1,43 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "runtime_host": "https://github.com/michaelayoade/dotmac_integrator",
   "source_repositories": [
     "https://github.com/michaelayoade/dotmac_starter_mt"
+  ],
+  "co_deployed_internal_engines": [
+    {
+      "authorization_id": "dotmac-erp-traccar",
+      "product_repository": "https://github.com/michaelayoade/dotmac_erp",
+      "engine_id": "traccar",
+      "runtime_role": "app",
+      "client_path": "app/services/fleet/tracking/traccar_client.py",
+      "client_symbol": "TraccarClient",
+      "service_path": "app/services/fleet/tracking/traccar_service.py",
+      "service_symbol": "FleetTrackingService",
+      "private_network": "dotmac_traccar_api",
+      "endpoint": "http://traccar:8082",
+      "public_device_ingress": "tcp/5001",
+      "private_ports": ["tcp/8082", "tcp/5432"],
+      "secret_path": "secret/data/dotmac/traccar/erp-service",
+      "secret_capabilities": ["read"],
+      "user_facing": false,
+      "browser_access": false,
+      "rbac_authority": "erp",
+      "failure_scope": "fleet-tracking",
+      "product_data": [
+        "vehicles",
+        "drivers-employees",
+        "vehicle-tracker-mapping",
+        "fleet-rbac",
+        "business-workflow"
+      ],
+      "engine_data": [
+        "gps-protocol-handling",
+        "raw-positions",
+        "telemetry",
+        "gps-history",
+        "raw-tracker-events"
+      ]
+    }
   ]
 }

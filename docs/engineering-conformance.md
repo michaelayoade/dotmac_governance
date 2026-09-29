@@ -160,6 +160,40 @@ entry, not only direct `pyproject.toml` dependencies, so a transitive
 connector fails too. A missing/malformed authority or lock fails closed.
 Product-authored copies of the authority file are ignored.
 
+### Co-deployed internal engines (ADR 0045, PROPOSED)
+
+ADR 0045 proposes one narrow classification outside the external-provider
+model. A co-deployed internal engine must be lifecycle-managed with its
+product, non-user-facing, private-network-only, consumed through one
+product-owned domain service, invisible to browsers, governed by product RBAC,
+limited to technical engine data, and isolated to feature-level degradation.
+Calling a service `internal` proves none of those conditions.
+
+The classification is not a product profile option. Every grant is an exact
+Governance-owned entry in
+`policies/external-connector-runtime-authority.json`; patterns and
+product-authored copies are refused. The one proposed entry admits only:
+
+```
+dotmac_erp app role
+  -> FleetTrackingService -> TraccarClient
+  -> dotmac_traccar_api -> http://traccar:8082
+```
+
+TCP/5001 is device ingress. TCP/8082 and TCP/5432 are private, and a browser
+may not reach Traccar. The ERP runtime grant is exactly `read` on
+`secret/data/dotmac/traccar/erp-service`; it conveys no list, write,
+administration or sibling-secret authority. ERP owns vehicles,
+drivers/employees, tracker mappings, Fleet RBAC and business workflow. Traccar
+owns protocol handling, raw positions, telemetry, GPS history and raw tracker
+events.
+
+This proposal does not change the Integrator requirement for third-party SaaS,
+independently hosted or public APIs, messaging, calendars, payments or any
+other trust-boundary crossing. Until ADR 0045 is accepted on canonical `main`
+and the product pins that immutable revision, the internal-engine grant is not
+an operative authority.
+
 **What a green run means, and the three things it does not.** This family
 INVENTORIES AND FREEZES the direct connector surfaces a product still holds
 while it migrates them behind the Integrator. A green run is evidence that the

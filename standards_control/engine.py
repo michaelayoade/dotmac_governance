@@ -70,6 +70,30 @@ CONNECTOR_DISTRIBUTION_PREFIX = "dotmac-connector-"
 class _ConnectorRuntimeAuthority(NamedTuple):
     runtime_host: CanonicalRepository
     source_repositories: frozenset[CanonicalRepository]
+    co_deployed_internal_engines: tuple[_InternalEngineAuthorization, ...]
+
+
+class _InternalEngineAuthorization(NamedTuple):
+    authorization_id: str
+    product_repository: CanonicalRepository
+    engine_id: str
+    runtime_role: str
+    client_path: PurePosixPath
+    client_symbol: str
+    service_path: PurePosixPath
+    service_symbol: str
+    private_network: str
+    endpoint: str
+    public_device_ingress: str
+    private_ports: tuple[str, ...]
+    secret_path: str
+    secret_capabilities: tuple[str, ...]
+    user_facing: bool
+    browser_access: bool
+    rbac_authority: str
+    failure_scope: str
+    product_data: tuple[str, ...]
+    engine_data: tuple[str, ...]
 
 
 class _ConnectorLockEntry(NamedTuple):
@@ -1457,6 +1481,234 @@ def _normalize_url(raw: str) -> CanonicalRepository | None:
     return CanonicalRepository(f"https://{host.lower()}/{repository_path}")
 
 
+_INTERNAL_ENGINE_KEYS = frozenset(
+    {
+        "authorization_id",
+        "product_repository",
+        "engine_id",
+        "runtime_role",
+        "client_path",
+        "client_symbol",
+        "service_path",
+        "service_symbol",
+        "private_network",
+        "endpoint",
+        "public_device_ingress",
+        "private_ports",
+        "secret_path",
+        "secret_capabilities",
+        "user_facing",
+        "browser_access",
+        "rbac_authority",
+        "failure_scope",
+        "product_data",
+        "engine_data",
+    }
+)
+_POLICY_SLUG = re.compile(r"^[a-z][a-z0-9-]*$")
+_POLICY_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_TCP_PORT = re.compile(r"^tcp/([1-9][0-9]{0,4})$")
+
+
+def _policy_strings(
+    value: object, location: str, *, nonempty: bool = True
+) -> tuple[tuple[str, ...] | None, str | None]:
+    if not isinstance(value, list) or (nonempty and not value):
+        return None, f"{location} must be a non-empty list"
+    if any(not isinstance(item, str) or not item for item in value):
+        return None, f"{location} must contain non-empty strings"
+    strings = tuple(str(item) for item in value)
+    if len(set(strings)) != len(strings):
+        return None, f"{location} must not contain duplicates"
+    if any(any(character in item for character in "*?[]") for item in strings):
+        return None, f"{location} must contain literal values, never patterns"
+    return strings, None
+
+
+def _policy_source_path(
+    value: object, location: str
+) -> tuple[PurePosixPath | None, str | None]:
+    if not isinstance(value, str) or not value:
+        return None, f"{location} must be a path"
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or path.suffix != ".py"
+        or any(character in value for character in "*?[]")
+    ):
+        return None, f"{location} must be one literal relative Python source"
+    return path, None
+
+
+def _internal_engine_authorization(
+    value: object, index: int
+) -> tuple[_InternalEngineAuthorization | None, str | None]:
+    location = f"co_deployed_internal_engines[{index}]"
+    if not isinstance(value, dict) or set(value) != _INTERNAL_ENGINE_KEYS:
+        return None, f"{location} must contain exactly {sorted(_INTERNAL_ENGINE_KEYS)}"
+
+    scalar_names = (
+        "authorization_id",
+        "engine_id",
+        "runtime_role",
+        "client_symbol",
+        "service_symbol",
+        "private_network",
+        "endpoint",
+        "public_device_ingress",
+        "secret_path",
+        "rbac_authority",
+        "failure_scope",
+    )
+    for name in scalar_names:
+        scalar = value[name]
+        if not isinstance(scalar, str) or not scalar:
+            return None, f"{location}.{name} must be a non-empty string"
+        if any(character in scalar for character in "*?[]"):
+            return None, f"{location}.{name} must be literal, never a pattern"
+
+    authorization_id = value["authorization_id"]
+    engine_id = value["engine_id"]
+    assert isinstance(authorization_id, str) and isinstance(engine_id, str)
+    if not _POLICY_SLUG.fullmatch(authorization_id):
+        return None, f"{location}.authorization_id must be a slug"
+    if not _POLICY_SLUG.fullmatch(engine_id):
+        return None, f"{location}.engine_id must be a slug"
+    if value["runtime_role"] != "app":
+        return None, f"{location}.runtime_role must be exactly 'app'"
+    if value["rbac_authority"] != "erp":
+        return None, f"{location}.rbac_authority must be exactly 'erp'"
+    private_network = value["private_network"]
+    assert isinstance(private_network, str)
+    if re.fullmatch(r"[a-z][a-z0-9_]*", private_network) is None:
+        return None, f"{location}.private_network must be one literal network name"
+    for name in ("client_symbol", "service_symbol"):
+        symbol = value[name]
+        assert isinstance(symbol, str)
+        if not _POLICY_SYMBOL.fullmatch(symbol):
+            return None, f"{location}.{name} must be a Python identifier"
+
+    repository_raw = value["product_repository"]
+    if not isinstance(repository_raw, str):
+        return None, f"{location}.product_repository must be a repository URL"
+    repository = _normalize_url(repository_raw)
+    if repository is None:
+        return None, f"{location}.product_repository is invalid"
+
+    client_path, problem = _policy_source_path(
+        value["client_path"], f"{location}.client_path"
+    )
+    if problem is not None:
+        return None, problem
+    service_path, problem = _policy_source_path(
+        value["service_path"], f"{location}.service_path"
+    )
+    if problem is not None:
+        return None, problem
+    assert client_path is not None and service_path is not None
+    if client_path == service_path:
+        return None, f"{location} client_path and service_path must differ"
+
+    endpoint_raw = value["endpoint"]
+    assert isinstance(endpoint_raw, str)
+    endpoint = urlsplit(endpoint_raw)
+    if (
+        endpoint.scheme not in {"http", "https"}
+        or endpoint.hostname is None
+        or "." in endpoint.hostname
+        or endpoint.hostname != engine_id
+        or endpoint.port is None
+        or endpoint.username is not None
+        or endpoint.password is not None
+        or endpoint.path not in {"", "/"}
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        return None, (
+            f"{location}.endpoint must be an authenticated-session-free private "
+            "single-label engine URL whose host equals engine_id"
+        )
+
+    ingress_raw = value["public_device_ingress"]
+    assert isinstance(ingress_raw, str)
+    ingress = _TCP_PORT.fullmatch(ingress_raw)
+    if ingress is None or int(ingress.group(1)) > 65535:
+        return None, f"{location}.public_device_ingress must be tcp/<port>"
+    private_ports, problem = _policy_strings(
+        value["private_ports"], f"{location}.private_ports"
+    )
+    if problem is not None:
+        return None, problem
+    assert private_ports is not None
+    for port in private_ports:
+        match = _TCP_PORT.fullmatch(port)
+        if match is None or int(match.group(1)) > 65535:
+            return None, f"{location}.private_ports must contain tcp/<port> values"
+    if ingress_raw in private_ports:
+        return None, f"{location} cannot make a private port public device ingress"
+    if f"tcp/{endpoint.port}" not in private_ports:
+        return None, f"{location}.private_ports must include the API endpoint port"
+
+    secret_path = value["secret_path"]
+    assert isinstance(secret_path, str)
+    if (
+        not secret_path.startswith("secret/data/")
+        or secret_path.endswith("/")
+        or "//" in secret_path
+    ):
+        return None, f"{location}.secret_path must be one exact KV-v2 data path"
+    capabilities, problem = _policy_strings(
+        value["secret_capabilities"], f"{location}.secret_capabilities"
+    )
+    if problem is not None:
+        return None, problem
+    if capabilities != ("read",):
+        return None, f"{location}.secret_capabilities must be exactly ['read']"
+    if value["user_facing"] is not False or value["browser_access"] is not False:
+        return None, f"{location} must forbid user-facing and browser access"
+
+    product_data, problem = _policy_strings(
+        value["product_data"], f"{location}.product_data"
+    )
+    if problem is not None:
+        return None, problem
+    engine_data, problem = _policy_strings(
+        value["engine_data"], f"{location}.engine_data"
+    )
+    if problem is not None:
+        return None, problem
+    assert product_data is not None and engine_data is not None
+    if set(product_data) & set(engine_data):
+        return None, f"{location} product_data and engine_data must be disjoint"
+
+    return (
+        _InternalEngineAuthorization(
+            authorization_id=authorization_id,
+            product_repository=repository,
+            engine_id=engine_id,
+            runtime_role=str(value["runtime_role"]),
+            client_path=client_path,
+            client_symbol=str(value["client_symbol"]),
+            service_path=service_path,
+            service_symbol=str(value["service_symbol"]),
+            private_network=str(value["private_network"]),
+            endpoint=endpoint_raw,
+            public_device_ingress=ingress_raw,
+            private_ports=private_ports,
+            secret_path=secret_path,
+            secret_capabilities=capabilities,
+            user_facing=False,
+            browser_access=False,
+            rbac_authority=str(value["rbac_authority"]),
+            failure_scope=str(value["failure_scope"]),
+            product_data=product_data,
+            engine_data=engine_data,
+        ),
+        None,
+    )
+
+
 def _connector_runtime_authority(
     governance_root: Path | None,
 ) -> tuple[_ConnectorRuntimeAuthority | None, str | None]:
@@ -1470,14 +1722,20 @@ def _connector_runtime_authority(
         return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: {type(error).__name__}"
     if not isinstance(raw, dict):
         return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: expected an object"
-    if set(raw) != {"schema_version", "runtime_host", "source_repositories"}:
+    expected_keys = {
+        "schema_version",
+        "runtime_host",
+        "source_repositories",
+        "co_deployed_internal_engines",
+    }
+    if set(raw) != expected_keys:
         return None, (
-            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: expected exactly schema_version, "
-            "runtime_host and source_repositories"
+            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: expected exactly "
+            + ", ".join(sorted(expected_keys))
         )
     schema_version = raw["schema_version"]
-    if isinstance(schema_version, bool) or schema_version != 1:
-        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: schema_version must be 1"
+    if isinstance(schema_version, bool) or schema_version != 2:
+        return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: schema_version must be 2"
     runtime_host_raw = raw["runtime_host"]
     if not isinstance(runtime_host_raw, str):
         return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: runtime_host must be a URL"
@@ -1513,7 +1771,37 @@ def _connector_runtime_authority(
                 "is duplicated"
             )
         sources.add(source)
-    return _ConnectorRuntimeAuthority(runtime_host, frozenset(sources)), None
+    engines_raw = raw["co_deployed_internal_engines"]
+    if not isinstance(engines_raw, list):
+        return None, (
+            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: "
+            "co_deployed_internal_engines must be a list"
+        )
+    engines: list[_InternalEngineAuthorization] = []
+    for index, engine_raw in enumerate(engines_raw):
+        engine, problem = _internal_engine_authorization(engine_raw, index)
+        if problem is not None:
+            return None, f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: {problem}"
+        assert engine is not None
+        engines.append(engine)
+    identities = [engine.authorization_id for engine in engines]
+    if len(set(identities)) != len(identities):
+        return None, (
+            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: internal-engine "
+            "authorization_id values must be unique"
+        )
+    coordinates = [
+        (engine.product_repository, engine.client_path) for engine in engines
+    ]
+    if len(set(coordinates)) != len(coordinates):
+        return None, (
+            f"{CONNECTOR_RUNTIME_AUTHORITY_PATH}: a product client path may be "
+            "authorized only once"
+        )
+    return (
+        _ConnectorRuntimeAuthority(runtime_host, frozenset(sources), tuple(engines)),
+        None,
+    )
 
 
 def _normalized_distribution_name(value: str) -> str:
@@ -1728,6 +2016,305 @@ def _connector_runtime_dependencies(
             )
         )
     return findings
+
+
+def _internal_engine_imports_client(
+    tree: ast.Module, client_module: str, client_symbol: str
+) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(
+            alias.name == client_module for alias in node.names
+        ):
+            return True
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == client_module
+            and any(alias.name == client_symbol for alias in node.names)
+        ):
+            return True
+    return False
+
+
+def _uses_authorized_internal_endpoint(value: str, endpoint: str) -> bool:
+    """Accept paths on one exact internal origin, never another destination."""
+    candidate = urlsplit(value)
+    authorized = urlsplit(endpoint)
+    return (
+        candidate.scheme == authorized.scheme
+        and candidate.hostname == authorized.hostname
+        and candidate.port == authorized.port
+        and candidate.username is None
+        and candidate.password is None
+    )
+
+
+def _publicly_publishes_port(body: str, port: int) -> bool:
+    """Recognize Compose port publication beyond host loopback."""
+    lines = body.splitlines()
+    for index, raw_line in enumerate(lines):
+        line = raw_line.split("#", 1)[0].strip()
+        if not line.startswith("-"):
+            continue
+        value = line[1:].strip().strip(chr(34) + chr(39)).removesuffix("/tcp")
+        parts = value.rsplit(":", 2)
+        if len(parts) == 2:
+            host, published, target = "", parts[0], parts[1]
+        elif len(parts) == 3:
+            host, published, target = parts
+            host = host.strip("[]")
+        else:
+            continue
+        if target != str(port) or not published.isdigit():
+            target_key, separator, target_value = line.partition(":")
+            normalized_target = target_value.strip().strip(chr(34) + chr(39))
+            if (
+                not separator
+                or re.fullmatch(r"-\s*target", target_key) is None
+                or normalized_target != str(port)
+            ):
+                continue
+            base_indent = len(raw_line) - len(raw_line.lstrip())
+            host = ""
+            published = ""
+            for following in lines[index + 1 :]:
+                clean = following.split("#", 1)[0]
+                if not clean.strip():
+                    continue
+                indent = len(clean) - len(clean.lstrip())
+                if indent <= base_indent:
+                    break
+                key, separator, raw_value = clean.strip().partition(":")
+                if not separator:
+                    continue
+                normalized = raw_value.strip().strip(chr(34) + chr(39))
+                if key == "published":
+                    published = normalized
+                elif key == "host_ip":
+                    host = normalized.strip("[]")
+            if not published.isdigit():
+                continue
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            return True
+    return False
+
+
+def _internal_engine_boundaries(
+    root: Path,
+    profile: StandardsProfile,
+    scope: ConnectorScope,
+    *,
+    governance_root: Path | None,
+) -> tuple[list[Diagnostic], frozenset[PurePosixPath]]:
+    """Prove the narrow product/service/client boundary before discounting it."""
+    if not isinstance(profile.governance_model, PinnedGovernanceModelRef):
+        return [], frozenset()
+    authority, _ = _connector_runtime_authority(governance_root)
+    if authority is None:
+        return [], frozenset()
+    grants = tuple(
+        grant
+        for grant in authority.co_deployed_internal_engines
+        if grant.product_repository == profile.repository.canonical_url
+    )
+    findings: list[Diagnostic] = []
+    admitted: set[PurePosixPath] = set()
+    measured = set(scope.measured)
+
+    for grant in grants:
+        client_text, client_problem = _reads(root, grant.client_path)
+        service_text, service_problem = _reads(root, grant.service_path)
+        if client_problem is not None or service_problem is not None:
+            findings.append(
+                _finding(
+                    DiagnosticCode.INTERNAL_ENGINE_BOUNDARY_INVALID,
+                    f"{grant.authorization_id} names a missing or unreadable "
+                    "client/service boundary",
+                    path=(
+                        grant.client_path
+                        if client_problem is not None
+                        else grant.service_path
+                    ),
+                )
+            )
+            continue
+        assert client_text is not None and service_text is not None
+        try:
+            client_tree = ast.parse(client_text, filename=str(grant.client_path))
+            service_tree = ast.parse(service_text, filename=str(grant.service_path))
+        except SyntaxError as error:
+            findings.append(
+                _finding(
+                    DiagnosticCode.INTERNAL_ENGINE_BOUNDARY_INVALID,
+                    f"{grant.authorization_id} boundary is not parseable: {error}",
+                    path=grant.client_path,
+                )
+            )
+            continue
+
+        client_classes = {
+            node.name
+            for node in ast.walk(client_tree)
+            if isinstance(node, ast.ClassDef)
+        }
+        service_classes = {
+            node.name
+            for node in ast.walk(service_tree)
+            if isinstance(node, ast.ClassDef)
+        }
+        client_module = ".".join(grant.client_path.with_suffix("").parts)
+        if (
+            grant.client_symbol not in client_classes
+            or grant.service_symbol not in service_classes
+            or not _internal_engine_imports_client(
+                service_tree, client_module, grant.client_symbol
+            )
+        ):
+            findings.append(
+                _finding(
+                    DiagnosticCode.INTERNAL_ENGINE_BOUNDARY_INVALID,
+                    f"{grant.authorization_id} must resolve "
+                    f"{grant.service_symbol} -> {grant.client_symbol}",
+                    path=grant.service_path,
+                )
+            )
+            continue
+
+        public_literals = {
+            node.value
+            for node in ast.walk(client_tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.startswith(("http://", "https://"))
+            and not _uses_authorized_internal_endpoint(node.value, grant.endpoint)
+        }
+        if public_literals:
+            findings.append(
+                _finding(
+                    DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN,
+                    f"{grant.authorization_id} client contains an endpoint outside "
+                    "its one private engine authorization",
+                    path=grant.client_path,
+                )
+            )
+            continue
+
+        access_failed = False
+        for relative in sorted(measured, key=PurePosixPath.as_posix):
+            if relative in {grant.client_path, grant.service_path}:
+                continue
+            source = root / relative
+            try:
+                tree = ast.parse(source.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, SyntaxError):
+                continue
+            imports_client = _internal_engine_imports_client(
+                tree, client_module, grant.client_symbol
+            )
+            names_client = any(
+                isinstance(node, ast.ImportFrom)
+                and any(alias.name == grant.client_symbol for alias in node.names)
+                for node in ast.walk(tree)
+            )
+            constructs_client = any(
+                isinstance(node, ast.Call)
+                and (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == grant.client_symbol
+                    or isinstance(node.func, ast.Attribute)
+                    and node.func.attr == grant.client_symbol
+                )
+                for node in ast.walk(tree)
+            )
+            facade_only = (
+                relative.name == "__init__.py"
+                and (imports_client or names_client)
+                and not constructs_client
+            )
+            if (
+                imports_client or names_client or constructs_client
+            ) and not facade_only:
+                access_failed = True
+                findings.append(
+                    _finding(
+                        DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN,
+                        f"{grant.authorization_id} permits only "
+                        f"{grant.service_symbol} to consume {grant.client_symbol}",
+                        path=relative,
+                    )
+                )
+        if access_failed:
+            continue
+
+        tracked = _git_paths(root, "--cached") or ()
+        private_port_numbers = tuple(
+            int(port.removeprefix("tcp/")) for port in grant.private_ports
+        )
+        for relative in tracked:
+            if relative.name not in _DEPLOYMENT_ARTEFACT_NAMES:
+                continue
+            try:
+                body = (root / relative).read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            if grant.engine_id not in relative.as_posix().lower() and (
+                grant.engine_id not in body.lower()
+            ):
+                continue
+            published = tuple(
+                port
+                for port in private_port_numbers
+                if _publicly_publishes_port(body, port)
+            )
+            if published:
+                findings.append(
+                    _finding(
+                        DiagnosticCode.INTERNAL_ENGINE_EXPOSURE_FORBIDDEN,
+                        f"{grant.authorization_id} requires private ports; "
+                        f"public publication found for {published}",
+                        path=relative,
+                    )
+                )
+                access_failed = True
+        for relative in tracked:
+            if relative.suffix.lower() not in {
+                ".html",
+                ".js",
+                ".jsx",
+                ".ts",
+                ".tsx",
+            }:
+                continue
+            try:
+                body = (root / relative).read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            endpoint = urlsplit(grant.endpoint)
+            if grant.endpoint in body or (
+                endpoint.hostname is not None
+                and endpoint.port is not None
+                and f"{endpoint.hostname}:{endpoint.port}" in body
+            ):
+                findings.append(
+                    _finding(
+                        DiagnosticCode.INTERNAL_ENGINE_ACCESS_FORBIDDEN,
+                        f"{grant.authorization_id} forbids browser-to-engine access",
+                        path=relative,
+                    )
+                )
+                access_failed = True
+        if access_failed:
+            continue
+
+        admitted.add(grant.client_path)
+        findings.append(
+            _notice(
+                DiagnosticCode.INTERNAL_ENGINE_AUTHORIZED,
+                f"{grant.authorization_id} is the exact Governance-authorized "
+                "co-deployed internal-engine client",
+                path=grant.client_path,
+            )
+        )
+    return findings, frozenset(admitted)
 
 
 def _git(root: Path, *arguments: str) -> str | None:
@@ -6724,7 +7311,10 @@ def _conserved(
 
 
 def _external_connector(
-    root: Path, profile: StandardsProfile, scope: ConnectorScope
+    root: Path,
+    profile: StandardsProfile,
+    scope: ConnectorScope,
+    authorized_internal_clients: frozenset[PurePosixPath] = frozenset(),
 ) -> list[Diagnostic]:
     surface = profile.external_connector_surface
     findings: list[Diagnostic] = [
@@ -6761,6 +7351,8 @@ def _external_connector(
 
     observed = dict.fromkeys(ConnectorCategory, 0)
     for relative, tree in trees.items():
+        if relative in authorized_internal_clients:
+            continue
         classified = _classify_connector(
             tree, traced_factories=traced.get(relative, frozenset())
         )
@@ -7442,8 +8034,22 @@ def verify_repository(
                 path=relative,
             )
         )
+    internal_engine_findings, authorized_internal_clients = _internal_engine_boundaries(
+        root,
+        profile,
+        scope,
+        governance_root=governance_root,
+    )
+    findings.extend(internal_engine_findings)
     findings.extend(_testing_kit(root, profile.testing_kit_boundary, inventory or ()))
-    findings.extend(_external_connector(root, profile, scope))
+    findings.extend(
+        _external_connector(
+            root,
+            profile,
+            scope,
+            authorized_internal_clients,
+        )
+    )
     findings.extend(_deployment_artefact(root, profile.deployment_artefact_surfaces))
     repository_error = (
         retirement_error

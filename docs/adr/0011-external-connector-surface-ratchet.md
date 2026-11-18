@@ -2212,8 +2212,7 @@ companion obeys every control above.
 - Retirement target: `dotmac-connector-smtp` hosted in Academy's companion
   Integrator, per decision D10. "Hosted by `dotmac_integrator`" is read as
   Academy's companion; the ruling is otherwise unchanged.
-- Academy item A4 must lower Academy's own `outbound_transport` count when that
-  connector is activated, with deletion or cutover evidence. The transfer moves
+- Academy A4 (the transport switch onto `dotmac-delivery-smtp`) lowers Academy's `outbound_transport` count in the same change, with cutover evidence; that is the paired half of this transfer. The transfer moves
   where the debt is counted; it does not remove it.
 - Starter's baseline returns from 1 to 0 with cutover evidence once the
   in-product transport is deleted.

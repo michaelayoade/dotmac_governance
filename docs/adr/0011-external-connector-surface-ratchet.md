@@ -2105,3 +2105,131 @@ This is an implementation correction to the already accepted separation
 between the sole connector runtime, the authorized source repository, and
 product debt. It changes neither the ADR's status nor the conformance profile
 schema.
+
+## Amendment — 2026-11-18: the successor controls bind per Integrator deployment
+
+Michael ruled the Integrator deployment topology on 2026-11-18 (decisions D1,
+D2, D3, D4, D5, D9 and D10 of the topology options paper, all as recommended).
+Acceptance becomes effective only when this exact change is merged by Michael
+through protected `main`; the agent-authored branch and pull request do not
+approve themselves. This is wording only. It changes no schema, no baseline and
+no policy file.
+
+### What the topology is
+
+Each composed application runs its own companion Integrator: a separate
+`dotmac_integrator` workload with its own image, process, database and roles,
+and OpenBao workload identity. Platform CP is an application like the others
+and has its own companion. There is no separate shared Integrator. Where the
+"Integrator" above is written in the singular, it reads "the Integrator
+deployment that owns the provider account".
+
+This is deliberately not a change of authority. `dotmac_integrator` stays the
+sole runtime host repository and Starter the sole source repository in
+`policies/external-connector-runtime-authority.json`. That policy names
+repositories, not instances, and is unchanged.
+
+### The ownership rule
+
+One provider account is owned by exactly one Integrator deployment. An
+application that needs a provider account it does not own reaches it through
+the owning application's port, never by installing the account a second time.
+Splitting one account across deployments would break the rate-limit, backoff
+and idempotency ownership that this record gives to the Integrator.
+
+### The successor controls, as amended
+
+| Control | Amended wording |
+| --- | --- |
+| DECLARATION | Unchanged. |
+| PACKAGE | Original stands: business products cannot depend on or load `dotmac-connector-*` distributions, and only the Integrator assembly discovers them. Added: an Integrator deployment is a separate image, process and identity, and composing `dotmac-integration` or any `dotmac-connector-*` distribution into a product process is forbidden. |
+| SECRETS | Original stands (a product cannot dereference those OpenBao paths; a pointer is not a grant). Narrowed: provider material is granted to the workload identity of the one Integrator deployment that owns the provider account, and to no other identity. |
+| EGRESS | Original stands: product runtimes default-deny external network access. Narrowed: each Integrator deployment receives the destinations declared by its enabled connectors and nothing else. |
+| INGRESS | Original stands: provider callbacks terminate only at provider-agnostic Integrator endpoints, and no product route is a provider's URL. Added: the endpoint is that of the Integrator deployment that owns the account. |
+| DATA | Original stands: products exchange versioned observations, commands and receipts through inbox/outbox contracts, never a shared database. Added: an Integrator deployment's database is never a product database or a schema inside one. It may share a Postgres server with its product as a separate database with separate roles, and the product's role has no CONNECT to it. |
+| MIGRATION | Unchanged. |
+
+EGRESS remains reported, not enforced. Projection is today the union over
+installed connector manifests, so one image projects every provider host from
+every deployment until the module narrows projection to enabled installations
+and the network is split per application (product on an internal-only network,
+the companion alone on the egress network). That hardening follows the first
+companion. Until then the gap is recorded as existing, not as new, and no
+deployment is to be described as egress-isolated.
+
+### Rules that follow
+
+- A product never refuses to start because its companion is absent. A companion
+  failure degrades to an ageing outbox and an alert.
+- The companion's release is bound late as a deploy value entered in the
+  deployment UI. The companion is a separate deploy unit with its own health
+  gate, so adding or changing a provider does not release the product.
+- Platform-owned key material, including the licence signing key, is never
+  co-located with a product's companion.
+- **Widening, stated explicitly (D4).** A companion on the application's host
+  means host-level access to the application also reaches that application's
+  provider credentials. This is accepted for application-owned providers only,
+  at the same trust tier as the application database already on that host.
+- First-party channels are not provider connectors: platform-to-application
+  traffic and application-to-application traffic (for example Billing to ERP)
+  are outside this record's measured scope. When a companion carries one of
+  them, it obeys every control above.
+- Licence delivery and enforcement are new feature work and stay parked.
+  Only the shape is reserved: the companion is the deployment's only egress and
+  would pull platform traffic outbound-only.
+
+### Provider transport retirement targets
+
+Each legacy provider transport retires into the Integrator deployment that owns
+its account. The ratchet is lowered only with deletion or cutover evidence, as
+before.
+
+| Legacy surface | Retirement target |
+| --- | --- |
+| FreeRADIUS and settlement connectors for Sub | The companion on the Sub-thin and billing host |
+| Traccar for ERP | ERP's companion |
+| Academy outbound mail | `dotmac-connector-smtp` in Academy's companion |
+| Platform CP's own providers (GitHub App, commercial billing mail and payment) | Platform CP's companion |
+| Other C1 providers (payment, messaging, identity lookups) | The companion of the application that owns the account |
+
+Sub billing to ERP v2 is a first-party application-to-application channel, not a
+provider transport, so it has no row here. Under D13 it is carried by ERP v2's
+companion, which pulls the resource API exposed by the Sub deployment, and that
+companion obeys every control above.
+
+### Recorded transfer: Starter `outbound_transport` 0 to 1
+
+**This is an explicit loosening of the Starter baseline, approved by Michael on
+2026-11-18.** It is a recorded transfer, not a new debt.
+
+- The transfer raises Starter's `outbound_transport` baseline from 0 to 1 for
+  `dotmac-delivery-smtp`, which stays in-product under the S11 ruling.
+- The single counted surface is
+  `packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py`.
+- The conserved exclusion, pinned by fingerprint, is
+  `tests/unit/test_delivery_smtp.py::test_data_reply_uses_the_long_timeout`.
+  It is recorded so the exclusion does not widen silently.
+- Retirement target: `dotmac-connector-smtp` hosted in Academy's companion
+  Integrator, per decision D10. "Hosted by `dotmac_integrator`" is read as
+  Academy's companion; the ruling is otherwise unchanged.
+- Academy A4 (the transport switch onto `dotmac-delivery-smtp`) lowers Academy's `outbound_transport` count in the same change, with cutover evidence; that is the paired half of this transfer. The transfer moves
+  where the debt is counted; it does not remove it.
+- Starter's baseline returns from 1 to 0 with cutover evidence once the
+  in-product transport is deleted.
+- **The S1 condition is not met until Starter is back at 0.**
+
+This amendment records the transfer and its retirement target; the baseline
+change itself is made, and evidenced, in the Starter pull request that carries
+it.
+
+### Gates are verification rails
+
+Where this record or a successor refers to a cutover gate for a connector, that
+gate is satisfied by verification rails and never by running the old and new
+paths side by side or for an agreed number of days: a backtest over recorded
+data, saved golden tests, a one-shot preview against real records, and a
+guarded enable of one binding with a target cap and a disable-binding kill
+switch.
+
+The incumbent writer is sealed before a binding becomes writable, so no
+cutover involves a dual write.
